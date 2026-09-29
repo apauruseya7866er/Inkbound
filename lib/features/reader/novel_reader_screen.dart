@@ -130,6 +130,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   // that can turn the page when a chapter ends.
   TtsCubit? _tts;
   TtsChapterSource? _ttsChapters;
+  StreamSubscription<TtsState>? _ttsSubscription;
 
   /// The chapter segmented against the text this screen actually renders, or
   /// null when it could not be segmented.
@@ -169,6 +170,15 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// a feature nobody asked for should not sit permanently on the page.
   bool _ttsPanelOpen = false;
 
+  /// Cumulative y of every block, measured once per chapter so the follow can
+  /// reach a block the sliver list has never built. Null until first measured.
+  List<double>? _blockOffsets;
+  String? _blockMetricsKey;
+
+  /// Paged mode as of the last build, so the follow knows not to fight the page
+  /// turn that already does this job.
+  bool _isPaginated = false;
+
   void _startTts() {
     setState(() => _ttsPanelOpen = true);
     // The panel renders the error if there is nothing to read, so this does not
@@ -205,6 +215,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       // chapter already on screen. The reader has to own this: it is the only
       // thing that knows how to load, paginate and align the next chapter.
       _tts!.attachChapterNavigator(_navigateForTts);
+      // Following the sentence in scrolling mode hangs off the coordinator's
+      // stream, not off a block's build: the block holding the spoken sentence
+      // is not in the tree while it is off screen, so a block-triggered follow
+      // could only ever fire once the scroll it wanted had already happened.
+      _ttsSubscription = _tts!.stream.listen(_maybeFollowTtsScroll);
     }
     // Wakelock/brightness/orientation — see ReaderComfortMixin. The novel
     // reader never held a wakelock before this; it now does, same as manga.
@@ -220,6 +235,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // not try to advance into a chapter list that is going away.
     _tts?.detachChapterSource();
     _tts?.detachChapterNavigator();
+    _ttsSubscription?.cancel();
     _autoScroll.dispose();
     restoreReaderComfort();
     _scrollController.removeListener(_onScroll);
@@ -523,6 +539,9 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       _scrollLayout = null;
       _ttsAligned = null;
       _ttsDecorKey = -1;
+      // The old chapter's measured offsets describe text that is gone.
+      _blockOffsets = null;
+      _blockMetricsKey = null;
       _error = null;
       _atEnd = false;
       _lastScrollSaveMs = 0;
@@ -616,11 +635,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       final aligned = alignChapter(
         _scrollLayout ?? NovelTextLayout.fromHtml(html),
       );
-      // `print`, not `debugPrint`: debugPrint is a no-op in a release build, and
-      // this is the line that says whether the highlight has anything to point
-      // at. It is also the first thing to check when the panel tracks the voice
-      // but nothing is highlighted on the page.
-      print(
+      // This is the first thing to check when the panel tracks the voice but
+      // nothing is highlighted on the page: it is the line that says whether
+      // there is a sentence list to point at. `debugPrint` because main.dart
+      // mirrors it into the app's own log, which is where a reader can see it.
+      debugPrint(
         '[TtsCubit] segmented ${aligned.total} sentences in '
         '${aligned.layout.blocks.length} blocks '
         '(${aligned.layout.length} chars)',
@@ -655,6 +674,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   Widget build(BuildContext context) {
     final prefs = sl<ReaderPrefs>();
     final theme = _readerTheme(prefs.theme);
+    _isPaginated = prefs.novelPaginated;
     return Scaffold(
       backgroundColor: _dimmedBg(theme, prefs.novelBgOpacity),
       body: Stack(
@@ -774,6 +794,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // bottom.
     final showNext = _atEnd && hasNext;
     final direction = resolveNovelDirection(prefs, text.html);
+    // Measured here, where the width is known, so the follow can reach a block
+    // the sliver list has not built. Deferred past the frame: it costs one text
+    // layout per block and has no business delaying the chapter's first paint.
+    if (_scrollLayout != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ensureBlockMetrics(prefs, base);
+      });
+    }
 
     // One `Text.rich` per block, built from the same `NovelTextLayout` the
     // read-aloud sentences were segmented from.
@@ -862,7 +890,6 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       builder: (context, state) {
         final range = _ttsAligned?.rangeAt(state.currentIndex);
         final speaking = state.isActive && range != null;
-        if (speaking) _followTtsBlock(context);
         return _scrollBlockText(
           blockIndex,
           base,
@@ -912,28 +939,69 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   TextStyle get _ttsHighlight =>
       TextStyle(color: AppColors.accent.withValues(alpha: 0.30));
 
-  /// Brings the block being read into view, in scrolling mode.
+  /// Brings the sentence being read into view, in scrolling mode.
   ///
-  /// Only when it has actually gone off screen or up under the status bar, and
-  /// only after layout. Reikai's `scrollToElement` makes the same check in the
-  /// page: yanking the reader to a sentence they are already looking at is worse
-  /// than not following along at all.
-  void _followTtsBlock(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (!_scrollController.hasClients) return;
-      final position = _scrollController.position;
-      if (!position.hasContentDimensions) return;
-      final box = context.findRenderObject() as RenderBox?;
-      if (box == null || !box.hasSize) return;
-      final top = box.localToGlobal(Offset.zero).dy;
-      final viewport = MediaQuery.sizeOf(context).height;
-      if (top >= _ttsScrollTopInset && top < viewport * 0.75) return;
-      final target = position.pixels + (top - _ttsScrollTopInset);
-      _scrollController.jumpTo(
-        target.clamp(position.minScrollExtent, position.maxScrollExtent),
-      );
-    });
+  /// Driven by the coordinator's stream rather than by a block's own builder,
+  /// and that is the whole trick. A block widget can only ever follow itself: a
+  /// `SliverList` does not build the blocks off screen, so the block holding the
+  /// spoken sentence — the one place a follow could be triggered from — is not
+  /// in the tree until the reader is already there. Asking a block to scroll to
+  /// itself waits for the very scroll it was supposed to cause.
+  ///
+  /// So the sentence is located arithmetically instead: its offset gives a
+  /// block, the block's measured y gives a scroll position, and no widget has to
+  /// exist. Measured with the same painter the paginator uses, so the position
+  /// is the one the scroll view actually produces rather than an estimate that
+  /// lands a paragraph out on every sentence.
+  void _maybeFollowTtsScroll(TtsState state) {
+    if (!state.isSpeaking) return;
+    if (_isPaginated) return; // paged mode turns the page instead
+    final layout = _scrollLayout;
+    final aligned = _ttsAligned;
+    final offsets = _blockOffsets;
+    if (layout == null || aligned == null || offsets == null) return;
+    final range = aligned.rangeAt(state.currentIndex);
+    if (range == null) return;
+    final block = blockIndexForOffset(layout, range.start);
+    if (block == null || block + 1 >= offsets.length) return;
+    if (!_scrollController.hasClients) return;
+
+    final position = _scrollController.position;
+    if (!position.hasContentDimensions) return;
+
+    final viewport = MediaQuery.sizeOf(context).height;
+    final top = offsets[block] - _ttsScrollTopInset;
+    final bottom = offsets[block + 1];
+    // Only move when the sentence is out of view or tucked under the chrome.
+    // Following something already on screen is how a reader ends up fighting
+    // their own scroll position on every sentence.
+    if (top >= position.pixels && bottom <= position.pixels + viewport) return;
+    position.jumpTo(
+      top.clamp(position.minScrollExtent, position.maxScrollExtent),
+    );
+  }
+
+  /// Lays the chapter out once so the follow can reach blocks that were never
+  /// built. Cached against everything that changes the answer, because it costs
+  /// one text layout per block.
+  void _ensureBlockMetrics(ReaderPrefs prefs, TextStyle base) {
+    final layout = _scrollLayout;
+    if (layout == null || layout.blocks.isEmpty) return;
+    final width = (MediaQuery.sizeOf(context).width - prefs.marginWidth * 2)
+        .clamp(1.0, double.infinity);
+    final key = '${identityHashCode(layout)}|${base.fontSize}|${base.fontFamily}'
+        '|${base.height}|${base.letterSpacing}|${base.wordSpacing}'
+        '|${width.toStringAsFixed(1)}|${prefs.paragraphSpacing}';
+    if (key == _blockMetricsKey) return;
+    _blockMetricsKey = key;
+    _blockOffsets = measureBlockOffsets(
+      layout,
+      style: base,
+      width: width,
+      paragraphSpacing: prefs.paragraphSpacing,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+    );
   }
 
   /// Clearance for the notch and the camera cutout when following a sentence.
@@ -2182,6 +2250,47 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                         ]),
                         readerSheetSection('Navigation'),
                         readerSheetGroup([
+                          // Read-aloud. Reachable from here as well as from the
+                          // player's own gear, because the settings sheet is
+                          // where someone goes to find a feature the reader has
+                          // not started yet — the panel is behind a tap on the
+                          // bottom bar, which a new reader has no reason to try.
+                          if (_tts != null) ...[
+                            readerSheetRow(
+                              icon: _tts!.state.isSpeaking
+                                  ? Icons.stop_rounded
+                                  : Icons.headphones_rounded,
+                              label: 'Read aloud',
+                              trailing: _tts!.state.isSpeaking
+                                  ? null
+                                  : Icon(
+                                      Icons.play_arrow_rounded,
+                                      color: AppColors.accent,
+                                      size: 20,
+                                    ),
+                              onTap: () {
+                                Navigator.of(ctx).pop();
+                                if (_tts!.state.isSpeaking) {
+                                  _stopTts();
+                                } else {
+                                  _startTts();
+                                }
+                              },
+                            ),
+                            readerSheetRow(
+                              icon: Icons.tune_rounded,
+                              label: 'Read-aloud settings',
+                              trailing: Icon(
+                                Icons.chevron_right_rounded,
+                                color: AppColors.textSecondary,
+                                size: 20,
+                              ),
+                              onTap: () {
+                                Navigator.of(ctx).pop();
+                                _openTtsSheet();
+                              },
+                            ),
+                          ],
                           readerSheetRow(
                             icon: Icons.play_circle_outline_rounded,
                             label: context.l10n.autoScroll,

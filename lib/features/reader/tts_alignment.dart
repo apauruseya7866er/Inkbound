@@ -190,6 +190,51 @@ int? blockIndexForOffset(NovelTextLayout layout, int offset) {
   return null;
 }
 
+/// Cumulative top offset of every block: `_offsets[i]` is block `i`'s y, and
+/// the final entry is the whole chapter's height.
+///
+/// ### Why this has to be measured
+///
+/// Following the sentence in a scrolling reader needs the y of a block that may
+/// not be on screen — and a `SliverList` does not build the blocks off screen,
+/// so the block holding the spoken sentence has no widget to ask. Measuring the
+/// chapter once is the only way to reach a block that has never been laid out.
+///
+/// Measured with the same painter the paginator uses, so these are the offsets
+/// the scroll view actually produces rather than an estimate: a follow built on
+/// an approximation lands a paragraph out on every sentence, which is worse
+/// than not following at all.
+///
+/// Costs one text layout per block, so callers measure once per chapter and
+/// cache — never per sentence.
+List<double> measureBlockOffsets(
+  NovelTextLayout layout, {
+  required TextStyle style,
+  required double width,
+  required double paragraphSpacing,
+  required TextDirection textDirection,
+  TextScaler textScaler = TextScaler.noScaling,
+}) {
+  final offsets = <double>[];
+  var total = 0.0;
+  for (final b in layout.blocks) {
+    offsets.add(total);
+    final painter = TextPainter(
+      text: TextSpan(
+        style: style,
+        children: novelBlockSpans(layout, b.index, base: style),
+      ),
+      textDirection: textDirection,
+      textScaler: textScaler,
+      textAlign: TextAlign.start,
+    )..layout(maxWidth: width);
+    total += painter.height + paragraphSpacing;
+    painter.dispose();
+  }
+  offsets.add(total);
+  return offsets;
+}
+
 /// The page holding the start of the chapter range `[start, end)`, or null when
 /// the range falls outside the page list.
 ///

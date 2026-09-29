@@ -196,19 +196,93 @@ void main() {
         'Plain text here.',
       );
     });
+  });
 
-    test('blockIndexForOffset finds the containing block', () {
+  group('block offsets for following the sentence', () {
+    const style = TextStyle(fontSize: 14);
+    const width = 360.0;
+
+    List<double> measure(NovelTextLayout layout, {double spacing = 0}) =>
+        measureBlockOffsets(
+          layout,
+          style: style,
+          width: width,
+          paragraphSpacing: spacing,
+          textDirection: TextDirection.ltr,
+        );
+
+    test('one entry per block, plus a total', () {
+      final layout = NovelTextLayout.fromHtml(
+        '<p>One.</p><p>Two.</p><p>Three.</p><p>Four.</p>',
+      );
+      final offsets = measure(layout);
+      expect(offsets, hasLength(layout.blocks.length + 1));
+      expect(offsets.first, 0);
+      // Strictly increasing: a follow that lands on the same y as the previous
+      // block cannot tell them apart.
+      for (var i = 1; i < offsets.length; i++) {
+        expect(offsets[i], greaterThan(offsets[i - 1]));
+      }
+    });
+
+    test('paragraph spacing widens the gap between blocks', () {
+      final layout = NovelTextLayout.fromHtml(
+        '<p>One paragraph of a reasonable length here.</p>'
+        '<p>Another paragraph of a reasonable length here.</p>',
+      );
+      final tight = measure(layout);
+      final loose = measure(layout, spacing: 20);
+      // Same text, so block heights are unchanged; only the gaps differ.
+      expect(
+        loose.last - tight.last,
+        closeTo(20 * layout.blocks.length, 0.5),
+      );
+    });
+
+    test('every block is reachable, including one far off screen', () {
+      // The point: a SliverList never builds a block that is off screen, so the
+      // follow has to reach it by arithmetic instead.
+      final html = List.generate(
+        30,
+        (i) => '<p>Paragraph $i with enough words to occupy a line or two '
+            'of a phone screen at this size.</p>',
+      ).join();
+      final layout = NovelTextLayout.fromHtml(html);
+      final offsets = measure(layout);
+      expect(layout.blocks.length, 30);
+      expect(offsets, hasLength(31));
+
+      for (var i = 0; i < 30; i++) {
+        expect(offsets[i + 1], greaterThan(offsets[i]));
+      }
+      expect(offsets[29], lessThan(offsets[30]));
+    });
+
+    test('an empty chapter measures to nothing rather than throwing', () {
+      final layout = NovelTextLayout.fromHtml('');
+      expect(measure(layout), [0.0]);
+    });
+
+    test('a single long block is one entry', () {
+      final layout = NovelTextLayout.fromHtml('<p>${'word ' * 200}</p>');
+      final offsets = measure(layout);
+      expect(offsets, hasLength(2));
+      expect(offsets[1], greaterThan(0));
+    });
+  });
+
+  group('blockIndexForOffset', () {
+    test('finds the containing block', () {
       const html = '<p>First block here.</p><p>Second block here.</p>';
       final layout = NovelTextLayout.fromHtml(html);
       expect(blockIndexForOffset(layout, 0), 0);
-      expect(
-        blockIndexForOffset(layout, layout.blocks[1].start),
-        1,
-      );
+      expect(blockIndexForOffset(layout, layout.blocks[1].start), 1);
       expect(blockIndexForOffset(layout, -1), isNull);
       expect(blockIndexForOffset(layout, layout.length), isNull);
     });
+  });
 
+  group('scroll-mode highlight', () {
     test('a realistic chapter highlights the right words in every block', () {
       final html = '<h1>Chapter 4</h1>' + List.generate(
             8,
