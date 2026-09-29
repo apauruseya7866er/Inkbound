@@ -100,9 +100,12 @@ class TtsPlayerBar extends StatelessWidget {
   Widget _nowPlaying(TtsState state) {
     final total = state.totalSentences;
     final canSeek = total > 0;
-    final current = canSeek
-        ? (state.progress * (total - 1)).round().clamp(0, total - 1)
-        : 0;
+    // The real index, never one rebuilt from [TtsState.progress]. Round-tripping
+    // the position through a 0..1 fraction and back loses a sentence at the end
+    // of the chapter: at the last one it reported "162 of 163" while the voice
+    // and the highlight were both on 163, which looks exactly like the final
+    // line being skipped.
+    final current = canSeek ? state.currentIndex.clamp(0, total - 1) : 0;
     final speaking = state.currentSentence?.text ?? '';
 
     return Padding(

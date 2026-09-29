@@ -126,6 +126,19 @@ class ReaderPrefs {
   Future<void> setNovelBgOpacity(double value) =>
       _box.put('novelBgOpacity', value);
 
+  /// Whether the scrolling novel reader moves the page to keep the sentence being
+  /// read near the middle of the screen.
+  ///
+  /// On by default: following the voice is the whole point of a highlighted
+  /// read-aloud, and someone reading along wants the sentence held in view with
+  /// the text above and below it. Off is for the reader who scrolls on their own
+  /// terms and does not want the page moving — the follow otherwise yields for a
+  /// few seconds after every manual scroll, but resumes on its own after that.
+  bool get novelFollowNarration =>
+      _box.get('novelFollowNarration', defaultValue: true) as bool;
+  Future<void> setNovelFollowNarration(bool value) =>
+      _box.put('novelFollowNarration', value);
+
   /// Auto-scroll speed on a 1–10 feel scale, not pixels per second: how fast
   /// you like it is a feel, and "60 px/s" means nothing to anyone reading.
   /// [ReaderAutoScroll] maps it to a creep rate or a page dwell depending on

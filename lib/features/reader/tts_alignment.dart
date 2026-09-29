@@ -190,6 +190,55 @@ int? blockIndexForOffset(NovelTextLayout layout, int offset) {
   return null;
 }
 
+/// The part of `[start, end)` that falls inside block [blockIndex], rebased to
+/// that block's own text — or null when the range misses it entirely.
+///
+/// The highlight box is painted per block and per page, so each of them has to
+/// answer this for itself: a sentence is stored once, in chapter coordinates,
+/// but the thing being drawn is a single block or a single page.
+({int from, int to})? blockSliceFor(
+  NovelTextLayout layout,
+  int blockIndex,
+  int start,
+  int end,
+) {
+  if (end <= start) return null;
+  if (blockIndex < 0 || blockIndex >= layout.blocks.length) return null;
+  final block = layout.blocks[blockIndex];
+  final from = start < block.start ? block.start : start;
+  final to = end > block.end ? block.end : end;
+  if (to <= from) return null;
+  return (from: from - block.start, to: to - block.start);
+}
+
+/// The part of `[start, end)` that falls on page [pageIndex], rebased to that
+/// page's own text — or null when the range misses it.
+///
+/// The paged-mode counterpart of [blockSliceFor]. Pages are contiguous slices of
+/// the chapter in the order [paginateSpans] produced them, so the same
+/// accumulate-and-clip walk resolves a chapter offset to a page one.
+({int from, int to})? pageSliceFor(
+  List<TextSpan> pages,
+  int pageIndex,
+  int start,
+  int end,
+) {
+  if (end <= start) return null;
+  if (pageIndex < 0 || pageIndex >= pages.length) return null;
+  var pageStart = 0;
+  for (var i = 0; i < pages.length; i++) {
+    final pageEnd = pageStart + pages[i].toPlainText().length;
+    if (i == pageIndex) {
+      final from = start < pageStart ? pageStart : start;
+      final to = end > pageEnd ? pageEnd : end;
+      return to > from ? (from: from - pageStart, to: to - pageStart) : null;
+    }
+    if (start < pageStart) return null; // gap: the range precedes this page
+    pageStart = pageEnd;
+  }
+  return null;
+}
+
 /// Cumulative top offset of every block: `_offsets[i]` is block `i`'s y, and
 /// the final entry is the whole chapter's height.
 ///

@@ -57,9 +57,16 @@ class TtsState extends Equatable {
   bool get isSpeaking => status == TtsStatus.speaking;
 
   /// 0..1 progress through the chapter, for the player's progress bar.
+  ///
+  /// Divided by `totalSentences - 1`, not by `totalSentences`, because
+  /// [currentIndex] is a 0-based index while the total is a count: the last
+  /// sentence sits at index `total - 1`, so dividing by the count tops out at
+  /// `(total - 1) / total` and the bar never reaches the end. That reads as
+  /// "the last line of every chapter is never read" — the voice is on it, the
+  /// highlight is on it, and the counter disagrees.
   double get progress {
-    if (totalSentences <= 0) return 0;
-    return (currentIndex / totalSentences).clamp(0.0, 1.0);
+    if (totalSentences <= 1) return 0;
+    return (currentIndex / (totalSentences - 1)).clamp(0.0, 1.0);
   }
 
   /// The sentence currently being spoken, if the chapter is loaded.

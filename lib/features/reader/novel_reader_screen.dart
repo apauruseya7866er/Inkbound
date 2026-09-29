@@ -29,6 +29,7 @@ import 'reader_auto_scroll_ui.dart';
 import 'reader_comfort.dart';
 import 'reader_pull_chapter.dart';
 import 'tts_alignment.dart';
+import 'tts_highlight_box.dart';
 import 'tts_player_bar.dart';
 import '../../l10n/l10n.dart';
 
@@ -145,10 +146,6 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// prevent.
   NovelTextLayout? _scrollLayout;
 
-  /// Memo for the paged decoration: the key the cached page list was built for.
-  int _ttsDecorKey = -1;
-  List<TextSpan> _ttsDecorated = const [];
-
   /// Set while a read-aloud page turn is in flight, so [_onPageChanged] can tell
   /// our own jump apart from the reader's.
   bool _ttsTurningPage = false;
@@ -156,6 +153,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// When the reader last turned a page themselves. Read-aloud defers to it for
   /// [_ttsPageTurnGraceMs].
   int _lastManualPageTurn = 0;
+
+  /// When the reader last dragged the scrolling novel view themselves, in epoch
+  /// ms. Read-aloud's follow defers to it — see [_maybeFollowTtsScroll].
+  int _lastManualScroll = 0;
 
   /// Set while a chapter change is happening *because* narration finished.
   ///
@@ -174,6 +175,12 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// reach a block the sliver list has never built. Null until first measured.
   List<double>? _blockOffsets;
   String? _blockMetricsKey;
+
+  /// The width and style those offsets were measured at, so the follow can
+  /// measure a sentence's position inside its block against exactly the same
+  /// layout the block was placed with.
+  double? _blockWidth;
+  TextStyle? _blockStyle;
 
   /// Paged mode as of the last build, so the follow knows not to fight the page
   /// turn that already does this job.
@@ -538,7 +545,6 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       _text = null;
       _scrollLayout = null;
       _ttsAligned = null;
-      _ttsDecorKey = -1;
       // The old chapter's measured offsets describe text that is gone.
       _blockOffsets = null;
       _blockMetricsKey = null;
@@ -603,7 +609,6 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// audio — that would make scrolling through a book unusable.
   void _syncTtsFor(ChapterText text) {
     _ttsAligned = null;
-    _ttsDecorKey = -1;
     // The aligned path replaces the plain one rather than running alongside it.
     // Doing both would parse the chapter twice per load and briefly install a
     // sentence list built from different text than the page renders.
@@ -697,7 +702,18 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                   nextLabel: _chapterLabel(_nextIndex),
                   onChangeChapter: (d) =>
                       _goToChapter(d > 0 ? _nextIndex : _prevIndex),
-                  child: _buildBody(theme, prefs),
+                  // A drag, not a fling or a jump: this is the reader taking
+                  // the page back, and read-aloud's follow should let them.
+                  child: NotificationListener<ScrollStartNotification>(
+                    onNotification: (n) {
+                      if (n.dragDetails != null) {
+                        _lastManualScroll =
+                            DateTime.now().millisecondsSinceEpoch;
+                      }
+                      return false;
+                    },
+                    child: _buildBody(theme, prefs),
+                  ),
                 ),
               ),
             ),
@@ -888,14 +904,21 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       buildWhen: (a, b) =>
           a.currentIndex != b.currentIndex || a.isActive != b.isActive,
       builder: (context, state) {
-        final range = _ttsAligned?.rangeAt(state.currentIndex);
-        final speaking = state.isActive && range != null;
+        // The range comes from the sentence the cubit is actually speaking — the
+        // same object the player's panel quotes — rather than from this screen's
+        // own copy of the alignment. Two copies of the same segmentation can
+        // drift apart (a chapter adopted from HTML falls back to no offsets at
+        // all, a re-parse lands on a different split), and when they do the box
+        // ends up marking a different, shorter stretch of words than the voice is
+        // reading: a highlight that stops mid-sentence and looks broken.
+        final view = state.currentSentence;
+        final speaking = state.isActive && view != null && view.isHighlightable;
         return _scrollBlockText(
           blockIndex,
           base,
           prefs,
-          highlightStart: speaking ? range.start : null,
-          highlightEnd: speaking ? range.end : null,
+          highlightStart: speaking ? view.start : null,
+          highlightEnd: speaking ? view.end : null,
         );
       },
     );
@@ -910,36 +933,26 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   }) {
     final layout = _scrollLayout;
     if (layout == null) return const SizedBox.shrink();
-    final speaking = highlightStart != null && highlightEnd != null;
+    final slice = (highlightStart != null && highlightEnd != null)
+        ? blockSliceFor(layout, blockIndex, highlightStart, highlightEnd)
+        : null;
     return Padding(
       // The gap the old `margin: 0 0 paragraphSpacing` produced, now expressed
       // in Flutter's layout rather than CSS.
       padding: EdgeInsets.only(bottom: prefs.paragraphSpacing),
-      child: Text.rich(
-        TextSpan(
+      child: TtsHighlightText(
+        span: TextSpan(
           style: base,
-          children: novelBlockSpans(
-            layout,
-            blockIndex,
-            base: base,
-            highlightStart: highlightStart,
-            highlightEnd: highlightEnd,
-            highlight: speaking ? _ttsHighlight : null,
-          ),
+          children: novelBlockSpans(layout, blockIndex, base: base),
         ),
-        textAlign:
-            prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+        textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+        rangeStart: slice?.from,
+        rangeEnd: slice?.to,
       ),
     );
   }
 
-  /// Warm and low-contrast: it has to sit under body text without hurting
-  /// legibility, and it has to read on all three page themes. The same colour
-  /// the paged reader uses, so switching modes does not change the feature.
-  TextStyle get _ttsHighlight =>
-      TextStyle(color: AppColors.accent.withValues(alpha: 0.30));
-
-  /// Brings the sentence being read into view, in scrolling mode.
+  /// Keeps the sentence being read near the middle of the screen.
   ///
   /// Driven by the coordinator's stream rather than by a block's own builder,
   /// and that is the whole trick. A block widget can only ever follow itself: a
@@ -953,33 +966,125 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// exist. Measured with the same painter the paginator uses, so the position
   /// is the one the scroll view actually produces rather than an estimate that
   /// lands a paragraph out on every sentence.
+  ///
+  /// ### Centred, not merely visible
+  ///
+  /// Bringing a sentence to the top edge technically "follows" it and is what
+  /// this did first, but it reads like a page turning under you: the sentence
+  /// being spoken sits in the corner, the next screenful of prose is jammed
+  /// below it, and someone who wants to read along has nowhere to look. Holding
+  /// it near the middle leaves the text above *and* below on screen, which is
+  /// what makes reading along possible at all.
   void _maybeFollowTtsScroll(TtsState state) {
     if (!state.isSpeaking) return;
     if (_isPaginated) return; // paged mode turns the page instead
+    if (!sl<ReaderPrefs>().novelFollowNarration) return;
     final layout = _scrollLayout;
-    final aligned = _ttsAligned;
     final offsets = _blockOffsets;
-    if (layout == null || aligned == null || offsets == null) return;
-    final range = aligned.rangeAt(state.currentIndex);
-    if (range == null) return;
-    final block = blockIndexForOffset(layout, range.start);
-    if (block == null || block + 1 >= offsets.length) return;
+    final width = _blockWidth;
+    final base = _blockStyle;
+    if (layout == null || offsets == null || width == null || base == null) {
+      return;
+    }
+    // The same sentence the panel is quoting, so the view follows the words the
+    // voice is actually on rather than a second segmentation's idea of them.
+    final view = state.currentSentence;
+    if (view == null || !view.isHighlightable) return;
+    final block = view.blockIndex;
+    if (block < 0 || block + 1 >= offsets.length) return;
     if (!_scrollController.hasClients) return;
 
     final position = _scrollController.position;
     if (!position.hasContentDimensions) return;
 
+    // Their scroll wins for a moment. Yanking the page back mid-drag is the
+    // fastest way to make an auto-follow feel broken; after the grace the
+    // sentence takes over again, so pausing it does not mean switching it off.
+    final sinceScroll =
+        DateTime.now().millisecondsSinceEpoch - _lastManualScroll;
+    if (sinceScroll < _ttsScrollGraceMs) return;
+
     final viewport = MediaQuery.sizeOf(context).height;
-    final top = offsets[block] - _ttsScrollTopInset;
-    final bottom = offsets[block + 1];
-    // Only move when the sentence is out of view or tucked under the chrome.
-    // Following something already on screen is how a reader ends up fighting
-    // their own scroll position on every sentence.
-    if (top >= position.pixels && bottom <= position.pixels + viewport) return;
-    position.jumpTo(
-      top.clamp(position.minScrollExtent, position.maxScrollExtent),
+    final anchor = viewport * _ttsFollowAnchor;
+    final yInBlock = _sentenceTopInBlock(
+      layout: layout,
+      base: base,
+      width: width,
+      blockIndex: block,
+      start: view.start,
+      end: view.end,
+    );
+
+    // Where the sentence's first line sits on screen right now, and how far that
+    // is from where we want it. Only the first line matters: a long sentence
+    // spanning six lines cannot be centred, and chasing its middle would scroll
+    // the page on every one of its sentences.
+    final onScreen = position.pixels + yInBlock;
+    if ((onScreen - anchor).abs() <= viewport * _ttsFollowTolerance) return;
+
+    final target = (offsets[block] + yInBlock - anchor).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    // Animated, so a sentence that starts a couple of lines lower glides there
+    // instead of teleporting the text out from under the reader's eye.
+    if (position.isScrollingNotifier.value) return;
+    position.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
     );
   }
+
+  /// Where the sentence's first line falls inside its block, in pixels.
+  ///
+  /// 0 when it cannot be measured, which degrades to centring the paragraph —
+  /// the old behaviour — rather than to no follow at all.
+  double _sentenceTopInBlock({
+    required NovelTextLayout layout,
+    required TextStyle base,
+    required double width,
+    required int blockIndex,
+    required int start,
+    required int end,
+  }) {
+    final slice = blockSliceFor(layout, blockIndex, start, end);
+    if (slice == null) return 0;
+    final boxes = ttsHighlightBoxes(
+      span: TextSpan(
+        style: base,
+        children: novelBlockSpans(layout, blockIndex, base: base),
+      ),
+      start: slice.from,
+      end: slice.to,
+      maxWidth: width,
+      textDirection: Directionality.of(context),
+      textAlign: _textAlign,
+      textScaler: MediaQuery.textScalerOf(context),
+    );
+    if (boxes.isEmpty) return 0;
+    return boxes.first.top;
+  }
+
+  TextAlign get _textAlign =>
+      sl<ReaderPrefs>().textAlignJustify ? TextAlign.justify : TextAlign.start;
+
+  /// Where the followed sentence is held, as a fraction of the viewport.
+  ///
+  /// Just above the middle: that is where the eye rests while reading, and it
+  /// leaves more of the *next* text visible below than a true centre would.
+  static const double _ttsFollowAnchor = 0.40;
+
+  /// How far the sentence may drift from [_ttsFollowAnchor] before the page
+  /// moves, as a fraction of the viewport.
+  ///
+  /// A dead zone on purpose. Without one, every sentence re-centres the page and
+  /// a paragraph of short lines turns into constant scrolling; with it, the view
+  /// moves in calm steps and stays put while the reading position is comfortable.
+  static const double _ttsFollowTolerance = 0.12;
+
+  /// How long the reader's own scroll suppresses the follow, in milliseconds.
+  static const int _ttsScrollGraceMs = 4000;
 
   /// Lays the chapter out once so the follow can reach blocks that were never
   /// built. Cached against everything that changes the answer, because it costs
@@ -994,6 +1099,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         '|${width.toStringAsFixed(1)}|${prefs.paragraphSpacing}';
     if (key == _blockMetricsKey) return;
     _blockMetricsKey = key;
+    // Kept so the follow measures the sentence against the same width and style
+    // the block was laid out with; measuring at a different width is how a
+    // highlight ends up a line out of place.
+    _blockWidth = width;
+    _blockStyle = base;
     _blockOffsets = measureBlockOffsets(
       layout,
       style: base,
@@ -1004,55 +1114,43 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     );
   }
 
-  /// Clearance for the notch and the camera cutout when following a sentence.
-  static const double _ttsScrollTopInset = 72;
-
-  Widget _pageText(TextSpan page, ReaderPrefs prefs) => Text.rich(
-        page,
+  /// The page text, with the spoken sentence boxed when [rangeStart] is set.
+  ///
+  /// The box replaces the old colour wash in both reader modes rather than
+  /// sitting on top of it: a red-tinted sentence inside a blue outline reads as
+  /// two different highlights fighting each other. One marker, one look, and the
+  /// same colours whichever mode the reader is in.
+  Widget _pageText(
+    TextSpan page,
+    ReaderPrefs prefs, {
+    int? rangeStart,
+    int? rangeEnd,
+  }) =>
+      TtsHighlightText(
+        span: page,
         textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+        rangeStart: rangeStart,
+        rangeEnd: rangeEnd,
       );
 
-  /// The pages with the sentence being read painted on them.
+  /// The slice of the page currently on screen that the spoken sentence covers.
   ///
-  /// Memoised on the sentence and the page list, because this runs on every
-  /// frame the reader is on a page and repainting several hundred spans each
-  /// time would stutter the very page the user is trying to read along with.
-  List<TextSpan> _ttsDecoratedPages(
+  /// Read off the cubit's own sentence — the one the panel quotes — for the same
+  /// reason the scrolling reader does: two segmentations can disagree, and a
+  /// highlight drawn from the wrong one marks words nobody is hearing.
+  ///
+  /// Null when nothing is being read, or when the sentence is on another page —
+  /// which is also the case that makes [_maybeFollowTts] turn to it, so there is
+  /// nothing to draw here anyway.
+  ({int from, int to})? _ttsPageSlice(
     List<TextSpan> pages,
+    int pageIndex,
     TtsState ttsState,
-    _ReaderTheme theme,
   ) {
-    final aligned = _ttsAligned;
-    if (aligned == null || pages.isEmpty) return pages;
-
-    // No highlight unless something is actually being read: a leftover
-    // highlight after stop would point at a sentence nobody is hearing.
-    if (!ttsState.isActive) {
-      if (_ttsDecorKey != -2) {
-        _ttsDecorKey = -2;
-        _ttsDecorated = pages;
-      }
-      return pages;
-    }
-
-    final range = aligned.rangeAt(ttsState.currentIndex);
-    if (range == null) return pages;
-
-    final key = Object.hash(
-      ttsState.currentIndex,
-      identityHashCode(pages),
-      theme.text,
-    );
-    if (key == _ttsDecorKey) return _ttsDecorated;
-
-    _ttsDecorKey = key;
-    _ttsDecorated = highlightPages(
-      pages,
-      range.start,
-      range.end,
-      highlight: _ttsHighlight,
-    );
-    return _ttsDecorated;
+    if (!ttsState.isActive) return null;
+    final view = ttsState.currentSentence;
+    if (view == null || !view.isHighlightable) return null;
+    return pageSliceFor(pages, pageIndex, view.start, view.end);
   }
 
   /// How long after a page turn the reader is considered to be in control.
@@ -1460,9 +1558,17 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                                 // so it is already scheduled to run after the
                                 // frame that shows the new highlight.
                                 _maybeFollowTts(ttsState);
-                                final shown =
-                                    _ttsDecoratedPages(pages, ttsState, theme);
-                                return _pageText(shown[index], prefs);
+                                final slice = _ttsPageSlice(
+                                  pages,
+                                  index,
+                                  ttsState,
+                                );
+                                return _pageText(
+                                  pages[index],
+                                  prefs,
+                                  rangeStart: slice?.from,
+                                  rangeEnd: slice?.to,
+                                );
                               },
                             ),
                     ),
@@ -2289,6 +2395,24 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                                 Navigator.of(ctx).pop();
                                 _openTtsSheet();
                               },
+                            ),
+                            // Whether the page follows the voice in scrolling
+                            // mode. Beside the other read-aloud rows because it
+                            // is a read-aloud behaviour, and next to Auto-scroll
+                            // because they look like the same feature and are
+                            // not: this one moves the page to the sentence
+                            // being spoken, the other creeps the page down on a
+                            // timer.
+                            readerSheetRow(
+                              icon: Icons.my_location_rounded,
+                              label: 'Follow narration',
+                              trailing: Switch(
+                                value: prefs.novelFollowNarration,
+                                activeThumbColor: AppColors.accent,
+                                onChanged: (v) => apply(
+                                  () => prefs.setNovelFollowNarration(v),
+                                ),
+                              ),
                             ),
                           ],
                           readerSheetRow(
