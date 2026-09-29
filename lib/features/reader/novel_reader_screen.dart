@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/di/injector.dart';
 import '../../core/models/episode.dart';
 import '../../core/reading/chapter_nav.dart';
@@ -10,17 +11,25 @@ import '../../core/reading/read_history.dart';
 import '../../core/reading/read_store.dart';
 import '../../core/reading/reader_prefs.dart';
 import '../../core/reading/tap_zones.dart';
+import '../../core/reading/tts/tts_chapters.dart';
+import '../../core/reading/tts/tts_cubit.dart';
+import '../../core/reading/tts/tts_platform.dart';
+import '../../core/reading/tts/tts_prefs.dart';
+import '../../core/reading/tts/tts_state.dart';
 import '../../core/repository/source_repository.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tracker/tracker.dart';
 import '../../core/tracker/tracker_hub.dart';
+import 'novel_html.dart';
 import 'novel_paginator.dart';
 import 'reader_chrome.dart';
 import 'reader_auto_scroll.dart';
 import 'reader_auto_scroll_ui.dart';
 import 'reader_comfort.dart';
 import 'reader_pull_chapter.dart';
+import 'tts_alignment.dart';
+import 'tts_player_bar.dart';
 import '../../l10n/l10n.dart';
 
 /// Text reader for manga/novel chapters — the reading counterpart of the
@@ -112,6 +121,66 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   // change/dispose can all observe the same finished chapter).
   final Set<String> _scrobbled = {};
 
+  // ── read-aloud ─────────────────────────────────────────────────────────────
+  //
+  // The engine, its segmentation and its filters live in `core/reading/tts` and
+  // `features/reader/novel_html.dart`. Everything here is the seam: this screen
+  // owns the page, the pagination and the sentence alignment, so it is the only
+  // thing that can put a highlight on the words being read and the only thing
+  // that can turn the page when a chapter ends.
+  TtsCubit? _tts;
+  TtsChapterSource? _ttsChapters;
+
+  /// The chapter segmented against the text this screen actually renders, or
+  /// null when it could not be segmented.
+  TtsAlignedChapter? _ttsAligned;
+
+  /// The same layout, kept for the scrolling reader's own spans.
+  ///
+  /// Built from the same HTML as [_ttsAligned] so a block's spans reproduce
+  /// exactly the characters a sentence offset points at. If these were two
+  /// layouts, the highlight would be measured against a different string than
+  /// the one drawn — which is the whole failure mode `novel_html.dart` exists to
+  /// prevent.
+  NovelTextLayout? _scrollLayout;
+
+  /// Memo for the paged decoration: the key the cached page list was built for.
+  int _ttsDecorKey = -1;
+  List<TextSpan> _ttsDecorated = const [];
+
+  /// Set while a read-aloud page turn is in flight, so [_onPageChanged] can tell
+  /// our own jump apart from the reader's.
+  bool _ttsTurningPage = false;
+
+  /// When the reader last turned a page themselves. Read-aloud defers to it for
+  /// [_ttsPageTurnGraceMs].
+  int _lastManualPageTurn = 0;
+
+  /// Set while a chapter change is happening *because* narration finished.
+  ///
+  /// A manual chapter change stops the audio — the words on screen have just
+  /// changed. An auto-advance is the opposite: the audio reaching the end of the
+  /// chapter is the reason the page is turning, so stopping there would end
+  /// every session at the first chapter boundary.
+  bool _ttsAutoAdvancing = false;
+
+  /// Whether the read-aloud panel is on screen. Off until the bottom-bar button
+  /// is tapped, and deliberately not derived from the engine being available:
+  /// a feature nobody asked for should not sit permanently on the page.
+  bool _ttsPanelOpen = false;
+
+  void _startTts() {
+    setState(() => _ttsPanelOpen = true);
+    // The panel renders the error if there is nothing to read, so this does not
+    // need to check first.
+    unawaited(_tts?.play() ?? Future<void>.value());
+  }
+
+  void _stopTts() {
+    setState(() => _ttsPanelOpen = false);
+    unawaited(_tts?.stop() ?? Future<void>.value());
+  }
+
   @override
   void initState() {
     super.initState();
@@ -123,6 +192,20 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // access — which, if auto-scroll was never used, is dispose(), where
     // the element is already deactivated and the lookup throws.
     _autoScroll = ReaderAutoScroll(vsync: this);
+    if (sl.isRegistered<TtsCubit>()) {
+      _tts = sl<TtsCubit>();
+      _ttsChapters = _ReaderTtsChapterSource(this);
+      // Attached before the first chapter loads, so the chapter after this one
+      // is already being fetched while the user reads this one.
+      _tts!.attachChapterSource(
+        autoAdvance: TtsAutoAdvance(source: _ttsChapters!, index: _index),
+        workTitle: widget.showTitle,
+      );
+      // So a finished chapter turns the page instead of being read out over the
+      // chapter already on screen. The reader has to own this: it is the only
+      // thing that knows how to load, paginate and align the next chapter.
+      _tts!.attachChapterNavigator(_navigateForTts);
+    }
     // Wakelock/brightness/orientation — see ReaderComfortMixin. The novel
     // reader never held a wakelock before this; it now does, same as manga.
     applyReaderComfort();
@@ -133,6 +216,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   @override
   void dispose() {
     _flushProgress(); // reader close: don't lose the last-read position
+    // Narration may still be running in the background service; it just must
+    // not try to advance into a chapter list that is going away.
+    _tts?.detachChapterSource();
+    _tts?.detachChapterNavigator();
     _autoScroll.dispose();
     restoreReaderComfort();
     _scrollController.removeListener(_onScroll);
@@ -190,6 +277,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         _text = text;
         _loading = false;
       });
+      // One layout, two consumers. Built here rather than inside each renderer so
+      // the scrolling spans and the read-aloud sentences cannot disagree about
+      // where a paragraph ends.
+      _scrollLayout = NovelTextLayout.fromHtml(text.html);
+      _syncTtsFor(text);
       _restoreScrollPosition();
     } catch (_) {
       if (!mounted) return;
@@ -394,17 +486,43 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   int? get _prevIndex => adjacentChapterIndex(_chapters, _index, step: -1);
 
   void _goToChapter(int? newIndex) {
+    unawaited(_changeChapter(newIndex));
+  }
+
+  /// Moves to [newIndex] and reports whether the reader ended up on a chapter
+  /// that loaded.
+  ///
+  /// [_goToChapter] is the fire-and-forget wrapper the buttons, swipes and
+  /// chapter list use. Read-aloud needs the outcome: it is about to start
+  /// narrating the new chapter, and doing that into a page that never arrived
+  /// is how the voice and the screen end up disagreeing.
+  Future<bool> _changeChapter(int? newIndex) async {
     // See the manga reader: a live auto-scroll must not survive into a chapter
     // that hasn't laid out yet.
     _autoScroll.stop();
-    if (newIndex == null || newIndex < 0 || newIndex >= _chapters.length) {
-      return;
+    // Audio belongs to the text on screen. Leaving it running would read the old
+    // chapter while the new one is displayed, and its highlight would point at
+    // sentences the user cannot see. The position in the chapter being left is
+    // kept, so coming back offers to resume.
+    //
+    // Except during an auto-advance, where this change *is* the narration
+    // finishing. Stopping here would end every session at the first chapter
+    // boundary — the exact moment it is supposed to continue.
+    if (!_ttsAutoAdvancing) {
+      _tts?.stop(clearPosition: false);
     }
-    if (newIndex == _index) return;
+    if (newIndex == null || newIndex < 0 || newIndex >= _chapters.length) {
+      return false;
+    }
+    if (newIndex == _index) return false;
     _flushProgress(); // chapter change: push the chapter we're leaving now
+    if (!mounted) return false;
     setState(() {
       _index = newIndex;
       _text = null;
+      _scrollLayout = null;
+      _ttsAligned = null;
+      _ttsDecorKey = -1;
       _error = null;
       _atEnd = false;
       _lastScrollSaveMs = 0;
@@ -415,7 +533,120 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       _paginationKey = null;
       _pageIndex = 0;
     });
-    _load();
+    // Point the read-aloud coordinator at the chapter now on screen, so a
+    // completion advances to the right neighbour rather than the one the
+    // prefetch was started for.
+    _tts?.setChapterIndex(newIndex);
+    await _load();
+    final ok = mounted && _error == null && _text != null;
+    // The chapter ids, not the indices: if these match, the reader adopted the
+    // chapter it is now showing, and any mismatch between the queue and the
+    // highlight starts here.
+    debugPrint(
+      '[TtsCubit] reader loaded ${_chapter.url} '
+      '(aligned=${_ttsAligned != null}, ${_ttsAligned?.total ?? 0} sentences, '
+      'loaded=$ok)',
+    );
+    return ok;
+  }
+
+  /// Turns to the next chapter because narration reached the end of this one.
+  ///
+  /// The reader decides which chapter that is. The coordinator has no way to
+  /// know where the reader actually is — it only ever sees the index it was
+  /// given when the chapter list was attached, which is not the same thing once
+  /// the list has been widened or a chapter opened directly.
+  ///
+  /// Reports false at the end of the book or when the chapter will not load, so
+  /// the coordinator treats it as the end of the session rather than sitting in
+  /// a speaking state with nothing queued.
+  Future<bool> _navigateForTts() async {
+    final target = _index + 1;
+    _ttsAutoAdvancing = true;
+    try {
+      final ok = await _changeChapter(target);
+      debugPrint(
+        '[TtsCubit] reader turned ${ok ? 'to' : 'nowhere from'} index $target '
+        '(of ${_chapters.length})',
+      );
+      return ok;
+    } finally {
+      _ttsAutoAdvancing = false;
+    }
+  }
+
+  /// Hands the freshly loaded chapter to read-aloud.
+  ///
+  /// Drop the previous chapter's alignment first: a stale one would highlight
+  /// offsets from text that is no longer on screen.
+  ///
+  /// Deliberately does not start speech. Opening a chapter should not start
+  /// audio — that would make scrolling through a book unusable.
+  void _syncTtsFor(ChapterText text) {
+    _ttsAligned = null;
+    _ttsDecorKey = -1;
+    // The aligned path replaces the plain one rather than running alongside it.
+    // Doing both would parse the chapter twice per load and briefly install a
+    // sentence list built from different text than the page renders.
+    if (!_adoptAlignedChapter(text.html)) {
+      _tts?.loadChapter(
+        // The chapter URL is the stable per-chapter key here; `showId` scopes
+        // the resume point to the book so two books' positions never mix.
+        bookId: widget.showId,
+        chapterId: _chapter.url,
+        html: text.html,
+      );
+    }
+  }
+
+  /// Segments the chapter against its *rendered* text and hands the result to
+  /// the controller, so the sentence being spoken can be pointed at.
+  ///
+  /// Uses the same tokenizer the paged renderer builds its spans from.
+  /// Segmenting from the raw HTML instead would produce offsets into a string
+  /// the page never contains, and the highlight would land on the wrong words
+  /// with nothing to indicate why.
+  ///
+  /// Returns whether the chapter was adopted, so the caller can fall back to
+  /// plain HTML segmentation.
+  bool _adoptAlignedChapter(String html) {
+    final tts = _tts;
+    if (tts == null) return false;
+    try {
+      final aligned = alignChapter(
+        _scrollLayout ?? NovelTextLayout.fromHtml(html),
+      );
+      // `print`, not `debugPrint`: debugPrint is a no-op in a release build, and
+      // this is the line that says whether the highlight has anything to point
+      // at. It is also the first thing to check when the panel tracks the voice
+      // but nothing is highlighted on the page.
+      print(
+        '[TtsCubit] segmented ${aligned.total} sentences in '
+        '${aligned.layout.blocks.length} blocks '
+        '(${aligned.layout.length} chars)',
+      );
+      if (aligned.isEmpty) return false;
+      _ttsAligned = aligned;
+      tts.adoptChapter(
+        bookId: widget.showId,
+        chapterId: _chapter.url,
+        views: [
+          for (final s in aligned.sentences)
+            TtsSentenceView(
+              index: s.index,
+              text: s.text,
+              blockIndex: s.blockIndex,
+              pauseAfterMs: s.pauseAfterMs,
+              start: s.startIndex,
+              end: s.endIndex,
+            ),
+        ],
+      );
+      return true;
+    } catch (e) {
+      debugPrint('[TtsCubit] could not segment this chapter: $e');
+      return false;
+    }
   }
 
   void _toggleChrome() => setState(() => _chromeVisible = !_chromeVisible);
@@ -455,6 +686,26 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
           // IgnorePointer inside each for why that doesn't eat page taps.
           _buildTopBar(),
           _buildBottomBar(),
+          // The read-aloud panel floats over the text, above the bottom bar.
+          // Opt-in: it only appears once the bottom-bar button has been tapped,
+          // so a reader who is not listening pays nothing for the feature and
+          // the page is not permanently furniture.
+          if (_tts != null && _ttsPanelOpen)
+            Positioned(
+              left: 0,
+              right: 0,
+              // Clears the bottom bar's pill, which is SafeArea + 12 padding +
+              // the pill itself.
+              bottom: 72,
+              child: TtsPlayerBar(
+                cubit: _tts!,
+                onOpenSettings: _openTtsSheet,
+                onClose: () {
+                  setState(() => _ttsPanelOpen = false);
+                  _tts?.stop();
+                },
+              ),
+            ),
           if (prefs.autoScrollButton)
             ReaderAutoScrollButton(
               autoScroll: _autoScroll,
@@ -468,9 +719,26 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     );
   }
 
-  /// Display name for a neighbouring chapter, for the pull indicator.
-  String? _chapterLabel(int? i) {
-    if (i == null || i < 0 || i >= _chapters.length) return null;
+  // ── read-aloud's view of the chapter list ──────────────────────────────────
+
+  int get chapterCountForTts => _chapters.length;
+
+  Episode? chapterAtForTts(int i) =>
+      (i >= 0 && i < _chapters.length) ? _chapters[i] : null;
+
+  String chapterTitleForTts(int i) => _chapterLabel(i) ?? 'Chapter ${i + 1}';
+
+  /// Feeds read-aloud from the reader's own chapter list.
+  ///
+  /// Reads the live list rather than a copy, so a Continue-Reading resume that
+  /// widens to the full chapter list in the background is picked up without the
+  /// coordinator having to be told.
+  ///
+  /// Fetches through [SourceRepository] exactly as the reader does, rather than
+  /// talking to a source directly: that is the layer that already handles plugin
+  /// routing, headers and per-source quirks, and duplicating it here would mean
+  /// two code paths that drift.
+  String? _chapterLabel(int? i) {    if (i == null || i < 0 || i >= _chapters.length) return null;
     final t = _chapters[i].title.trim();
     return t.isNotEmpty ? t : 'Chapter ${chapterNumberLabel(_chapters, i)}';
   }
@@ -507,17 +775,27 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     final showNext = _atEnd && hasNext;
     final direction = resolveNovelDirection(prefs, text.html);
 
-    // Lazy sliver HTML instead of a paragraph-per-ListView-item — a long
-    // chapter with a few huge paragraphs used to still lay those out (and
-    // repaint) whole; `flutter_widget_from_html`'s sliverList mode only
-    // builds the blocks actually on screen. Same `_scrollController`, so
-    // progress/resume/mark-read (all pixels/maxScrollExtent based) are
-    // untouched — <img> tags render via the package's own bundled
-    // cached-network-image support, no wiring needed here.
+    // One `Text.rich` per block, built from the same `NovelTextLayout` the
+    // read-aloud sentences were segmented from.
     //
-    // Wrapped in [Directionality] so Arabic (and other RTL-script) chapters
-    // read right-to-left: 'text-align: start' below then resolves to right
-    // instead of left, and HtmlWidget mirrors block layout to match.
+    // This used to hand the chapter to `HtmlWidget`, which owns its text, and a
+    // widget that owns the text cannot be handed a decorated copy of it — so
+    // read-aloud had no way to mark the sentence being read. Reikai solves this
+    // by rendering in a WebView and toggling a CSS class on the DOM element,
+    // which highlights whole paragraphs because an element is the smallest
+    // thing a class can go on. We already hold a character range for the exact
+    // sentence, so this builds the blocks from our own tokens instead and gets
+    // sentence-level precision. See `novelBlockSpans`.
+    //
+    // The cost is honest and worth naming: an `<img>` inside a chapter no longer
+    // renders, where `HtmlWidget` handled it. Novels from the sources this reads
+    // do not use inline images, and a chapter that did would show its text with
+    // the picture missing.
+    //
+    // Still lazy, which is what `RenderMode.sliverList` was bought for:
+    // `SliverList.builder` only lays out the blocks near the viewport. Same
+    // `_scrollController`, so progress, resume and mark-read — all
+    // pixels/maxScrollExtent based — are untouched.
     return SafeArea(
       child: Directionality(
         textDirection: direction,
@@ -530,49 +808,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                 horizontal: prefs.marginWidth,
                 vertical: 32,
               ),
-              sliver: HtmlWidget(
-                cleanNovelHtml(text.html),
-                renderMode: RenderMode.sliverList,
-                // Only a downloaded chapter carries a folder — resolves an
-                // image's relative `src` (the download saves them bare, e.g.
-                // `img_0.jpg`) to the local file next to the saved HTML.
-                // Null for anything read live, same as before this existed.
-                baseUrl: text.folder == null
-                    ? null
-                    : Uri.file('${text.folder}/'),
-                textStyle: base,
-                // HtmlWidget caches its built tree and only re-renders when the
-                // HTML or one of these triggers changes — a changed `textStyle`
-                // alone does NOT re-render it. So every setting that feeds `base`
-                // (font size/family/line height/colour) or `customStylesBuilder`
-                // (spacing/alignment/direction) has to be listed here, or the
-                // slider moves but the text doesn't.
-                rebuildTriggers: [
-                  prefs.fontSize,
-                  prefs.fontFamily,
-                  prefs.lineHeight,
-                  theme.text,
-                  prefs.paragraphSpacing,
-                  prefs.textAlignJustify,
-                  direction,
-                ],
-                customStylesBuilder: (element) {
-                  // Force font size + line height as CSS on every element so a
-                  // source that baked its own sizing in can't win over the
-                  // reader's setting (textStyle alone loses to inline CSS).
-                  final styles = <String, String>{
-                    'font-size': '${prefs.fontSize}px',
-                    'line-height': '${prefs.lineHeight}',
-                    'direction': direction == TextDirection.rtl ? 'rtl' : 'ltr',
-                  };
-                  if (element.localName == 'p' || element.localName == 'div') {
-                    styles['margin'] = '0 0 ${prefs.paragraphSpacing}px 0';
-                    styles['text-align'] = prefs.textAlignJustify
-                        ? 'justify'
-                        : 'start';
-                  }
-                  return styles;
-                },
+              sliver: SliverList.builder(
+                itemCount: _scrollLayout?.blocks.length ?? 0,
+                itemBuilder: (context, i) =>
+                    _ttsScrollBlock(context, i, base, prefs),
               ),
             ),
             if (showNext)
@@ -596,8 +835,465 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     );
   }
 
-  Widget _buildError(_ReaderTheme theme) {
-    return Center(
+  /// One paragraph of the scrolling reader, highlighted if it holds the sentence
+  /// being read.
+  ///
+  /// Rebuilds only when the spoken sentence changes: [BlocBuilder]'s
+  /// `buildWhen` keeps a settings change or a scroll from re-laying the chapter
+  /// out, and when it does rebuild, [SliverList] only rebuilds what is near the
+  /// viewport.
+  Widget _ttsScrollBlock(
+    BuildContext context,
+    int blockIndex,
+    TextStyle base,
+    ReaderPrefs prefs,
+  ) {
+    final layout = _scrollLayout;
+    if (layout == null) return const SizedBox.shrink();
+    final tts = _tts;
+    if (tts == null) {
+      return _scrollBlockText(blockIndex, base, prefs);
+    }
+
+    return BlocBuilder<TtsCubit, TtsState>(
+      bloc: tts,
+      buildWhen: (a, b) =>
+          a.currentIndex != b.currentIndex || a.isActive != b.isActive,
+      builder: (context, state) {
+        final range = _ttsAligned?.rangeAt(state.currentIndex);
+        final speaking = state.isActive && range != null;
+        if (speaking) _followTtsBlock(context);
+        return _scrollBlockText(
+          blockIndex,
+          base,
+          prefs,
+          highlightStart: speaking ? range.start : null,
+          highlightEnd: speaking ? range.end : null,
+        );
+      },
+    );
+  }
+
+  Widget _scrollBlockText(
+    int blockIndex,
+    TextStyle base,
+    ReaderPrefs prefs, {
+    int? highlightStart,
+    int? highlightEnd,
+  }) {
+    final layout = _scrollLayout;
+    if (layout == null) return const SizedBox.shrink();
+    final speaking = highlightStart != null && highlightEnd != null;
+    return Padding(
+      // The gap the old `margin: 0 0 paragraphSpacing` produced, now expressed
+      // in Flutter's layout rather than CSS.
+      padding: EdgeInsets.only(bottom: prefs.paragraphSpacing),
+      child: Text.rich(
+        TextSpan(
+          style: base,
+          children: novelBlockSpans(
+            layout,
+            blockIndex,
+            base: base,
+            highlightStart: highlightStart,
+            highlightEnd: highlightEnd,
+            highlight: speaking ? _ttsHighlight : null,
+          ),
+        ),
+        textAlign:
+            prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+      ),
+    );
+  }
+
+  /// Warm and low-contrast: it has to sit under body text without hurting
+  /// legibility, and it has to read on all three page themes. The same colour
+  /// the paged reader uses, so switching modes does not change the feature.
+  TextStyle get _ttsHighlight =>
+      TextStyle(color: AppColors.accent.withValues(alpha: 0.30));
+
+  /// Brings the block being read into view, in scrolling mode.
+  ///
+  /// Only when it has actually gone off screen or up under the status bar, and
+  /// only after layout. Reikai's `scrollToElement` makes the same check in the
+  /// page: yanking the reader to a sentence they are already looking at is worse
+  /// than not following along at all.
+  void _followTtsBlock(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_scrollController.hasClients) return;
+      final position = _scrollController.position;
+      if (!position.hasContentDimensions) return;
+      final box = context.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final top = box.localToGlobal(Offset.zero).dy;
+      final viewport = MediaQuery.sizeOf(context).height;
+      if (top >= _ttsScrollTopInset && top < viewport * 0.75) return;
+      final target = position.pixels + (top - _ttsScrollTopInset);
+      _scrollController.jumpTo(
+        target.clamp(position.minScrollExtent, position.maxScrollExtent),
+      );
+    });
+  }
+
+  /// Clearance for the notch and the camera cutout when following a sentence.
+  static const double _ttsScrollTopInset = 72;
+
+  Widget _pageText(TextSpan page, ReaderPrefs prefs) => Text.rich(
+        page,
+        textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+      );
+
+  /// The pages with the sentence being read painted on them.
+  ///
+  /// Memoised on the sentence and the page list, because this runs on every
+  /// frame the reader is on a page and repainting several hundred spans each
+  /// time would stutter the very page the user is trying to read along with.
+  List<TextSpan> _ttsDecoratedPages(
+    List<TextSpan> pages,
+    TtsState ttsState,
+    _ReaderTheme theme,
+  ) {
+    final aligned = _ttsAligned;
+    if (aligned == null || pages.isEmpty) return pages;
+
+    // No highlight unless something is actually being read: a leftover
+    // highlight after stop would point at a sentence nobody is hearing.
+    if (!ttsState.isActive) {
+      if (_ttsDecorKey != -2) {
+        _ttsDecorKey = -2;
+        _ttsDecorated = pages;
+      }
+      return pages;
+    }
+
+    final range = aligned.rangeAt(ttsState.currentIndex);
+    if (range == null) return pages;
+
+    final key = Object.hash(
+      ttsState.currentIndex,
+      identityHashCode(pages),
+      theme.text,
+    );
+    if (key == _ttsDecorKey) return _ttsDecorated;
+
+    _ttsDecorKey = key;
+    _ttsDecorated = highlightPages(
+      pages,
+      range.start,
+      range.end,
+      highlight: _ttsHighlight,
+    );
+    return _ttsDecorated;
+  }
+
+  /// How long after a page turn the reader is considered to be in control.
+  ///
+  /// A read-aloud auto-turn that fires while someone is swiping pages themselves
+  /// is worse than no auto-turn at all: it fights them for the page, several
+  /// times a minute, and the highlight stops being a way to follow along. Five
+  /// seconds is long enough to cover a deliberate turn and a re-read of the
+  /// previous sentence, short enough that narration is not ignored for long.
+  static const int _ttsPageTurnGraceMs = 5000;
+
+  /// Turns the page when narration moves onto a page the reader is not looking
+  /// at.
+  ///
+  /// Without this, a spoken sentence on the next page is simply invisible — the
+  /// highlight is painting somewhere off-screen, which makes read-aloud in paged
+  /// mode feel broken even though it is working. Skipped while the reader is
+  /// paging themselves (see [_ttsPageTurnGraceMs]) so it assists rather than
+  /// takes over.
+  void _maybeFollowTts(TtsState state) {
+    final aligned = _ttsAligned;
+    final pages = _pages;
+    if (aligned == null || pages.isEmpty || !state.isSpeaking) return;
+
+    final range = aligned.rangeAt(state.currentIndex);
+    if (range == null) return;
+    final target = pageIndexForRange(pages, range.start, range.end);
+    if (target == null || target == _pageIndex) return;
+
+    final since = DateTime.now().millisecondsSinceEpoch - _lastManualPageTurn;
+    if (since < _ttsPageTurnGraceMs) return;
+    if (_ttsTurningPage) return;
+
+    _ttsTurningPage = true;
+    // Post-frame: this is called from a builder, and jumping the controller
+    // mid-build is not allowed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _ttsTurningPage = false;
+      if (!mounted || !_pageController.hasClients) return;
+      if (_pageController.page?.round() == target) return;
+      _pageController.jumpToPage(target);
+    });
+  }
+
+  /// Read-aloud settings: voice, speed, pitch, sleep timer, background
+  /// playback, and the resume offer.
+  ///
+  /// Every control writes straight through to the cubit, so a change is audible
+  /// on the next sentence rather than after a stop and restart — the whole point
+  /// of a settings sheet you open *during* a listen.
+  void _openTtsSheet() {
+    final tts = _tts;
+    if (tts == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => BlocProvider<TtsCubit>.value(
+        value: tts,
+        child: BlocBuilder<TtsCubit, TtsState>(
+          bloc: tts,
+          builder: (context, state) {
+            void apply(VoidCallback change) {
+              change();
+              // The sheet is a separate route, so it does not see the reader's
+              // rebuilds; repaint it from the state it just changed.
+              if (sheetContext.mounted) {
+                (sheetContext as Element).markNeedsBuild();
+              }
+            }
+
+            return SafeArea(
+              child: Container(
+                margin: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.surface2,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      readerSheetSection('Read-aloud settings'),
+                      _ttsVoiceRow(tts, apply),
+                      readerSheetSection('Speed and pitch'),
+                      readerSheetGroup([
+                        readerSheetRow(
+                          icon: Icons.speed_rounded,
+                          label: 'Speed',
+                          trailing: Text(
+                            // Same formatter as the player's speed chip, so the
+                            // two cannot print one speed two ways.
+                            TtsSpeed.label(state.rate),
+                            style: AppText.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          child: Slider(
+                            value: state.rate
+                                .clamp(TtsSpeed.min, TtsSpeed.max)
+                                .toDouble(),
+                            min: TtsSpeed.min,
+                            max: TtsSpeed.max,
+                            // 0.1 steps across 0.5-3.0, so the slider can
+                            // reach every tenth the chip does and the two never
+                            // show a speed the other cannot.
+                            divisions: 25,
+                            onChanged: (v) =>
+                                apply(() => tts.setRate(v)),
+                          ),
+                        ),
+                        readerSheetRow(
+                          icon: Icons.graphic_eq_rounded,
+                          label: 'Pitch',
+                          trailing: Text(
+                            state.pitch.toStringAsFixed(1),
+                            style: AppText.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          child: Slider(
+                            value: state.pitch.clamp(0.5, 2.0).toDouble(),
+                            min: 0.5,
+                            max: 2.0,
+                            divisions: 15,
+                            onChanged: (v) =>
+                                apply(() => tts.setPitch(v)),
+                          ),
+                        ),
+                      ]),
+                      readerSheetSection('Session'),
+                      readerSheetGroup([
+                        readerSheetRow(
+                          icon: Icons.bedtime_rounded,
+                          label: 'Stop after',
+                          trailing: Text(
+                            state.sleepTimerMinutes <= 0
+                                ? 'Off'
+                                : '${state.sleepTimerMinutes} min',
+                            style: AppText.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          onTap: () => _ttsSleepSheet(tts, apply),
+                        ),
+                        readerSheetRow(
+                          icon: Icons.screen_lock_portrait_rounded,
+                          label: 'Keep reading with the screen off',
+                          trailing: Switch(
+                            value: state.backgroundPlayback,
+                            onChanged: (v) =>
+                                apply(() => tts.setBackgroundPlayback(v)),
+                          ),
+                        ),
+                      ]),
+                      if (tts.resumePointFor(state.bookId, state.chapterId)
+                          case final point?)
+                        readerSheetGroup([
+                          readerSheetRow(
+                            icon: Icons.restore_rounded,
+                            label: 'Resume from sentence '
+                                '${tts.resolveResumeIndex(point) + 1}',
+                            onTap: () {
+                              final index = tts.resolveResumeIndex(point);
+                              Navigator.of(sheetContext).maybePop();
+                              apply(() => tts.play(from: index));
+                            },
+                          ),
+                        ]),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Sleep timer, as a sheet of presets rather than a picker: the useful values
+  /// are a handful, and the panel is already a sheet over a sheet.
+  void _ttsSleepSheet(TtsCubit tts, void Function(VoidCallback) apply) {
+    const options = <int>[0, 5, 10, 15, 30, 45, 60, 90];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: AppColors.surface2,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final m in options)
+                ListTile(
+                  title: Text(m <= 0 ? 'Off' : '$m minutes'),
+                  onTap: () {
+                    Navigator.of(sheetContext).maybePop();
+                    apply(() => tts.setSleepTimer(m));
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The voice picker. Only voices the engine actually offers, so the list is
+  /// never a row of "Default" that does nothing.
+  Widget _ttsVoiceRow(TtsCubit tts, void Function(VoidCallback) apply) {
+    return readerSheetGroup([
+      readerSheetRow(
+        icon: Icons.record_voice_over_rounded,
+        label: 'Voice',
+        onTap: () => _ttsVoicePicker(tts, apply),
+        trailing: FutureBuilder<List<TtsVoice>>(
+          future: tts.voices(),
+          builder: (context, snap) {
+            final selected = tts.state.voiceName;
+            final voices = snap.data;
+            // Resolved here rather than in the picker so the row shows a real
+            // name the moment the engine answers, instead of a bare id.
+            var name = 'Default (system)';
+            if (selected != null && voices != null) {
+              for (final v in voices) {
+                if (v.name == selected) {
+                  name = '${v.locale} - ${v.qualityLabel}';
+                  break;
+                }
+              }
+              if (name == 'Default (system)') name = selected;
+            }
+            return Text(
+              name,
+              style: AppText.body.copyWith(color: AppColors.textSecondary),
+            );
+          },
+        ),
+      ),
+    ]);
+  }
+
+  void _ttsVoicePicker(TtsCubit tts, void Function(VoidCallback) apply) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => SafeArea(
+        child: Container(
+          margin: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(maxHeight: 420),
+          decoration: BoxDecoration(
+            color: AppColors.surface2,
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: FutureBuilder<List<TtsVoice>>(
+            future: tts.voices(),
+            builder: (context, snap) {
+              final voices = snap.data;
+              if (voices == null) {
+                return const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (voices.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(
+                    'This device has no text-to-speech voices installed.',
+                    style: AppText.body,
+                    textAlign: TextAlign.center,
+                  ),
+                );
+              }
+              return ListView(
+                shrinkWrap: true,
+                children: [
+                  ListTile(
+                    title: const Text('Default (system)'),
+                    onTap: () {
+                      Navigator.of(sheetContext).maybePop();
+                      apply(() => tts.setVoice(null));
+                    },
+                  ),
+                  for (final v in voices)
+                    ListTile(
+                      title: Text('${v.locale} - ${v.qualityLabel}'),
+                      onTap: () {
+                        Navigator.of(sheetContext).maybePop();
+                        apply(() => tts.setVoice(v.name));
+                      },
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError(_ReaderTheme theme) {    return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
@@ -679,12 +1375,28 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                     ),
                     child: Align(
                       alignment: AlignmentDirectional.topStart,
-                      child: Text.rich(
-                        pages[index],
-                        textAlign: prefs.textAlignJustify
-                            ? TextAlign.justify
-                            : TextAlign.start,
-                      ),
+                      // Scoped to the page text rather than the whole reader:
+                      // the highlight changes on every sentence, and rebuilding
+                      // the chrome, the tap handling and the pagination
+                      // bookkeeping several times a minute would be wasteful
+                      // for a change that only affects these spans.
+                      child: _tts == null
+                          ? _pageText(pages[index], prefs)
+                          : BlocBuilder<TtsCubit, TtsState>(
+                              bloc: _tts,
+                              buildWhen: (a, b) =>
+                                  a.currentIndex != b.currentIndex ||
+                                  a.isActive != b.isActive,
+                              builder: (context, ttsState) {
+                                // Called from the builder, not from a listener,
+                                // so it is already scheduled to run after the
+                                // frame that shows the new highlight.
+                                _maybeFollowTts(ttsState);
+                                final shown =
+                                    _ttsDecoratedPages(pages, ttsState, theme);
+                                return _pageText(shown[index], prefs);
+                              },
+                            ),
                     ),
                   );
                 },
@@ -727,6 +1439,12 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   }
 
   void _onPageChanged(int index) {
+    // Read-aloud's own jump, not the reader reaching for the page: it defers to
+    // the reader for a grace period after *they* turn one, and its own turn
+    // would otherwise reset that clock and stop it ever following along.
+    if (!_ttsTurningPage) {
+      _lastManualPageTurn = DateTime.now().millisecondsSinceEpoch;
+    }
     if (index == _pageIndex) return; // e.g. the restore jump landing on target
     setState(() => _pageIndex = index); // refresh the page x / y indicator
     _saveProgress(flush: false); // same save/scrobble path as scroll mode
@@ -971,6 +1689,24 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                     ),
                     onPressed: _openTextSizeSheet,
                   ),
+                  // Read-aloud. The one control that starts the feature, so it
+                  // sits with the other transport: hidden entirely when the
+                  // engine could never work, and a play/pause toggle while it is
+                  // running rather than a button that silently does nothing.
+                  if (_tts != null)
+                    BlocBuilder<TtsCubit, TtsState>(
+                      bloc: _tts,
+                      // Only the icon depends on this, and it flips twice per
+                      // session at most — rebuilding the whole bar on every
+                      // sentence would fight the page slider for no reason.
+                      buildWhen: (a, b) => a.isSpeaking != b.isSpeaking,
+                      builder: (context, state) => readerBarButton(
+                        state.isSpeaking
+                            ? Icons.stop_rounded
+                            : Icons.headphones_rounded,
+                        state.isSpeaking ? _stopTts : _startTts,
+                      ),
+                    ),
                   readerBarButton(
                     Icons.skip_next_rounded,
                     () => _goToChapter(_nextIndex),
@@ -1832,4 +2568,40 @@ String _unescapeHtml(String s) {
 String _charOrRaw(int? code, String raw) {
   if (code == null || code < 0 || code > 0x10FFFF) return raw;
   return String.fromCharCode(code);
+}
+
+/// Read-aloud's window onto the reader's chapter list.
+///
+/// The coordinator needs to fetch and name the next chapter when narration runs
+/// past the end of this one, and it must be the *same* chapters the reader is
+/// showing — a second copy of the list would go stale the moment a
+/// Continue-Reading resume widens it, and read-aloud would advance into a
+/// chapter that is not the one after the one on screen.
+class _ReaderTtsChapterSource implements TtsChapterSource {
+  _ReaderTtsChapterSource(this._reader);
+
+  final _NovelReaderScreenState _reader;
+
+  @override
+  Future<int> chapterCount() async => _reader.chapterCountForTts;
+
+  @override
+  Future<String> chapterTitle(int index) async =>
+      _reader.chapterTitleForTts(index);
+
+  @override
+  Future<String> chapterText(int index) async {
+    final chapter = _reader.chapterAtForTts(index);
+    if (chapter == null) return '';
+    final text = await sl<SourceRepository>().chapterText(
+      chapter.url,
+      sourceId: _reader.widget.sourceId,
+    );
+    return text.html;
+  }
+
+  /// The chapter's own URL, so an auto-advanced resume point names a chapter the
+  /// app can actually reopen — the same key the reader uses itself.
+  @override
+  String chapterId(int index) => _reader.chapterAtForTts(index)?.url ?? '';
 }
