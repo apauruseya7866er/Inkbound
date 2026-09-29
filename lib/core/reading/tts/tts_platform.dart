@@ -140,6 +140,17 @@ class TtsPaused extends TtsEngineEvent {
   final int index;
 }
 
+/// Playback resumed, from outside the app.
+///
+/// The counterpart to [TtsPaused], and the one that was missing: resuming from
+/// the notification or a headset key drives the engine directly, and the engine
+/// had no way to say so. Dart went on showing "paused" — the play button stayed
+/// on screen while audio was already playing, which reads as a broken control
+/// rather than as stale state.
+class TtsResumed extends TtsEngineEvent {
+  const TtsResumed();
+}
+
 /// The last sentence of the chapter was reached.
 class TtsCompleted extends TtsEngineEvent {
   const TtsCompleted();

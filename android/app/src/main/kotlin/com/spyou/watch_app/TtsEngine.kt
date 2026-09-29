@@ -72,6 +72,9 @@ object TtsEngine {
 
         fun onPaused(index: Int)
 
+        /** Playback resumed. The counterpart to [onPaused]. */
+        fun onResumed()
+
         fun onCompleted()
 
         fun onStopped()
@@ -314,6 +317,11 @@ object TtsEngine {
         val from = resumeIndex
         paused = false
         begin(from)
+        // `begin` only queues; the next `onStart` is the first thing the listener
+        // hears, which is too late to correct a UI that is still showing
+        // "paused" — and if the first utterance is a long one, far too late. The
+        // resume itself is the event.
+        listener?.onResumed()
     }
 
     fun isPaused(): Boolean = paused

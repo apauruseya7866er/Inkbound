@@ -66,6 +66,23 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false" />
+        <!-- Headset and Bluetooth media keys.
+             Android routes those keys to whichever app holds the active
+             MediaSession, but it only delivers them as a MEDIA_BUTTON broadcast
+             if a receiver is declared for it. Without this declaration the keys
+             are silently dropped: the notification's transport controls work,
+             pressing play or next on a pair of headphones does nothing at all,
+             and the app looks broken in exactly the way the user is holding it.
+             TtsService forwards the intent to this receiver's static handler,
+             which turns it into the same session callbacks the notification
+             taps use. -->
+        <receiver
+            android:name="androidx.media.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
         <activity
             android:name=".MainActivity"
             android:exported="true"

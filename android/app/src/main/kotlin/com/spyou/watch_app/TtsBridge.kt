@@ -212,6 +212,10 @@ object TtsBridge : TtsEngine.Listener {
         emit(mapOf("type" to "paused", "index" to index))
     }
 
+    override fun onResumed() {
+        emit(mapOf("type" to "resumed"))
+    }
+
     override fun onCompleted() {
         emit(mapOf("type" to "completed"))
     }

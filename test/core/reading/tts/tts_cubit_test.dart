@@ -429,6 +429,29 @@ void main() {
       await cubit.close();
     });
 
+    test('a resume from outside the app clears the paused state', () async {
+      // The notification and a headset key drive the engine directly, so the
+      // only way Dart learns about it is the engine's own event. Without it the
+      // panel kept showing a play button while audio was already running.
+      final cubit = await build();
+      cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+      platform.becomeReady();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.play();
+      platform.emit(const TtsPaused(2));
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, TtsStatus.paused);
+
+      platform.emit(const TtsResumed());
+      await Future<void>.delayed(Duration.zero);
+      expect(cubit.state.status, TtsStatus.speaking);
+      expect(cubit.state.isSpeaking, isTrue);
+      // The position is the engine's to report; this event is only about state.
+      expect(cubit.state.currentIndex, 2);
+      await cubit.close();
+    });
+
+
     test('toggle flips between playing and paused', () async {
       final cubit = await build();
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);

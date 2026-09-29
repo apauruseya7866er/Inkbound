@@ -47,6 +47,7 @@ class MethodChannelTtsPlatform implements TtsPlatform {
       'sentenceDone' => TtsSentenceFinished(index),
       'error' => TtsUtteranceFailed(index, (raw['code'] as num?)?.toInt() ?? -1),
       'paused' => TtsPaused(index),
+      'resumed' => const TtsResumed(),
       'completed' => const TtsCompleted(),
       'stopped' => const TtsStopped(),
       _ => null,

@@ -531,6 +531,18 @@ class TtsCubit extends Cubit<TtsState> {
           ),
         );
 
+      case TtsResumed():
+        // A resume from the notification or a headset key arrives here, not
+        // through this cubit's own methods, so without this the panel kept its
+        // play button — looking paused — while the engine was already speaking.
+        if (_loaded.isEmpty) return;
+        emit(
+          state.copyWith(
+            status: TtsStatus.speaking,
+            currentIndex: state.currentIndex.clamp(0, _loaded.length - 1),
+          ),
+        );
+
       case TtsCompleted():
         // Only a session that was actually speaking can have finished. An engine
         // can still emit one after a stop — a queued retry firing late, or a

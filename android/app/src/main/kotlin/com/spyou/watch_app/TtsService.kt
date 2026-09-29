@@ -14,6 +14,7 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
@@ -65,6 +66,32 @@ class TtsService : Service() {
                     override fun onPlay() = resumeFromNotification()
                     override fun onPause() = pauseFromNotification()
                     override fun onStop() = stopFromNotification()
+
+                    // A headset's next/previous, and the fast-forward/rewind a
+                    // Bluetooth remote sends for the same intent, move one
+                    // sentence — the same granularity as the notification's own
+                    // buttons, so the key and the on-screen control agree.
+                    //
+                    // Chapter-level skipping is deliberately not here: the chapter
+                    // list lives in Dart, and a media key that worked only while
+                    // the reader happened to be open would be worse than one that
+                    // is absent.
+                    override fun onSkipToNext() = skipFromNotification(1)
+                    override fun onSkipToPrevious() = skipFromNotification(-1)
+                    override fun onFastForward() = skipFromNotification(1)
+                    override fun onRewind() = skipFromNotification(-1)
+
+                    /**
+                     * A seek needs a position the engine does not expose over
+                     * this path, and guessing one from a key press would move
+                     * the highlight to words nobody asked for. Declared
+                     * supported so the system UI offers it, and answered with
+                     * the current sentence's own position, which makes the scrub
+                     * a no-op instead of a jump.
+                     */
+                    override fun onSeekTo(pos: Long) {
+                        updateNotification()
+                    }
                 },
             )
             isActive = true
@@ -73,20 +100,23 @@ class TtsService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
+            // The headset/Bluetooth key path. `MediaButtonReceiver` decodes the
+            // KeyEvent and calls the session callback above, so a key press is
+            // handled by exactly the same code as tapping the notification.
+            Intent.ACTION_MEDIA_BUTTON -> {
+                val current = session
+                if (current != null) {
+                    androidx.media.session.MediaButtonReceiver.handleIntent(current, intent)
+                }
+            }
             ACTION_STOP -> {
                 stopEverything()
                 return START_NOT_STICKY
             }
             ACTION_PAUSE -> pauseFromNotification()
             ACTION_RESUME -> resumeFromNotification()
-            ACTION_NEXT -> {
-                TtsEngine.skip(1)
-                updateNotification()
-            }
-            ACTION_PREVIOUS -> {
-                TtsEngine.skip(-1)
-                updateNotification()
-            }
+            ACTION_NEXT -> skipFromNotification(1)
+            ACTION_PREVIOUS -> skipFromNotification(-1)
             else -> {
                 startForegroundCompat(buildNotification())
                 markRunning(true)
@@ -338,6 +368,12 @@ class TtsService : Service() {
         updateNotification()
     }
 
+    /** Shared by the notification buttons and the media keys. */
+    private fun skipFromNotification(delta: Int) {
+        TtsEngine.skip(delta)
+        updateNotification()
+    }
+
     private fun stopFromNotification() = stopEverything()
 
     private fun stopEverything() {
@@ -366,19 +402,79 @@ class TtsService : Service() {
     private fun updateNotification() {
         val nm = notifyManager() ?: return
         nm.notify(NOTI_ID, buildNotification())
-        session?.setPlaybackState(
+        syncSession()
+    }
+
+    /**
+     * Republishes the session's metadata and playback state.
+     *
+     * ### This has to run on every state change, including Dart's
+     *
+     * Android decides which app owns the media buttons by looking at the
+     * sessions' playback states and picks the one that is *playing*. So a session
+     * that is still advertising `PAUSED` while the engine speaks is not a cosmetic
+     * inconsistency: the system keeps handing the headset keys to whatever app it
+     * last saw playing, and this app's own pause/play buttons are unreachable
+     * from the lock screen and from a pair of headphones.
+     *
+     * That is exactly what happened when only the service's own actions updated
+     * the state: pause the narration with the panel, press play in the app, and
+     * the session never left `PAUSED`, because the only other caller — [refresh],
+     * on the path Dart uses for every sentence — rebuilt the notification and
+     * nothing else.
+     */
+    private fun syncSession() {
+        val current = session ?: return
+        current.setMetadata(
+            MediaMetadataCompat.Builder()
+                // The system's media panel — the one under the shade, and the one
+                // a car head unit or a watch shows — reads the session, not the
+                // notification. Without metadata it lists the app and nothing
+                // else, which is how a media app ends up as a nameless row.
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                .putString(
+                    MediaMetadataCompat.METADATA_KEY_ARTIST,
+                    if (subtitle.isNotEmpty()) subtitle else "Reading aloud",
+                )
+                .putString(
+                    MediaMetadataCompat.METADATA_KEY_ALBUM,
+                    "Read aloud",
+                )
+                .build(),
+        )
+        current.setPlaybackState(
             PlaybackStateCompat.Builder()
                 .setActions(
+                    // Every control the notification shows. Advertising them is
+                    // not cosmetic: a system media UI, a car head unit and a
+                    // Bluetooth remote all read this list and grey out whatever
+                    // is missing, so leaving the skip actions out made a working
+                    // control look unavailable on half the devices that can
+                    // drive it.
                     PlaybackStateCompat.ACTION_PLAY or
                         PlaybackStateCompat.ACTION_PAUSE or
                         PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                        PlaybackStateCompat.ACTION_STOP,
+                        PlaybackStateCompat.ACTION_STOP or
+                        PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+                        PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+                        PlaybackStateCompat.ACTION_FAST_FORWARD or
+                        PlaybackStateCompat.ACTION_REWIND or
+                        PlaybackStateCompat.ACTION_SEEK_TO,
                 )
                 .setState(
                     if (TtsEngine.isPaused()) PlaybackStateCompat.STATE_PAUSED
                     else PlaybackStateCompat.STATE_PLAYING,
+                    // 0, because the unit is a sentence and the engine's clock
+                    // is not a playback position. A real position here makes
+                    // system UIs draw a scrubber that jumps to the wrong place.
                     0,
                     1.0f,
+                )
+                .setExtras(
+                    android.os.Bundle().apply {
+                        putInt("index", TtsEngine.currentIndex())
+                        putInt("total", TtsEngine.totalSentences())
+                    },
                 )
                 .build(),
         )
@@ -440,12 +536,19 @@ class TtsService : Service() {
          * state (wakelock, session, paused flag), not just the static text. A
          * no-op when the service is not running, so the caller does not have to
          * check first.
+         *
+         * Also republishes the session, and that matters more than it looks: this
+         * is the path Dart takes for every sentence, and it is the only place
+         * that notices a play or pause the user made in the app. A session whose
+         * playback state is stale is a session the system will not route media
+         * buttons to. See [syncSession].
          */
         fun refresh(context: Context) {
             if (!isRunning) return
             val running = instance ?: return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
             nm.notify(NOTI_ID, running.buildNotification())
+            running.syncSession()
         }
 
         /**
