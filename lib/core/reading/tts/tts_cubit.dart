@@ -344,7 +344,7 @@ class TtsCubit extends Cubit<TtsState> {
     await _ensureService();
 
     try {
-      await _platform.start(units: _unitsFrom(startIndex), startIndex: startIndex);
+      await _platform.start(units: _units(), startIndex: startIndex);
       await _syncServiceSentence();
       // Warm the following chapter now, so finishing this one does not mean a
       // silent network wait.
@@ -711,10 +711,21 @@ class TtsCubit extends Cubit<TtsState> {
   /// refills its own look-ahead queue from the list it was given; sending a
   /// window would stall at the end of it.
   ///
+  /// Every sentence of the chapter, in order.
+  ///
+  /// The **whole** list, not a window from the start index, because the engine
+  /// addresses units by their position in the chapter (`units[startIndex]`) and
+  /// refills its queue from the sentences after the look-ahead window without
+  /// another round trip. Slicing the list to start at the seek position made
+  /// `units[startIndex]` out of range for any seek past the halfway point — the
+  /// engine could queue nothing, concluded the chapter had finished, and
+  /// auto-advance turned the page. Dragging the progress bar to the middle of a
+  /// chapter skipped to the next one.
+  ///
   /// The last sentence carries no trailing beat, since nothing follows it and
   /// the delay would be dead air before the completion callback.
-  List<TtsUnit> _unitsFrom(int from) => <TtsUnit>[
-    for (var i = from; i < _loaded.length; i++)
+  List<TtsUnit> _units() => <TtsUnit>[
+    for (var i = 0; i < _loaded.length; i++)
       TtsUnit(
         text: _loaded[i].text,
         pauseAfterMs: i == _loaded.length - 1 ? 0 : _loaded[i].pauseAfterMs,

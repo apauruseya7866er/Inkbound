@@ -311,7 +311,13 @@ void main() {
       await cubit.close();
     });
 
-    test('resuming mid-chapter sends only the remainder', () async {
+    test('resuming mid-chapter still addresses the whole chapter', () async {
+      // This used to assert the opposite — that resuming sent *only* the
+      // remainder, alongside a startIndex that counted from the chapter start.
+      // Those two are incompatible: the engine reads `units[startIndex]`, so a
+      // list beginning at sentence 2 could not be indexed with 2. It happened
+      // to work while the remainder was longer than the offset, which is why it
+      // only broke from the halfway point of a chapter onwards.
       final cubit = await build();
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
       platform.becomeReady();
@@ -319,8 +325,12 @@ void main() {
 
       await cubit.play(from: 2);
       expect(platform.lastStartIndex, 2);
-      expect(platform.lastUnits, hasLength(2));
-      expect(platform.lastUnits.first.text, 'Third sentence now.');
+      expect(platform.lastUnits, hasLength(4));
+      expect(
+        platform.lastUnits[2].text,
+        'Third sentence now.',
+        reason: 'the engine must be able to read the sentence it was asked for',
+      );
       await cubit.close();
     });
 
@@ -453,6 +463,42 @@ void main() {
   });
 
   group('seeking', () {
+    test('the whole chapter is sent, so any seek position can queue', () async {
+      // The engine addresses units by their position in the chapter, so a list
+      // sliced to start at the seek position made `units[startIndex]` out of
+      // range from the halfway point on. Nothing could queue, the engine read
+      // that as "chapter finished", and auto-advance turned the page — dragging
+      // the progress bar past the middle skipped to the next chapter.
+      final cubit = await build();
+      const sentences = 40;
+      final html = '<p>${List.generate(
+        sentences,
+        (i) => 'Sentence number $i stands here.',
+      ).join(' ')}</p>';
+      cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: html);
+      platform.becomeReady();
+      await Future<void>.delayed(Duration.zero);
+      await cubit.play();
+
+      expect(cubit.state.totalSentences, sentences);
+
+      for (final target in [sentences ~/ 2, (sentences * 3) ~/ 4, sentences - 2]) {
+        await cubit.seek(target);
+        expect(
+          platform.lastUnits.length,
+          cubit.state.totalSentences,
+          reason: 'seeking to $target sent a shortened list',
+        );
+        // The engine reads units[startIndex]; it must be the sentence asked for.
+        expect(
+          platform.lastUnits[platform.lastStartIndex].text,
+          cubit.state.sentences[target].text,
+          reason: 'seek to $target queued the wrong sentence',
+        );
+      }
+      await cubit.close();
+    });
+
     test('seek while speaking restarts from the target', () async {
       final cubit = await build();
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
