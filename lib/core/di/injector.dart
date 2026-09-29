@@ -39,6 +39,10 @@ import '../reading/read_history.dart';
 import '../reading/read_store.dart';
 import '../reading/reader_overrides.dart';
 import '../reading/reader_prefs.dart';
+import '../reading/tts/method_channel_tts_platform.dart';
+import '../reading/tts/tts_cubit.dart';
+import '../reading/tts/tts_platform.dart';
+import '../reading/tts/tts_prefs.dart';
 import '../playback/title_prefs.dart';
 import '../playback/watch_history.dart';
 import '../provider/cf_clearance_store.dart';
@@ -71,6 +75,7 @@ import '../metadata/tmdb.dart';
 import 'package:watch_app/core/metadata/tmdb_fallback.dart';
 import '../metadata/title_logo_service.dart';
 import '../mode/content_mode_cubit.dart';
+import '../mode/novel_only.dart';
 import '../trailer/trailer_service.dart';
 import '../anilist/anilist_graphql.dart';
 import '../anilist/anilist_network_policy.dart';
@@ -102,6 +107,7 @@ import '../discord/discord_rpc.dart';
 import '../aniyomi/aniyomi_extension_service.dart';
 import '../aniyomi/aniyomi_provider.dart';
 import '../lnreader/lnreader_extension_service.dart';
+import '../lnreader/seed_repo.dart';
 import '../lnreader/lnreader_manager.dart';
 import '../lnreader/novel_lang_prefs.dart';
 import '../prefs/source_lang_prefs.dart';
@@ -330,6 +336,15 @@ Future<void> initDependencies() async {
   sl.registerSingleton<PlaybackPrefs>(PlaybackPrefs());
   await ReaderPrefs.init();
   sl.registerSingleton<ReaderPrefs>(ReaderPrefs());
+  // Read-aloud settings plus the per-book resume point. Registered as a
+  // singleton because the cubit holds the live playback position, which must
+  // survive navigating between the reader and its settings sheet.
+  await TtsPrefs.init();
+  sl.registerSingleton<TtsPrefs>(TtsPrefs());
+  sl.registerLazySingleton<TtsPlatform>(MethodChannelTtsPlatform.new);
+  sl.registerLazySingleton<TtsCubit>(
+    () => TtsCubit(platform: sl<TtsPlatform>(), prefs: sl<TtsPrefs>()),
+  );
   await ReaderOverrideStore.init();
   sl.registerSingleton<ReaderOverrideStore>(ReaderOverrideStore());
   // Apply the saved accent colour before the first frame (default = coral).
@@ -660,6 +675,18 @@ Future<void> initDependencies() async {
   sl.registerSingleton<LnReaderExtensionService>(lnrService);
   sl.registerSingleton<LnReaderManager>(lnrManager);
   await lnrManager.init();
+  // Seed the official LNReader plugin repo.
+  //
+  // Inline and index-only: adding the index URL to the tracked-repos box is one
+  // write and no network, so the Sources screen can list the full 157-source
+  // English catalogue immediately.
+  //
+  // Installing the plugins is NOT done here. It is ~157 small downloads (~2.3 MB,
+  // a couple of minutes) on a fresh install, for sources the user may never
+  // open — spending a user's data and battery before they have chosen anything
+  // is not a decision this app should make for them. The Sources screen offers
+  // it instead, where the catalogue is visible and the choice is informed.
+  await LnReaderSeedRepo.ensureSeeded();
   // Repo-URL box too, so Backup's sync build() can read it any time — the
   // novel twin of the mihon_repos/aniyomi_repos opens below. Unlike those
   // (opened inside a guarded, Android-only microtask), LNReader has no
@@ -667,6 +694,7 @@ Future<void> initDependencies() async {
   if (!Hive.isBoxOpen('lnreader_repos')) {
     await openBoxSafely<String>('lnreader_repos');
   }
+
 
   // --- Provider registry data layer ---------------------------------
   await ProviderReposRegistry.init();
@@ -686,8 +714,11 @@ Future<void> initDependencies() async {
   sl.registerSingleton<BackupService>(BackupService(
     SourcesBackup(sl<ProviderReposRegistry>(), sl<ProviderRegistry>(),
         sl.isRegistered<CloudStreamManager>() ? sl<CloudStreamManager>() : null,
-        aniyomi: AniyomiExtensionService(),
-        mihon: MihonExtensionService(),
+        // Novel-only build: null is the documented "this ecosystem is absent"
+        // value (see SourcesBackup's ctor doc), so a restore can't reinstall
+        // anime or manga extensions the app will never load.
+        aniyomi: kNovelOnly ? null : AniyomiExtensionService(),
+        mihon: kNovelOnly ? null : MihonExtensionService(),
         lnreader: lnrService),
     LibraryBackup(),
     SettingsBackup(),
@@ -695,19 +726,25 @@ Future<void> initDependencies() async {
 
   // Load bundled extractor BEFORE the providers so getVideoSources can resolve.
   // Extractors are NOT providers — they stay loaded directly on the manager.
-  final extractorJs = await rootBundle.loadString(
-    'extractors/example_embed.js',
-  );
-  await manager.loadExtractor(
-    extractorId: 'example_embed',
-    jsSource: extractorJs,
-  );
+  //
+  // Novel-only build: skipped. Extractors exist to pull a playable stream URL
+  // out of an embed host, which is video-only, and loading five scripts into the
+  // JS runtime costs boot time for nothing.
+  if (!kNovelOnly) {
+    final extractorJs = await rootBundle.loadString(
+      'extractors/example_embed.js',
+    );
+    await manager.loadExtractor(
+      extractorId: 'example_embed',
+      jsSource: extractorJs,
+    );
 
-  // Real embed-host extractors. Order doesn't matter; each registers its
-  // own hosts in __extractors and is reached via extractVideo().
-  for (final ex in ['okru', 'mp4upload', 'streamlare', 'doodstream']) {
-    final js = await rootBundle.loadString('extractors/$ex.js');
-    await manager.loadExtractor(extractorId: ex, jsSource: js);
+    // Real embed-host extractors. Order doesn't matter; each registers its
+    // own hosts in __extractors and is reached via extractVideo().
+    for (final ex in ['okru', 'mp4upload', 'streamlare', 'doodstream']) {
+      final js = await rootBundle.loadString('extractors/$ex.js');
+      await manager.loadExtractor(extractorId: ex, jsSource: js);
+    }
   }
 
   // The app ships with NO built-in providers — every source comes from a repo
@@ -782,6 +819,12 @@ Future<void> initDependencies() async {
   // This runs on a microtask so it never blocks or slows app startup. Any
   // failure is caught and logged; it must never propagate to the caller.
   Future.microtask(() async {
+    // Novel-only build: the Aniyomi/anime extension stack is never booted, so
+    // no anime extension is ever loaded, constructed, or listed. This is the
+    // single gate that makes the whole anime source path unreachable — the
+    // classes above stay registered (and therefore compile, and stay
+    // isRegistered-safe for every caller) but stay empty.
+    if (kNovelOnly) return;
     try {
       if (!Hive.isBoxOpen(AniyomiExtensionService.installedBoxName)) {
         await openBoxSafely<dynamic>(AniyomiExtensionService.installedBoxName);
@@ -847,6 +890,12 @@ Future<void> initDependencies() async {
   //     picker's listing, and every data call in one place: on iOS nothing is
   //     ever loaded, so no MihonProvider is ever constructed.
   Future.microtask(() async {
+    // Novel-only build: as with Aniyomi above, the manga extension stack never
+    // boots, so no Mihon provider is ever constructed. Skipping the
+    // `mihon_installed` / `mihon_repos` box opens along with it is safe —
+    // every reader in backup/sources_backup.dart is behind Hive.isBoxOpen, so
+    // an unopened box reads as "nothing installed" rather than throwing.
+    if (kNovelOnly) return;
     if (!Platform.isAndroid) return; // Mihon extensions are Android-only (DEX)
     try {
       if (!Hive.isBoxOpen(MihonExtensionService.installedBoxName)) {
@@ -1036,7 +1085,15 @@ Future<void> initDependencies() async {
   // rows for the active source) while the intro animation plays — Home then
   // appears already populated instead of flashing skeletons.
   sl.registerLazySingleton<HomeCubit>(
-    () => HomeCubit(sl<CatalogueRepository>()),
+    () {
+      final cubit = HomeCubit(sl<CatalogueRepository>());
+      // Novel-only home is built from the pinned sources, so a pin/unpin has to
+      // refresh it. Bound here because a cubit with no listener would keep
+      // showing the previous source's catalogue until something else happened to
+      // reload the page.
+      cubit.bindPinnedSources();
+      return cubit;
+    },
   );
 
   sl<MetadataRepository>().onStreamHomeCached = (kind, rows) {
@@ -1052,6 +1109,10 @@ Future<void> initDependencies() async {
   // after ActiveSourceCubit + HomeCubit exist, so the restore below is safe.
   // Any failure is caught and logged; it must never propagate to the caller.
   Future.microtask(() async {
+    // Novel-only build: as with Aniyomi and Mihon above, no CloudStream plugin
+    // is ever loaded. `.cs3` plugins are a streaming source format, so this
+    // skips a native plugin scan that has no novel to find.
+    if (kNovelOnly) return;
     try {
       await csManager.loadInstalled();
       // Honor a saved `cs:` active source that wasn't loaded yet at boot

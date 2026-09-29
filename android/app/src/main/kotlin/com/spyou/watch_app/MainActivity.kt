@@ -575,6 +575,9 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
         // Native phone-player channel; the object owns everything else.
         PhonePlayerBridge.register(flutterEngine, this)
 
+        // Novel TTS: text-to-speech engine plus its event stream.
+        TtsBridge.register(flutterEngine, this)
+
         // Notifications channel: deliver the "new episode" notification a CS
         // worker posted (its launch intent carries notif_payload) to Dart so it
         // can open that show's Detail. getInitialNotification covers cold/back
@@ -1869,6 +1872,7 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
         castManager?.release()
         tvBridge = null
         PhonePlayerBridge.dispose()
+        TtsBridge.dispose()
         if (com.lagradost.cloudstream3.CommonActivity.activity === this) {
             com.lagradost.cloudstream3.CommonActivity.setActivityInstance(null)
         }

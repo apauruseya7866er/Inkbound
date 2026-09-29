@@ -25,6 +25,31 @@ if (hasReleaseKeystore) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+/**
+ * Reads a boolean flag from `android/local.properties`.
+ *
+ * Needed because Gradle does not treat that file as a source of project
+ * properties - only `gradle.properties` and `~/.gradle/gradle.properties` are.
+ * A per-machine, git-ignored opt-in therefore has to be read by hand.
+ *
+ * Returns false when the file or the key is absent, and never throws: this runs
+ * during configuration, where an exception would break every build rather than
+ * just the emulator one.
+ *
+ * Declared above `android { }` because a Kotlin build script is a script, not a
+ * class: its top-level functions are locals, and locals must precede their use.
+ */
+fun localPropertiesFlag(key: String): Boolean {
+    val file = rootProject.file("local.properties")
+    if (!file.exists()) return false
+    return try {
+        val props = Properties()
+        FileInputStream(file).use { props.load(it) }
+        props.getProperty(key)?.trim().equals("true", ignoreCase = true)
+    } catch (e: Exception) {
+        false
+    }
+}
 android {
     namespace = "com.spyou.watch_app"
     compileSdk = flutter.compileSdkVersion
@@ -57,9 +82,45 @@ android {
     // the prebuilt plugin lib (libmpv) that abiFilters / --target-platform do
     // NOT strip. This is the reliable lever for the fat APK + AAB, and it's
     // harmless to the per-ABI (arm) split builds.
+    //
+    // Opt back in for emulator runs with `includeEmulatorAbis=true`.
+    //
+    // Read from `local.properties` as well as the usual project properties,
+    // because Gradle does NOT load `local.properties` as project properties (it
+    // only does that for `gradle.properties` and `~/.gradle/gradle.properties`).
+    // Relying on Gradle's own loading here is the trap: the flag appears to be
+    // set, the build succeeds, and the emulator still cannot start the app.
+    // `local.properties` is git-ignored, so this is the one place the opt-in
+    // can live without reaching CI or another developer.
+    //
+    // Without the flag an x86_64 emulator cannot start the app at all: every
+    // native lib in the APK is stripped, so the launch dies with "Could not
+    // find 'libflutter.so'. Looked for: [x86_64, arm64-v8a], but only found:
+    // []". Needed by integration_test/ and any manual emulator run.
+    //
+    // Deliberately NOT the default: the x86_64 libs are dead weight on every
+    // real device, and defaulting them on would quietly grow release APKs. The
+    // warning below is loud because the opt-in applies to *every* build type
+    // from this checkout, release included, and a forgotten flag would ship that
+    // bloat to users.
+    val includeEmulatorAbis =
+        (project.findProperty("includeEmulatorAbis") as String?)
+            ?.toBoolean()
+            ?: localPropertiesFlag("includeEmulatorAbis")
+
+    if (includeEmulatorAbis) {
+        logger.lifecycle(
+            "[build] includeEmulatorAbis=true — x86/x86_64 native libs are being " +
+                "packaged into EVERY build from this checkout, release included. " +
+                "Remove the flag from android/local.properties before shipping.",
+        )
+    }
+
     packaging {
         jniLibs {
-            excludes += listOf("**/x86/**", "**/x86_64/**")
+            if (!includeEmulatorAbis) {
+                excludes += listOf("**/x86/**", "**/x86_64/**")
+            }
             // Extract native libs to the device's lib dir (extractNativeLibs=true).
             // The modern default (false = libs stay uncompressed inside the APK)
             // makes media_kit's libmpv.so lookup fail on some devices (old Android
@@ -273,6 +334,13 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:1.7.1")
     implementation("androidx.media3:media3-exoplayer-smoothstreaming:1.7.1")
     implementation("androidx.media3:media3-ui:1.7.1")
+    // MediaSessionCompat + NotificationCompat.MediaStyle for the read-aloud
+    // notification. Without it the notification can only carry plain buttons:
+    // no lockscreen transport, no headset/Bluetooth buttons, and no
+    // Now-Playing entry, which is most of what makes read-aloud usable with the
+    // screen off. Small, and unrelated to the media3 modules above (which use
+    // media3's own session types).
+    implementation("androidx.media:media:1.7.0")
     // Prebuilt FFmpeg software AUDIO decoders (Dolby AC3/E-AC3, DTS) — the exact
     // artifact CloudStream uses, straight off Maven Central (native .so bundled,
     // no source build). Version pairs with media3 1.7.1; nextlib 0.9.0 predates
@@ -296,3 +364,16 @@ if (file("google-services.json").exists()) {
     // builds rather than failing on a missing plugin.
     apply(plugin = "com.google.firebase.crashlytics")
 }
+
+/**
+ * Reads a boolean flag from `android/local.properties`.
+ *
+ * Needed because Gradle does not treat that file as a source of project
+ * properties - only `gradle.properties` and `~/.gradle/gradle.properties` are.
+ * A per-machine, git-ignored opt-in therefore has to be read by hand.
+ *
+ * Returns false when the file or the key is absent, and never throws: this runs
+ * during configuration, where an exception would break every build rather than
+ * just the emulator one.
+ */
+
