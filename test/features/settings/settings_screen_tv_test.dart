@@ -159,7 +159,7 @@ void main() {
   });
 
   testWidgets(
-    'TV SettingsScreen shows Sign-in tile when unauthenticated',
+    'TV SettingsScreen shows the local identity header, not a sign-in tile',
     (tester) async {
       _mockPathProvider(tester);
       final authCubit =
@@ -171,7 +171,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Sign in'), findsOneWidget);
+      // Local-only app: the header names the app and says the library lives on
+      // this device. There is no account to sign in to, so the sign-in tile
+      // that used to sit here is gone and nothing opens a login.
+      expect(find.text('Zangetsu'), findsOneWidget);
+      expect(find.text('On this device'), findsOneWidget);
+      expect(find.text('Sign in'), findsNothing);
       expect(find.text('Profile'), findsNothing);
     },
   );
@@ -195,7 +200,6 @@ void main() {
       for (final section in const [
         'Account & sync',
         'Sources',
-        'Playback',
         'Downloads',
         'Interface',
         'Advanced',
@@ -203,6 +207,10 @@ void main() {
       ]) {
         expect(find.text(section), findsOneWidget, reason: 'category: $section');
       }
+      // Novel-only build: the Playback category is gone on TV too — it is the
+      // same entry list the phone renders, and every row in it drives the MPV
+      // player this build has no route to.
+      expect(find.text('Playback'), findsNothing);
       // History is a single-destination section — category title is History.
       expect(find.text('History'), findsOneWidget);
       // Manga/novel reader and search are phone-only.

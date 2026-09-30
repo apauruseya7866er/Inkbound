@@ -75,8 +75,6 @@ import '../../core/ui/poster_card.dart';
 import '../../core/ui/row_skeleton.dart';
 import '../../core/ui/source_switcher.dart';
 import '../../core/ui/states.dart';
-import '../auth/auth_cubit.dart';
-import '../auth/reconnect.dart';
 import '../detail/detail_screen.dart';
 import '../history/history_screen.dart';
 import '../player/player_screen.dart';
@@ -842,9 +840,8 @@ class _HomeViewState extends State<_HomeView>
   /// switch makes a future row type a compile error here instead of a silent
   /// gap, and the local row reuses [ContinueSection] itself so its reactive
   /// Hive/mode behaviour is identical wherever the user drags it.
-  Widget _homeRowSliver(HomeRow row, {required bool loggedIn}) => switch (row) {
+  Widget _homeRowSliver(HomeRow row) => switch (row) {
     LocalContinueHomeRow() => ContinueSection(
-      loggedIn: loggedIn,
       onResume: _resume,
       onLongPress: _showContinueInfo,
       onSeeAll: _openHistory,
@@ -1036,55 +1033,6 @@ class _HomeViewState extends State<_HomeView>
     ).then((_) {
       if (mounted) setState(() {});
     });
-  }
-
-  /// Shown at the top of Home when the session lapsed — cloud sync is silently
-  /// off until the user reconnects. Tapping re-authenticates in place (no logout
-  /// / no wipe) and then refreshes Home to surface the freshly-synced rows.
-  Widget _reconnectBanner() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Material(
-        color: AppColors.accentSoft,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () async {
-            final ok = await showReconnectDialog(context) ?? false;
-            if (ok && mounted) context.read<HomeCubit>().load();
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.sync_problem_rounded,
-                  color: AppColors.accent,
-                  size: 20,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(context.l10n.reconnectToSync, style: AppText.body),
-                      Text(
-                        'Your session expired — tap to sign in and sync your library.',
-                        style: AppText.caption,
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  color: AppColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
   }
 
   /// A row of cards under the banner, showing the modes you're NOT in plus —
@@ -1657,11 +1605,6 @@ class _HomeViewState extends State<_HomeView>
   @override
   Widget build(BuildContext context) {
     if (sl<AppMode>().isTv) return const HomeScreenTv();
-    // Continue Watching is a logged-in feature; hide the row when signed out.
-    final authState = context.watch<AuthCubit>().state;
-    final loggedIn = authState.isLoggedIn;
-    // Session lapsed (logged-in from cache only) → cloud sync is silently off.
-    final needsReconnect = loggedIn && authState.needsReconnect;
 
     return BlocListener<ActiveSourceCubit, String>(
       listenWhen: (prev, curr) => prev != curr,
@@ -1682,13 +1625,6 @@ class _HomeViewState extends State<_HomeView>
             RefreshIndicator(
               color: AppColors.accent,
               onRefresh: () {
-                // Pull-to-refresh is the user saying "try again", so it also
-                // re-tests a session the startup check only assumed was dead
-                // (the "Reconnect to sync" banner). force: it must not sit out
-                // the cool-off when someone deliberately pulled.
-                if (sl.isRegistered<AuthCubit>()) {
-                  unawaited(sl<AuthCubit>().revalidateIfFlagged(force: true));
-                }
                 return context.read<HomeCubit>().load();
               },
               child: BlocBuilder<HomeCubit, HomeState>(
@@ -1773,10 +1709,6 @@ class _HomeViewState extends State<_HomeView>
                       // other entry point since it left the dock.
                       SliverToBoxAdapter(child: _modeCards()),
 
-                      // ── Reconnect banner (session lapsed → sync is off) ───────
-                      if (needsReconnect)
-                        SliverToBoxAdapter(child: _reconnectBanner()),
-
                       // ── The arrangement ─────────────────────────────────────
                       // state.rows is the merged view of this load: the local
                       // Continue row, the tracker rows the user enabled, and the
@@ -1787,12 +1719,9 @@ class _HomeViewState extends State<_HomeView>
                       // ContinueSection keeps its old spot above the skeletons
                       // so the loading screen is exactly today's.
                       if (state.rows case final rows?)
-                        ...rows.map(
-                          (r) => _homeRowSliver(r, loggedIn: loggedIn),
-                        )
+                        ...rows.map((r) => _homeRowSliver(r))
                       else
                         ContinueSection(
-                          loggedIn: loggedIn,
                           onResume: _resume,
                           onLongPress: _showContinueInfo,
                           onSeeAll: _openHistory,

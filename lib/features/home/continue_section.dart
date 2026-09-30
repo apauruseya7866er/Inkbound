@@ -31,7 +31,6 @@ import '../../core/ui/continue_card.dart';
 class ContinueSection extends StatelessWidget {
   const ContinueSection({
     super.key,
-    required this.loggedIn,
     required this.onResume,
     required this.onLongPress,
     required this.onSeeAll,
@@ -39,7 +38,6 @@ class ContinueSection extends StatelessWidget {
     required this.onLongPressReading,
   });
 
-  final bool loggedIn;
   final void Function(HistoryEntry) onResume;
   final void Function(HistoryEntry) onLongPress;
   final VoidCallback onSeeAll;
@@ -58,9 +56,10 @@ class ContinueSection extends StatelessWidget {
   // ── Continue Watching ────────────────────────────────────────────────────
 
   Widget _watchingRow() {
-    // Login-gated, and guarded so a signed-out render (or the test env) never
-    // touches the box — production opens it at boot.
-    if (!(loggedIn && Hive.isBoxOpen(WatchHistory.boxName))) {
+    // Local history, so there is no account to be missing - just guard the box
+    // so a render before boot (or the test env) never touches it. Production
+    // opens it at boot.
+    if (!Hive.isBoxOpen(WatchHistory.boxName)) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
     return ValueListenableBuilder(
@@ -90,7 +89,7 @@ class ContinueSection extends StatelessWidget {
   // ── Continue Reading (manga/novel) ────────────────────────────────────────
 
   Widget _readingRow(ContentMode mode) {
-    if (!(loggedIn && Hive.isBoxOpen(ReadHistory.boxName))) {
+    if (!Hive.isBoxOpen(ReadHistory.boxName)) {
       return const SliverToBoxAdapter(child: SizedBox.shrink());
     }
     // Only this mode's kind — the ReadHistory box mixes manga and novel.

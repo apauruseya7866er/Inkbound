@@ -49,7 +49,6 @@ import 'package:watch_app/features/auth/auth_cubit.dart';
 import 'package:watch_app/features/home/continue_section.dart';
 import 'package:watch_app/features/home/home_screen.dart' show readerFor;
 import 'package:watch_app/features/home/my_list_screen.dart';
-import 'package:watch_app/features/reader/manga_reader_screen.dart';
 import 'package:watch_app/features/reader/novel_reader_screen.dart';
 
 // ── Shared fakes ─────────────────────────────────────────────────────────────
@@ -308,7 +307,7 @@ void main() {
   // exercising exactly the "signed-out / test-env" guard branch the
   // original code's comment described, for both modes.
 
-  group('ContinueSection gating', () {
+  group('ContinueSection box guard', () {
     setUp(() async {
       await sl.reset();
       sl.registerSingleton<AppMode>(const AppMode(isTv: false));
@@ -320,7 +319,6 @@ void main() {
 
     Future<void> pumpGated(
       WidgetTester tester, {
-      required bool loggedIn,
       required ContentMode mode,
     }) async {
       if (sl.isRegistered<ContentModeCubit>()) {
@@ -333,7 +331,6 @@ void main() {
             body: CustomScrollView(
               slivers: [
                 ContinueSection(
-                  loggedIn: loggedIn,
                   onResume: (_) {},
                   onLongPress: (_) {},
                   onSeeAll: () {},
@@ -348,29 +345,23 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('signed out renders nothing in anime mode', (tester) async {
-      await pumpGated(tester, loggedIn: false, mode: ContentMode.anime);
+    // The app is local-only: there is no account, so "signed out" is the only
+    // state. What must still hold is the safety guard - a render before boot
+    // (or the test env) finds no open box and renders nothing instead of
+    // throwing. The rows themselves are covered by the live group below.
+    testWidgets('no account and the box was never opened renders nothing in '
+        'anime mode — never throws', (tester) async {
+      await pumpGated(tester, mode: ContentMode.anime);
       expect(find.text('Continue Watching'), findsNothing);
       expect(find.text('Continue Reading'), findsNothing);
     });
 
-    testWidgets('signed out renders nothing in a reading mode',
-        (tester) async {
-      await pumpGated(tester, loggedIn: false, mode: ContentMode.novel);
+    testWidgets('no account and the box was never opened renders nothing in a '
+        'reading mode — never throws', (tester) async {
+      await pumpGated(tester, mode: ContentMode.novel);
       expect(find.text('Continue Watching'), findsNothing);
       expect(find.text('Continue Reading'), findsNothing);
     });
-
-    testWidgets(
-      'signed in but the box was never opened (production opens it at '
-      'boot) still renders nothing — never throws',
-      (tester) async {
-        await pumpGated(tester, loggedIn: true, mode: ContentMode.anime);
-        expect(find.text('Continue Watching'), findsNothing);
-        await pumpGated(tester, loggedIn: true, mode: ContentMode.manga);
-        expect(find.text('Continue Reading'), findsNothing);
-      },
-    );
   });
 
   // ── Part A: ContinueSection's live branch selection ───────────────────────
@@ -441,7 +432,6 @@ void main() {
               body: CustomScrollView(
                 slivers: [
                   ContinueSection(
-                    loggedIn: true,
                     onResume: (_) {},
                     onLongPress: (_) {},
                     onSeeAll: () {},
@@ -509,7 +499,6 @@ void main() {
               body: CustomScrollView(
                 slivers: [
                   ContinueSection(
-                    loggedIn: true,
                     onResume: (_) {},
                     onLongPress: (_) {},
                     onSeeAll: () {},
@@ -580,41 +569,6 @@ void main() {
     tearDown(() async {
       await sl.reset();
     });
-
-    testWidgets(
-      'anime mode shows anime + movie items and hides manga/novel — the '
-      "hard constraint: anime mode's own library view is unchanged",
-      (tester) async {
-        sl.registerSingleton<ContentModeCubit>(
-          _FakeContentModeCubit(ContentMode.anime),
-        );
-
-        await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Anime Show'), findsOneWidget);
-        expect(find.text('Movie Show'), findsOneWidget);
-        expect(find.text('Manga Title'), findsNothing);
-        expect(find.text('Novel Title'), findsNothing);
-      },
-    );
-
-    testWidgets(
-      'manga mode shows only the manga item, hiding anime/movie/novel',
-      (tester) async {
-        sl.registerSingleton<ContentModeCubit>(
-          _FakeContentModeCubit(ContentMode.manga),
-        );
-
-        await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
-        await tester.pumpAndSettle();
-
-        expect(find.text('Manga Title'), findsOneWidget);
-        expect(find.text('Anime Show'), findsNothing);
-        expect(find.text('Movie Show'), findsNothing);
-        expect(find.text('Novel Title'), findsNothing);
-      },
-    );
 
     testWidgets(
       'novel mode shows only the novel item, hiding anime/movie/manga',
@@ -708,9 +662,34 @@ void main() {
       expect(find.text('Novels you add appear here'), findsOneWidget);
     });
 
+    // The un-gate: My List is local, so an empty list on a device that has
+    // never had an account says the same thing as an empty list on a device
+    // that had one. It used to render a "Sign in to build your list" wall
+    // with a sign-in button instead, which made the whole list unreachable.
+    testWidgets('no account at all - the empty list is still an empty list, '
+        'not a sign-in wall', (tester) async {
+      sl.registerSingleton<MyListStore>(_FakeMyListStore(const []));
+      sl.registerSingleton<ContentModeCubit>(
+        _FakeContentModeCubit(ContentMode.novel),
+      );
+
+      // No AuthCubit provider: nothing in the local path may reach for one.
+      await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Novels you add appear here'), findsOneWidget);
+      expect(find.text('Sign in to build your list'), findsNothing);
+      expect(find.text('Sign in'), findsNothing);
+    });
+
+    // Novel-only build: the only reachable filtered-to-nothing case is a list
+    // holding nothing but non-novel titles, and it has to say so in the mode's
+    // own words. The anime- and manga-mode wordings this used to also assert
+    // are unreachable — MyListScreen's kind tab is pinned to Novel — and the
+    // generic "Nothing here in this filter" wording only ever belonged to anime.
     testWidgets(
-      'anime mode, list has only manga/novel items (filtered to nothing) — '
-      'unchanged "Nothing here in this filter" wording (regression)',
+      'novel mode, list has only a manga item (filtered to nothing) — the '
+      'filtered wording names the mode',
       (tester) async {
         const mangaItem = MediaItem(
           id: 'g1',
@@ -721,36 +700,14 @@ void main() {
         );
         sl.registerSingleton<MyListStore>(_FakeMyListStore([mangaItem]));
         sl.registerSingleton<ContentModeCubit>(
-          _FakeContentModeCubit(ContentMode.anime),
+          _FakeContentModeCubit(ContentMode.novel),
         );
 
         await tester.pumpWidget(authed(const MyListScreen()));
         await tester.pumpAndSettle();
 
-        expect(find.text('Nothing here in this filter'), findsOneWidget);
-      },
-    );
-
-    testWidgets(
-      'manga mode, list has only an anime item (filtered to nothing) — '
-      'reading-specific filtered wording',
-      (tester) async {
-        const animeItem = MediaItem(
-          id: 'a1',
-          title: 'Anime Show',
-          url: '/a1',
-          type: ProviderType.anime,
-          sourceId: 's',
-        );
-        sl.registerSingleton<MyListStore>(_FakeMyListStore([animeItem]));
-        sl.registerSingleton<ContentModeCubit>(
-          _FakeContentModeCubit(ContentMode.manga),
-        );
-
-        await tester.pumpWidget(authed(const MyListScreen()));
-        await tester.pumpAndSettle();
-
-        expect(find.text('No manga here in this filter'), findsOneWidget);
+        expect(find.text('No novels here in this filter'), findsOneWidget);
+        expect(find.text('Nothing here in this filter'), findsNothing);
       },
     );
   });
@@ -778,11 +735,6 @@ void main() {
       updatedMs: 1,
       type: type,
     );
-
-    test('a manga ReadEntry routes to MangaReaderScreen', () {
-      expect(readerFor(entryOf(ProviderType.manga), chapter),
-          isA<MangaReaderScreen>());
-    });
 
     test('a novel ReadEntry routes to NovelReaderScreen', () {
       expect(readerFor(entryOf(ProviderType.novel), chapter),

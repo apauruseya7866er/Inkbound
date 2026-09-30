@@ -690,6 +690,10 @@ void main() {
           // Framework-supplied for anything focusable; matchesSemantics fails
           // on any action it wasn't told to expect.
           hasFocusAction: true,
+          // The account row that used to sit above the destinations is gone
+          // (there is no account), so the first destination in the rail is
+          // now what the drawer opens focused on.
+          isFocused: true,
         ),
       );
       // ...and only ONE node in the tree carries 'Home' — the label Text

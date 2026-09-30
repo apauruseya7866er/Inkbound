@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/zmode/zmode_prefs.dart';
@@ -12,16 +13,34 @@ typedef ModeChoice = ({String Function(BuildContext) label, IconData icon, Conte
 
 /// The four things the centre button can switch to. Movie/TV shares the
 /// `anime` content mode and differs by [StreamKind].
-final List<ModeChoice> modeChoices = [
+///
+/// Novel-only build: reduced to the single exposed choice, which makes the bar
+/// itself pointless — `root_shell.dart` hides it and the centre FAB along with
+/// it. The full list is still compiled so flipping `kNovelOnly` back to false
+/// restores the original switcher.
+final List<ModeChoice> _allModeChoices = [
   (label: (c) => c.l10n.modeAnime, icon: Icons.play_circle_outline_rounded, mode: ContentMode.anime, kind: StreamKind.anime),
   (label: (c) => c.l10n.modeMovieTv, icon: Icons.movie_outlined, mode: ContentMode.anime, kind: StreamKind.movie),
   (label: (c) => c.l10n.modeManga, icon: Icons.auto_stories_outlined, mode: ContentMode.manga, kind: StreamKind.anime),
   (label: (c) => c.l10n.modeNovel, icon: Icons.menu_book_outlined, mode: ContentMode.novel, kind: StreamKind.anime),
 ];
 
-IconData iconForMode(ContentMode mode, StreamKind kind) => modeChoices
-    .firstWhere((c) => c.mode == mode && (mode != ContentMode.anime || c.kind == kind))
-    .icon;
+final List<ModeChoice> modeChoices = kNovelOnly
+    ? _allModeChoices.where((c) => c.mode == kOnlyMode).toList(growable: false)
+    : _allModeChoices;
+
+/// The icon for [mode], falling back to the first offered choice when that
+/// mode isn't on the bar. A novel-only build filters [modeChoices] down to
+/// Novel alone, so a mode that isn't offered (a stale cubit value, or a caller
+/// that has no cubit to ask) must not throw — [modeChoices] is never empty.
+IconData iconForMode(ContentMode mode, StreamKind kind) {
+  for (final c in modeChoices) {
+    if (c.mode == mode && (mode != ContentMode.anime || c.kind == kind)) {
+      return c.icon;
+    }
+  }
+  return modeChoices.first.icon;
+}
 
 /// The floating bar above the dock. Hidden (and untappable) when [open] is
 /// false; slides up when true.

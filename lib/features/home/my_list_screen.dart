@@ -28,13 +28,11 @@ import '../../core/theme/app_text.dart';
 import '../../l10n/l10n.dart';
 import '../../core/tracker/tracker.dart';
 import '../../core/tracker/tracker_hub.dart';
-import '../../core/ui/buttons.dart';
 import '../../core/ui/list_status_sheet.dart';
 import '../../core/ui/poster_card.dart';
 import '../../core/ui/states.dart';
 import '../../core/ui/tracker_entry_sheet.dart';
 import '../auth/auth_cubit.dart';
-import '../auth/auth_screens.dart';
 import '../detail/detail_screen.dart';
 import 'cubit/my_list_cubit.dart';
 import 'library_tabs.dart';
@@ -1196,48 +1194,14 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
     };
   }
 
-  // ── Empty / sign-in ────────────────────────────────────────────────────────
+  // ── Empty ──────────────────────────────────────────────────────────────────
 
-  Widget _empty(BuildContext context) {
-    final auth = context.watch<AuthCubit>().state;
-    if (!auth.isLoggedIn) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.bookmark_outline,
-                size: 56,
-                color: AppColors.textTertiary,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                context.l10n.signInToBuildYourList,
-                style: AppText.body,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: 180,
-                child: PrimaryButton(
-                  label: context.l10n.signIn,
-                  onPressed: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return EmptyState(
-      icon: Icons.bookmark_outline,
-      message: myListEmptyMessage(context.l10n, sl<ContentModeCubit>().state),
-    );
-  }
+  /// My List is local-only, so an empty list is just an empty list - there is
+  /// no account to sign in to before you can start one.
+  Widget _empty(BuildContext context) => EmptyState(
+    icon: Icons.bookmark_outline,
+    message: myListEmptyMessage(context.l10n, sl<ContentModeCubit>().state),
+  );
 }
 
 /// EmptyState message for My List's per-status/type filter turning up

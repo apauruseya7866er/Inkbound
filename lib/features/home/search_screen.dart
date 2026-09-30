@@ -45,7 +45,6 @@ import '../../core/aniyomi/aniyomi_filters.dart';
 import '../../core/mihon/mihon_filters.dart';
 import '../aniyomi/aniyomi_filter_sheet.dart';
 import '../mihon/mihon_filter_sheet.dart';
-import '../auth/auth_screens.dart';
 import '../detail/detail_screen.dart';
 import '../player/player_screen.dart';
 import '../sources/zangetsu_sources_screen.dart';
@@ -603,9 +602,6 @@ class _SearchViewState extends State<_SearchView>
       onPlay: () => _play(item),
       onOpenDetail: () => _openDetail(item),
       onToggleMyList: () async {
-        if (!requireLogin(context, action: 'add to My List')) {
-          return _myList.contains(item);
-        }
         await _myList.toggle(item);
         if (mounted) setState(() {});
         return _myList.contains(item);

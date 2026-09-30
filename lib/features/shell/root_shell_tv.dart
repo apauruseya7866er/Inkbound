@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/app_mode.dart';
+import '../../core/app_config.dart';
 import '../../core/di/injector.dart';
 import '../../core/playback/my_list.dart';
 import '../../core/platform/apple_tv.dart';
@@ -17,9 +18,6 @@ import '../../core/tv/tv_focusable.dart';
 import '../../core/tv/tv_shell_tab_scope.dart';
 import '../../core/ui/dock_visibility.dart';
 import '../../core/zmode/zmode_prefs.dart';
-import '../auth/auth_cubit.dart';
-import '../auth/auth_screens_tv.dart';
-import '../auth/reconnect.dart';
 import '../downloads/downloads_screen.dart';
 import '../../l10n/l10n.dart';
 import '../home/cubit/home_cubit.dart';
@@ -559,124 +557,61 @@ class _RootShellTvState extends State<RootShellTv> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _confirmLogout() async {
-    final auth = context.read<AuthCubit>();
-    await showDialog<void>(
-      context: context,
-      barrierColor: Colors.black54,
-      builder: (dialogCtx) => Align(
-        alignment: const Alignment(-0.72, -0.42), // near the profile (top-left)
-        child: TvLogoutSheet(
-          onConfirm: () async {
-            Navigator.of(dialogCtx).pop();
-            // Back the library up first (if we have a live session) so the
-            // logout-time clearLocal can't lose an un-synced library.
-            await backupLibraryIfPossible();
-            await auth.logout();
-          },
-          onCancel: () => Navigator.of(dialogCtx).pop(),
-        ),
-      ),
-    );
-  }
-
-  /// Account row pinned to the BOTTOM of the drawer (like the mockup). Always
-  /// visible: signed in → avatar + name (OK opens the log-out popup); signed
-  /// out → a placeholder + "Sign in" (OK opens the TV login screen).
+  /// Local block pinned to the BOTTOM of the drawer (like the mockup). The app
+  /// is local-only, so there is no account to sign in to and no log-out to
+  /// offer: it just names the app and says the library lives on this device, so
+  /// it is deliberately not focusable.
   Widget _avatarBlock() {
-    return BlocBuilder<AuthCubit, AuthState>(
-      builder: (context, auth) {
-        final loggedIn = auth.isLoggedIn;
-        final name = loggedIn ? auth.displayName : context.l10n.signIn;
-        final sub = loggedIn
-            ? context.l10n.signedIn
-            : context.l10n.syncYourListNav;
-        final avatar = auth.avatarUrl;
-        final initial = (loggedIn && name.isNotEmpty)
-            ? name[0].toUpperCase()
-            : null;
-        return TvFocusable(
-          key: const ValueKey('tv-nav-avatar'),
-          variant: TvFocusVariant.pill,
-          onTap: () {
-            if (loggedIn) {
-              _confirmLogout();
-            } else {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const LoginScreenTv()),
-              );
-            }
-          },
-          builder: (focused) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: _kIconSlot,
-                  child: Center(
-                    child: CircleAvatar(
-                      radius: 19,
-                      backgroundColor: AppColors.surface2,
-                      backgroundImage: (avatar != null && avatar.isNotEmpty)
-                          ? NetworkImage(avatar)
-                          : null,
-                      child: (avatar == null || avatar.isEmpty)
-                          ? (initial != null
-                                ? Text(
-                                    initial,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  )
-                                : const Icon(
-                                    Icons.person_rounded,
-                                    color: AppColors.textSecondary,
-                                    size: 24,
-                                  ))
-                          : null,
-                    ),
-                  ),
+    return Padding(
+      key: const ValueKey('tv-nav-avatar'),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: _kIconSlot,
+            child: Center(
+              child: CircleAvatar(
+                radius: 19,
+                backgroundColor: AppColors.surface2,
+                child: const Icon(
+                  Icons.auto_stories_rounded,
+                  color: AppColors.textSecondary,
+                  size: 22,
                 ),
-                Expanded(
-                  child: _navOpen
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: focused
-                                    ? Colors.black
-                                    : AppColors.textPrimary,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            Text(
-                              sub,
-                              maxLines: 1,
-                              style: TextStyle(
-                                color: focused
-                                    ? const Color(0xFF555555)
-                                    : AppColors.textTertiary,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        )
-                      : const SizedBox.shrink(),
-                ),
-                if (_navOpen) const SizedBox(width: 12),
-              ],
+              ),
             ),
           ),
-        );
-      },
+          Expanded(
+            child: _navOpen
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        kAppName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        context.l10n.onThisDevice,
+                        maxLines: 1,
+                        style: const TextStyle(
+                          color: AppColors.textTertiary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+          if (_navOpen) const SizedBox(width: 12),
+        ],
+      ),
     );
   }
 

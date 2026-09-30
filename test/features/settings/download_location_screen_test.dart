@@ -4,8 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
+import 'package:watch_app/core/download/download_manager.dart';
 import 'package:watch_app/core/download/download_prefs.dart';
 import 'package:watch_app/features/settings/download_location_screen.dart';
+
+/// The screen asks the manager which volumes exist so it can list them beside
+/// the SAF picker. This test is about the tiles, not the platform channel
+/// behind that list, so it answers with one fixed internal volume.
+class _FakeDownloadManager extends ChangeNotifier implements DownloadManager {
+  @override
+  Future<List<({String path, String label, bool removable})>>
+      listDownloadVolumes() async => const [
+    (path: '/storage/emulated/0/Download', label: 'Internal storage', removable: false),
+  ];
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
 
 void main() {
   late Directory _dir;
@@ -15,6 +30,7 @@ void main() {
     Hive.init(_dir.path);
     await Hive.openBox(DownloadPrefs.boxName);
     GetIt.instance.registerSingleton<DownloadPrefs>(DownloadPrefs());
+    GetIt.instance.registerSingleton<DownloadManager>(_FakeDownloadManager());
   });
 
   tearDown(() async {

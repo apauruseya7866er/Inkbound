@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,6 +12,7 @@ import '../../core/anilist/anilist_service.dart';
 import '../../core/app_config.dart';
 import '../../core/app_mode.dart';
 import '../../core/metadata/streaming_providers.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/tracker/tracker_hub.dart';
 import '../../core/ui/streaming_prefs.dart';
 import '../../core/zmode/metadata_provider_prefs.dart';
@@ -71,7 +71,6 @@ import 'donate_screen.dart';
 import '../auth/auth_cubit.dart';
 import '../backup/backup_screen.dart';
 import '../watch_together/ui/watch_party_lobby_screen.dart';
-import '../auth/auth_screens.dart';
 import '../onboarding/how_it_works.dart';
 import '../notify/subscriptions_screen.dart';
 import 'tracker_settings_screen.dart';
@@ -665,100 +664,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Account header — a single profile card at the top of Settings. Signed in:
-  /// avatar + name + email → Profile. Signed out: an avatar placeholder + a
-  /// clear "Sign in" call-to-action → Login (its own card, so it no longer
-  /// reads as a flat duplicate of the "Account & sync" row below it).
+  /// Profile header — a single identity card at the top of Settings. The app is
+  /// local-only, so there is no account to sign in to and nothing to sign out
+  /// of: this just says who the app is and that the library lives here. Real
+  /// backup lives in the Backup card further down, not behind a profile.
   Widget _accountCard(BuildContext context) {
-    return BlocBuilder<AuthCubit, AuthState>(
-      builder: (context, auth) {
-        final Widget row;
-        if (auth.isLoggedIn) {
-          final initial = auth.displayName.isNotEmpty
-              ? auth.displayName[0].toUpperCase()
-              : '?';
-          row = _accountRow(
-            onTap: () => _push(const ProfileScreen()),
-            autofocus: _isTv,
-            semanticLabel: auth.displayName,
-            avatar: CircleAvatar(
-              radius: 24,
-              backgroundColor: AppColors.surface2,
-              backgroundImage: auth.avatarUrl != null
-                  ? CachedNetworkImageProvider(auth.avatarUrl!)
-                  : null,
-              child: auth.avatarUrl == null
-                  ? Text(
-                      initial,
-                      style: AppText.headline.copyWith(fontSize: 18),
-                    )
-                  : null,
-            ),
-            title: auth.displayName,
-            subtitle: auth.user?.email ?? '',
-            trailing: const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.textTertiary,
-              size: 20,
-            ),
-          );
-        } else {
-          row = _accountRow(
-            onTap: () => _push(const LoginScreen()),
-            autofocus: _isTv,
-            semanticLabel: context.l10n.signIn,
-            avatar: CircleAvatar(
-              radius: 24,
-              backgroundColor: AppColors.accentSoft,
-              child: Icon(
-                Icons.person_outline_rounded,
-                color: AppColors.accent,
-                size: 24,
-              ),
-            ),
-            title: context.l10n.signIn,
-            subtitle: _isTv
-                ? context.l10n.signInSubtitleTv
-                : context.l10n.signInSubtitle,
-            trailing: _isTv
-                ? const Icon(
-                    Icons.chevron_right_rounded,
-                    color: AppColors.textTertiary,
-                    size: 22,
-                  )
-                : Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.accent,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      context.l10n.signIn,
-                      style: AppText.caption.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-          );
-        }
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: SettingsCard(children: [row]),
-        );
-      },
+    final row = _accountRow(
+      avatar: CircleAvatar(
+        radius: 24,
+        backgroundColor: AppColors.accentSoft,
+        child: Icon(
+          Icons.auto_stories_outlined,
+          color: AppColors.accent,
+          size: 24,
+        ),
+      ),
+      title: kAppName,
+      subtitle: context.l10n.onThisDevice,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: SettingsCard(children: [row]),
     );
   }
 
   Widget _accountRow({
-    required VoidCallback onTap,
     required Widget avatar,
     required String title,
     required String subtitle,
-    required Widget trailing,
+    VoidCallback? onTap,
+    Widget? trailing,
     bool autofocus = false,
     String? semanticLabel,
   }) {
@@ -788,11 +723,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
-          const SizedBox(width: 10),
-          trailing,
+          if (trailing != null) ...[
+            const SizedBox(width: 10),
+            trailing,
+          ],
         ],
       ),
     );
+    // Nothing to tap means nothing to focus, on TV as much as on the phone.
+    if (onTap == null) return content;
     if (_isTv) {
       return TvListFocusable(
         autofocus: autofocus,
@@ -1054,16 +993,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     ],
     // Playback & downloads
-    _SettingsEntry(
-      section: SettingsSection.playback,
-      id: LeafParent.playback,
-      icon: Icons.play_circle_outline,
-      title: l10n.playback,
-      subtitle: l10n.playbackSubtitle,
-      keywords:
-          'playback quality autoplay speed player decoder audio subtitle resume gesture',
-      onTap: () => _push(const PlaybackSettingsScreen()),
-    ),
+    //
+    // Novel-only build: the whole Playback section is video-only — quality,
+    // autoplay, speed, decoder, audio/subtitle defaults and resume all drive
+    // the MPV/libmpv player, which this build has no way to reach. Hidden
+    // rather than relabelled, because there is nothing left in it that applies
+    // to reading text. The Downloads entry below stays (chapter downloads are
+    // live); only its wording changes.
+    if (!kNovelOnly)
+      _SettingsEntry(
+        section: SettingsSection.playback,
+        id: LeafParent.playback,
+        icon: Icons.play_circle_outline,
+        title: l10n.playback,
+        subtitle: l10n.playbackSubtitle,
+        keywords:
+            'playback quality autoplay speed player decoder audio subtitle resume gesture',
+        onTap: () => _push(const PlaybackSettingsScreen()),
+      ),
     // Manga/novel reader — phone only. TV has no reading surface.
     if (!_isTv)
       _SettingsEntry(
@@ -1071,7 +1018,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         id: LeafParent.reader,
         icon: Icons.menu_book_outlined,
         title: l10n.reader,
-        subtitle: l10n.readerSubtitle,
+        subtitle: kNovelOnly ? l10n.readerSubtitleNovels : l10n.readerSubtitle,
         keywords:
             'reader manga novel reading defaults fit direction fontsize theme orientation preload',
         onTap: () => _push(const ReaderSettingsScreen()),
@@ -1080,7 +1027,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       section: SettingsSection.history,
       icon: Icons.history_rounded,
       title: l10n.history,
-      subtitle: l10n.historySubtitle,
+        subtitle: kNovelOnly
+            ? l10n.historySubtitleNovels
+            : l10n.historySubtitle,
       keywords: 'history watch watched continue recent resume',
       onTap: () async {
         await _push(const HistoryScreen());
@@ -1092,7 +1041,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       id: LeafParent.downloads,
       icon: Icons.download_outlined,
       title: l10n.downloads,
-      subtitle: _isTv ? l10n.downloadsSubtitleTv : l10n.downloadsSubtitle,
+        subtitle: _isTv
+            ? l10n.downloadsSubtitleTv
+            : kNovelOnly
+            ? l10n.downloadsSubtitleNovel
+            : l10n.downloadsSubtitle,
       keywords: 'downloads offline episodes save manage',
       onTap: () => _push(const DownloadsScreen()),
     ),
@@ -1253,7 +1206,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         section: SettingsSection.notifications,
         icon: Icons.notifications_none_rounded,
         title: l10n.notifications,
-        subtitle: l10n.notificationsSubtitle,
+        subtitle: kNovelOnly
+            ? l10n.notificationsSubtitleNovel
+            : l10n.notificationsSubtitle,
         keywords: 'notifications alerts new episode subscribe airing',
         onTap: () => _push(const SubscriptionsScreen()),
       ),
@@ -1581,6 +1536,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           title: settingsSectionTitle(context.l10n, section),
           subtitle: settingsSectionSummary(context.l10n, section),
           iconAccent: tiles.isEmpty, // accent the lead row
+          // The identity card above is not focusable (there is nothing to sign
+          // in to), so on TV the lead category row takes the initial focus -
+          // otherwise the D-pad would arrive with nothing selected.
+          autofocus: _isTv && tiles.isEmpty,
           // A section with a single destination (Playback, History,
           // Notifications) opens it directly — no redundant one-row sub-page.
           // Multi-item sections: phone uses in-hub drill-down; TV pushes a
