@@ -289,6 +289,11 @@ void main() {
         'chapter n of m': 'Chapter 4 of 480',
         'click here': 'Click here to read the next chapter',
         'translation credit': 'Translation by someone',
+        'translator credit': 'Translator: BornToBe',
+        'translator colon': 'Translation: someone',
+        'TL credit': 'TL: someone',
+        'T/N credit': 'T/N: someone',
+        'editor dash': 'Editor - someone',
         'proofreader': 'Proofread by: someone',
         'novel promo': 'Check out my other novels!',
         'if you enjoy': 'If you enjoyed this novel, consider supporting it',
@@ -326,6 +331,7 @@ void main() {
           'I support me, I do.',
           'He followed me out the door.',
           'Mr. Smith translated it badly.',
+          "The translator's note explained the change.",
         ];
         final engine = builtins();
         for (final line in prose) {

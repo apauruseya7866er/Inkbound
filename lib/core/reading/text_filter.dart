@@ -499,10 +499,21 @@ const List<TextFilterRule> builtinTextFilterRules = [
         r'|^\s*(?:click|tap)\s+(?:here|below)\s+to\s+(?:read|continue|view|go)\b.*',
     label: 'Chapter navigation footers',
   ),
+  // "Translation by X", "Translator: X", "T/N: X", "TL - X", "Editor: X". The
+  // first one on this list was missed until a real chapter turned up with
+  // "Translator: BornToBe" sitting at the top of it, still on the page: the rule
+  // shipped with "translation" and "translated" and not the noun the sources
+  // actually use.
   TextFilterRule(
     id: 'builtin_translation_credits',
     pattern:
-        r'^\s*(?:translation|translated|editor|editing|edited|proofread(?:er|ers|ing)?|typeset(?:ter|ting)?|illustrat(?:or|ors|ion|ions)|raws?)\s*(?:by|:)\b.*',
+        r'^\s*(?:translation|translator(?:s)?|translated|editor|editing|edited|edit(?:or|ors)|'
+        r'proofread(?:er|ers|ing)?|proof(?:reader)?|typeset(?:ter|ting)?|'
+        // "by" needs its own word boundary; `:` and `-` cannot have one, since a
+        // boundary sits between a word and a non-word character and both sides
+        // of them here are non-word. Written as one alternation with the
+        // boundary on the branch that needs it.
+        r'illustrat(?:or|ors|ion|ions)|raws?|t\s*/?\s*n|t\s*/?\s*l|ed)\s*(?:by\b\s*|:|-).*$',
     label: 'Translation credits',
   ),
   TextFilterRule(

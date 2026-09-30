@@ -103,13 +103,19 @@ class _TextFilterSettingsScreenState extends State<TextFilterSettingsScreen> {
           SettingsSectionLabel('Built-in rules'),
           SettingsCard(
             children: [
+              // No pattern under the label, on purpose. A shipped rule is
+              // described by what it removes ("Discord invites / links"), and
+              // its regex is an implementation detail: shown raw it reads as
+              // `discord.?:gg|com|app|me|io)\S*|`, which looks like a broken
+              // string rather than a rule. The user's own rules below do show
+              // theirs, because there the exact text is what tells two
+              // near-identical rules apart before one of them is deleted.
               for (final rule in builtinTextFilterRules)
                 SettingsTile(
                   icon: Icons.rule_outlined,
                   title: rule.label,
-                  subtitle: _patternPreview(rule.pattern),
-                  subtitleMaxLines: 2,
-                  onTap: () => _toggleBuiltin(rule, !disabled.contains(rule.id)),
+                  onTap: () =>
+                      _toggleBuiltin(rule, !disabled.contains(rule.id)),
                   trailing: Switch.adaptive(
                     value: !disabled.contains(rule.id),
                     onChanged: (v) => _toggleBuiltin(rule, v),
