@@ -57,22 +57,17 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  testWidgets('Streaming tab combines the anime and movie buckets', (t) async {
-    await t.pumpWidget(const MaterialApp(home: BrowseSourcesScreen()));
-    await t.pumpAndSettle();
-
-    // Streaming is the first (default) tab.
-    expect(find.textContaining('HiAnime'), findsOneWidget);
-    expect(find.textContaining('js:movie'), findsOneWidget);
-    expect(find.textContaining('MangaDex'), findsNothing);
-  });
-
-  // The shell draws its floating dock OVER this tab, so the dock's height
-  // arrives as a bottom inset on the screen's MediaQuery. It has to survive
-  // the screen's own Scaffold + TabBarView and reach the list's padding —
-  // testing the list widget alone would pass even if the inset never got
-  // there, which is exactly how the last source ended up under the dock.
   testWidgets('the dock inset reaches the list through the screen', (t) async {
+    // The shell draws its floating dock OVER this tab, so the dock's height
+    // arrives as a bottom inset on the screen's MediaQuery. It has to survive
+    // the screen's own Scaffold + TabBarView and reach the list's padding —
+    // testing the list widget alone would pass even if the inset never got
+    // there, which is exactly how the last source ended up under the dock.
+    //
+    // Seeded with a novel source so the one tab this screen has actually holds
+    // rows and therefore a ListView to measure.
+    await t.runAsync(() => _seedJsSource(id: 'js:novel', type: 'novel'));
+
     await t.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -95,26 +90,28 @@ void main() {
     );
   });
 
-  testWidgets('Manga tab shows only the manga bucket', (t) async {
+  testWidgets('the novel list says so when nothing is installed', (t) async {
     await t.pumpWidget(const MaterialApp(home: BrowseSourcesScreen()));
     await t.pumpAndSettle();
 
-    await t.tap(find.text('Manga'));
-    await t.pumpAndSettle();
+    // Novel-only build: the screen opens on the novel list directly, and the
+    // tab bar that used to say "Novel" is not drawn — one tab that cannot be
+    // changed is a label, not a control.
+    expect(find.text('Novel'), findsNothing);
+    expect(find.byType(TabBar), findsNothing);
 
-    expect(find.textContaining('MangaDex'), findsOneWidget);
+    expect(find.text('No sources installed'), findsNothing);
+    // Replaced by a prompt that offers the way in: this list is where a
+    // fresh install lands, and a dead-end message is no use when nothing is
+    // installed and there is no other route to installing anything.
+    expect(find.text('No novel sources installed'), findsOneWidget);
+    expect(find.text('Add novel sources'), findsOneWidget);
+    // The fixture installs an anime and a manga source (plus a JS movie one);
+    // none of them is novel, so none of them may be listed here. Without these
+    // the "nothing installed" expectation would hold for the wrong reason.
     expect(find.textContaining('HiAnime'), findsNothing);
+    expect(find.textContaining('MangaDex'), findsNothing);
     expect(find.textContaining('js:movie'), findsNothing);
-  });
-
-  testWidgets('Novel tab says so when nothing is installed', (t) async {
-    await t.pumpWidget(const MaterialApp(home: BrowseSourcesScreen()));
-    await t.pumpAndSettle();
-
-    await t.tap(find.text('Novel'));
-    await t.pumpAndSettle();
-
-    expect(find.text('No sources installed'), findsOneWidget);
   });
 
   // The all-sources content search action (SearchScreen(forceSources: true))

@@ -11,6 +11,7 @@ import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/models/media_item.dart';
 import '../../core/anilist/anilist_service.dart';
 import '../../core/playback/category_store.dart';
@@ -144,7 +145,7 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
   /// the app's ContentMode, so you can see your manga list without switching
   /// the whole app into manga mode. Tracker screens ignore it — a tracker
   /// answers for one kind already.
-  ContentMode _kind = sl<ContentModeCubit>().state;
+  ContentMode _kind = kNovelOnly ? kOnlyMode : sl<ContentModeCubit>().state;
   bool _sortDesc = ListSortPrefs.descending;
 
   ListSort _sortFor({required bool isMyList}) {
@@ -230,7 +231,11 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
               children: [
                 _header(context),
                 if (_searching) _searchField(context),
-                if (widget.pinnedTracker == null) _kindTabs(context),
+                // Novel-only build: one segment that says "Novel" and cannot
+                // be changed is a label, not a control, so it is not drawn. See
+                // [_kindTabs], which handles the multi-mode case unchanged.
+                if (widget.pinnedTracker == null && availableModes.length > 1)
+                  _kindTabs(context),
                 Expanded(
                   child: tlState.isMyList
                       ? _myListBody(context)
@@ -737,7 +742,10 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
   );
 
   Widget _kindTabs(BuildContext context) {
-    const kinds = ContentMode.values;
+    // Novel-only build: one segment (Novel) instead of three. The Stack below
+    // already handles a single segment (alignment 0, full-width pill), so this
+    // needs no other change.
+    final kinds = availableModes;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
       child: LayoutBuilder(

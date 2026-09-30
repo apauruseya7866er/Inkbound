@@ -4,6 +4,7 @@ import '../../core/app_mode.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../l10n/l10n.dart';
@@ -39,7 +40,7 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
   /// tore down a ticker whose ancestors were already gone.
   TabController? _tabOrNull;
   TabController get _tab =>
-      _tabOrNull ??= TabController(length: 3, vsync: this);
+      _tabOrNull ??= TabController(length: _kinds.length, vsync: this);
 
   /// [SourceListKind] and [ContentMode] both split streaming/manga/novel the
   /// same way; this just names the mapping for [SearchScreen.forceMode].
@@ -48,6 +49,19 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
     SourceListKind.manga => ContentMode.manga,
     SourceListKind.novel => ContentMode.novel,
   };
+
+  /// The tab order, and the index every `_modeOf(SourceListKind.values[i])`
+  /// below relies on. Novel-only build: one tab (Novel) rather than three, so
+  /// the search button's forceMode can't hand Search a Streaming/Manga mode the
+  /// rest of the app no longer exposes.
+  static final List<SourceListKind> _kinds = [
+    for (final m in availableModes)
+      switch (m) {
+        ContentMode.anime => SourceListKind.streaming,
+        ContentMode.manga => SourceListKind.manga,
+        ContentMode.novel => SourceListKind.novel,
+      },
+  ];
 
   @override
   void dispose() {
@@ -80,33 +94,44 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
               MaterialPageRoute<void>(
                 builder: (_) => SearchScreen(
                   forceSources: true,
-                  forceMode: _modeOf(SourceListKind.values[_tab.index]),
+                  forceMode: _modeOf(_kinds[_tab.index]),
                 ),
               ),
             ),
           ),
         ],
-        bottom: TabBar(
-          controller: _tab,
-          // Drop the default full-width hairline under the bar — same
-          // treatment as History's tabs.
-          dividerColor: Colors.transparent,
-          dividerHeight: 0,
-          indicatorSize: TabBarIndicatorSize.label,
-          indicator: UnderlineTabIndicator(
-            borderRadius: const BorderRadius.all(Radius.circular(2)),
-            borderSide: BorderSide(width: 3, color: AppColors.accent),
-            insets: const EdgeInsets.symmetric(horizontal: -6),
-          ),
-          labelColor: AppColors.accent,
-          unselectedLabelColor: AppColors.textSecondary,
-          overlayColor: WidgetStateProperty.all(Colors.transparent),
-          tabs: [
-            Tab(text: context.l10n.modeStreaming),
-            Tab(text: context.l10n.modeManga),
-            Tab(text: context.l10n.modeNovel),
-          ],
-        ),
+        // Novel-only build: one tab that says "Novel" and cannot be changed is
+        // a label, not a control, so the bar is not drawn. The controller still
+        // has that one tab, so every `_kinds[_tab.index]` below resolves the
+        // same either way.
+        bottom: _kinds.length > 1
+            ? TabBar(
+                controller: _tab,
+                // Drop the default full-width hairline under the bar — same
+                // treatment as History's tabs.
+                dividerColor: Colors.transparent,
+                dividerHeight: 0,
+                indicatorSize: TabBarIndicatorSize.label,
+                indicator: UnderlineTabIndicator(
+                  borderRadius: const BorderRadius.all(Radius.circular(2)),
+                  borderSide: BorderSide(width: 3, color: AppColors.accent),
+                  insets: const EdgeInsets.symmetric(horizontal: -6),
+                ),
+                labelColor: AppColors.accent,
+                unselectedLabelColor: AppColors.textSecondary,
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                tabs: [
+                  // Novel-only build: only the modes this build exposes. See
+                  // [_kinds].
+                  if (availableModes.contains(ContentMode.anime))
+                    Tab(text: context.l10n.modeStreaming),
+                  if (availableModes.contains(ContentMode.manga))
+                    Tab(text: context.l10n.modeManga),
+                  if (availableModes.contains(ContentMode.novel))
+                    Tab(text: context.l10n.modeNovel),
+                ],
+              )
+            : null,
       ),
       body: Column(
         children: [
@@ -168,7 +193,7 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
             child: TabBarView(
               controller: _tab,
               children: [
-                for (final k in SourceListKind.values)
+                for (final k in _kinds)
                   BrowseSourcesList(
                     kind: k,
                     query: _query,
