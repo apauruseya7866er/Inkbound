@@ -2,6 +2,7 @@ import 'package:hive/hive.dart';
 import 'package:watch_app/core/hive/safe_box.dart';
 
 import 'tap_zones.dart';
+import 'text_filter.dart';
 
 /// Persistent reader settings — the manga/novel analogue of PlaybackPrefs.
 /// Backed by a tiny untyped Hive box read anywhere via `sl<ReaderPrefs>()`.
@@ -313,4 +314,141 @@ class ReaderPrefs {
       _box.get('textDirection', defaultValue: 'auto') as String;
   Future<void> setTextDirection(String value) =>
       _box.put('textDirection', value);
+
+  // ── Regex text cleanup ──────────────────────────────────────────────────
+  /// Whether ads and injected text are stripped from chapters at all.
+  ///
+  /// One switch for the whole built-in rule set, separate from the individual
+  /// rules: a user who wants to read a chapter exactly as the source shipped it
+  /// (to check a translation, or to see why a sentence vanished) should not
+  /// have to switch off a dozen rules to do it.
+  ///
+  /// Sentences hidden from the reader are *not* covered by it — see
+  /// [activeTextFilterRules]. On by default; every shipped rule is anchored to
+  /// the start of a line and matched per line, so a rule can only fire on text
+  /// shaped like an ad — but "on by default" is a judgement call about a filter
+  /// that deletes prose, and this is where it is made.
+  bool get textFiltersEnabled =>
+      _box.get('textFiltersEnabled', defaultValue: true) as bool;
+  Future<void> setTextFiltersEnabled(bool value) async {
+    await _box.put('textFiltersEnabled', value);
+    invalidateTextFilterCache();
+  }
+
+  /// The user's own rules: sentences hidden from the reader plus any pattern
+  /// typed into the settings screen.
+  ///
+  /// Stored as one JSON string, not a Hive list of maps, so a rule that gains a
+  /// field cannot leave a half-readable entry behind, and so a single bad entry
+  /// costs one rule rather than the whole set.
+  List<TextFilterRule> get textFilterRules =>
+      decodeTextFilterRules(_box.get('textFilterRules') as String?);
+
+  Future<void> setTextFilterRules(List<TextFilterRule> rules) async {
+    await _box.put('textFilterRules', encodeTextFilterRules(rules));
+    invalidateTextFilterCache();
+  }
+
+  /// Built-in rules the user has switched off.
+  ///
+  /// Tracked by id rather than by deleting the rule, so a later version can
+  /// improve a built-in pattern and have the user inherit the fix instead of
+  /// being stuck with the old one forever.
+  Set<String> get disabledTextFilterIds {
+    final raw = _box.get('disabledTextFilterIds') as List?;
+    if (raw == null) return const {};
+    return raw.map((e) => e.toString()).toSet();
+  }
+
+  Future<void> setDisabledTextFilterIds(Set<String> ids) async {
+    await _box.put('disabledTextFilterIds', ids.toList());
+    invalidateTextFilterCache();
+  }
+
+  /// Hides [sentence] everywhere, in every novel.
+  ///
+  /// Global on purpose. The sentences worth hiding are injected by the source
+  /// and translator, so the same line comes back in every chapter of every book
+  /// they publish — a per-book rule would mean hiding it again, by hand, for
+  /// each of the hundreds of books a reader has.
+  ///
+  /// Returns the rule, or the one already covering it: hiding the same sentence
+  /// twice used to leave two identical entries to delete.
+  Future<TextFilterRule> hideTextEverywhere(String sentence) async {
+    final trimmed = sentence.trim();
+    if (trimmed.isEmpty) {
+      return TextFilterRule.hiddenSentence(sentence, id: '');
+    }
+    final rules = textFilterRules;
+    final existing = rules.where(
+      (r) => r.pattern == TextFilterRule.hiddenSentence(trimmed, id: '').pattern,
+    );
+    if (existing.isNotEmpty) return existing.first;
+
+    final rule = TextFilterRule.hiddenSentence(
+      trimmed,
+      id: 'hidden_${DateTime.now().microsecondsSinceEpoch}',
+    );
+    await setTextFilterRules([...rules, rule]);
+    return rule;
+  }
+
+  /// Undoes [hideTextEverywhere].
+  Future<void> removeTextFilterRule(String id) async {
+    await setTextFilterRules(
+      textFilterRules.where((r) => r.id != id).toList(growable: false),
+    );
+  }
+
+  /// Every rule that should apply, built-ins and custom together.
+  ///
+  /// The master switch governs the built-ins only. The reader's own hidden
+  /// sentences are not defaults: each one is something they were shown, chose,
+  /// and confirmed — so it applies even with the built-ins off, or hiding a
+  /// sentence would quietly do nothing for anybody who has turned the ads off
+  /// (which is exactly who ends up hiding sentences one at a time).
+  List<TextFilterRule> get activeTextFilterRules {
+    final disabled = disabledTextFilterIds;
+    final builtinsOn = textFiltersEnabled;
+    return [
+      for (final r in builtinTextFilterRules)
+        r.copyWith(isEnabled: builtinsOn && !disabled.contains(r.id)),
+      ...textFilterRules,
+    ];
+  }
+
+  /// The engine for the saved rules, rebuilt only when they change.
+  ///
+  /// The chapter has to be cleaned in more places than the reader: the
+  /// narration that rolls into the next chapter in the background is parsed
+  /// with the reader widget already gone, so the rules cannot simply be handed
+  /// down from there. Reading them from prefs at the point of use is the only
+  /// way both paths see the same rules, and caching on the rule text keeps
+  /// that to one rebuild per change rather than one per chapter.
+  TextFilterEngine get textFilterEngine {
+    final rules = activeTextFilterRules;
+    final key = rules
+        .map((r) => '${r.id}|${r.isEnabled ? 1 : 0}|${r.pattern}')
+        .join('\n');
+    final cached = _engine;
+    if (cached != null && _engineKey == key) return cached;
+    final built = TextFilterEngine(rules);
+    _engine = built;
+    _engineKey = key;
+    return built;
+  }
+}
+
+TextFilterEngine? _engine;
+String? _engineKey;
+
+/// Drops the cached engine so the next read picks the new rules up.
+///
+/// Every mutating method above calls this; the key check in
+/// [ReaderPrefs.textFilterEngine] is the belt to these braces, not a
+/// replacement for them, so that a rule added by a path that forgot to call
+/// this still shows up on the next chapter.
+void invalidateTextFilterCache() {
+  _engine = null;
+  _engineKey = null;
 }

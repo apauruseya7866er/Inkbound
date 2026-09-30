@@ -11,6 +11,8 @@ import '../../core/reading/read_history.dart';
 import '../../core/reading/read_store.dart';
 import '../../core/reading/reader_prefs.dart';
 import '../../core/reading/tap_zones.dart';
+import '../../core/reading/text_filter.dart';
+import '../../core/reading/tts/sentence_parser.dart';
 import '../../core/reading/tts/tts_chapters.dart';
 import '../../core/reading/tts/tts_cubit.dart';
 import '../../core/reading/tts/tts_platform.dart';
@@ -146,6 +148,25 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// prevent.
   NovelTextLayout? _scrollLayout;
 
+  /// The chapter's HTML *after* the text-cleanup rules, which is the only
+  /// chapter text anything in this file is allowed to read.
+  ///
+  /// Cleaning happens once, at load, and everything downstream — the layout, the
+  /// pagination, the read-aloud sentences, and the next chapter the narrator
+  /// fetches with this reader already closed — tokenizes this one string. Two
+  /// cleanups would be two answers to "what does this chapter say", and the one
+  /// the narrator uses is the one nobody can see.
+  String? _html;
+
+  /// The rules [_html] was cleaned with.
+  ///
+  /// Cleaning happens once per chapter, so a rule added while the reader is
+  /// open — a sentence just hidden, or a switch flipped on the settings screen
+  /// the user came back from — would otherwise have no effect until the next
+  /// chapter. `build()` compares the live rules against this and re-cleans when
+  /// they differ.
+  String? _filterStamp;
+
   /// Set while a read-aloud page turn is in flight, so [_onPageChanged] can tell
   /// our own jump apart from the reader's.
   bool _ttsTurningPage = false;
@@ -187,7 +208,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   bool _isPaginated = false;
 
   void _startTts() {
-    setState(() => _ttsPanelOpen = true);
+    setState(() {
+      _ttsPanelOpen = true;
+      // The panel is chrome now, so it can only be seen with the chrome. Narration
+      // can also be started from the notification while the reader sits there
+      // with its bars hidden, and opening a panel nobody can see reads as the
+      // feature not having started at all.
+      _chromeVisible = true;
+    });
     // The panel renders the error if there is nothing to read, so this does not
     // need to check first.
     unawaited(_tts?.play() ?? Future<void>.value());
@@ -296,15 +324,19 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         sourceId: widget.sourceId,
       );
       if (!mounted) return;
+      final prefs = sl<ReaderPrefs>();
+      final html = filterNovelHtml(text.html, prefs.textFilterEngine);
       setState(() {
         _text = text;
+        _html = html;
+        _filterStamp = _stampFor(prefs);
         _loading = false;
       });
       // One layout, two consumers. Built here rather than inside each renderer so
       // the scrolling spans and the read-aloud sentences cannot disagree about
       // where a paragraph ends.
-      _scrollLayout = NovelTextLayout.fromHtml(text.html);
-      _syncTtsFor(text);
+      _scrollLayout = NovelTextLayout.fromHtml(html);
+      _syncTtsFor(html);
       _restoreScrollPosition();
     } catch (_) {
       if (!mounted) return;
@@ -313,6 +345,63 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         _loading = false;
       });
     }
+  }
+
+  /// A fingerprint of the rules, cheap enough to compute on every build.
+  static String _stampFor(ReaderPrefs prefs) => [
+    prefs.textFiltersEnabled,
+    prefs.textFilterRules.length,
+    prefs.disabledTextFilterIds.join(','),
+  ].join('|');
+
+  /// Re-cleans the open chapter after a rule changed, and re-points read-aloud
+  /// at the result.
+  ///
+  /// Narration stops first, and deliberately. The engine is part-way through an
+  /// utterance built from the *old* sentence list; re-adopting a shorter list
+  /// underneath it would leave the two disagreeing about what sentence 40 is,
+  /// and the panel would show a position the voice had never reached. The
+  /// chapter just changed shape — a pause is the honest response, and the play
+  /// button is one tap away.
+  Future<void> _reapplyTextFilters() async {
+    final html = _html;
+    if (html == null || _text == null || !mounted) return;
+    final prefs = sl<ReaderPrefs>();
+    // Only silence the voice when a rule actually removes something. Turning
+    // the cleanup off restores text, which does not invalidate a running
+    // narration so much as leave it behind.
+    if (prefs.textFiltersEnabled) await _tts?.stop();
+    if (!mounted) return;
+
+    final cleaned = filterNovelHtml(_text!.html, prefs.textFilterEngine);
+
+    setState(() {
+      _html = cleaned;
+      _scrollLayout = NovelTextLayout.fromHtml(cleaned);
+      // Both are measured off the layout, so both have to be thrown with it.
+      _blockMetricsKey = null;
+      _blockOffsets = null;
+      _pages = const [];
+      _paginationKey = null;
+      _filterStamp = _stampFor(prefs);
+    });
+
+    // The chapter id has not changed, so the cubit would keep the sentence list
+    // it already has — the one that still contains the sentence just hidden.
+    _ttsAligned = null;
+    if (!_adoptAlignedChapter(cleaned, force: true)) {
+      _tts?.loadChapter(
+        bookId: widget.showId,
+        chapterId: _chapter.url,
+        html: cleaned,
+        force: true,
+      );
+    }
+    // The page the reader was on no longer exists if what was hidden was part of
+    // it, so re-anchor to the top rather than leaving them somewhere other than
+    // the sentence they were reading.
+    if (_scrollController.hasClients) _scrollController.jumpTo(0);
+    _lastScrollPermille = 0;
   }
 
   /// Jumps to the chapter's saved scroll permille once the fresh content has
@@ -395,7 +484,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // that returned no text) is unscrollable too, and counting that as read
     // would mark it finished and scrobble it to the user's tracker.
     if (pos.maxScrollExtent <= 0) {
-      final hasText = (_text?.html.trim().isNotEmpty ?? false);
+      final hasText = (_html?.trim().isNotEmpty ?? false);
       return _lastScrollPermille = hasText ? 1000 : 0;
     }
     final raw = (pos.pixels / pos.maxScrollExtent * 1000).round();
@@ -607,18 +696,18 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   ///
   /// Deliberately does not start speech. Opening a chapter should not start
   /// audio — that would make scrolling through a book unusable.
-  void _syncTtsFor(ChapterText text) {
+  void _syncTtsFor(String html) {
     _ttsAligned = null;
     // The aligned path replaces the plain one rather than running alongside it.
     // Doing both would parse the chapter twice per load and briefly install a
     // sentence list built from different text than the page renders.
-    if (!_adoptAlignedChapter(text.html)) {
+    if (!_adoptAlignedChapter(html)) {
       _tts?.loadChapter(
         // The chapter URL is the stable per-chapter key here; `showId` scopes
         // the resume point to the book so two books' positions never mix.
         bookId: widget.showId,
         chapterId: _chapter.url,
-        html: text.html,
+        html: html,
       );
     }
   }
@@ -633,7 +722,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   ///
   /// Returns whether the chapter was adopted, so the caller can fall back to
   /// plain HTML segmentation.
-  bool _adoptAlignedChapter(String html) {
+  bool _adoptAlignedChapter(String html, {bool force = false}) {
     final tts = _tts;
     if (tts == null) return false;
     try {
@@ -654,6 +743,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       tts.adoptChapter(
         bookId: widget.showId,
         chapterId: _chapter.url,
+        force: force,
         views: [
           for (final s in aligned.sentences)
             TtsSentenceView(
@@ -675,11 +765,236 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
 
   void _toggleChrome() => setState(() => _chromeVisible = !_chromeVisible);
 
+  /// Re-cleans the open chapter when the rules changed while it was on screen.
+  ///
+  /// The settings screen is a route *above* the reader, so a rule toggled there
+  /// is already saved by the time the reader is visible again — the chapter just
+  /// has not been rebuilt. Checked here rather than on the way into the reader
+  /// because the reader is also where a sentence gets hidden, and both need the
+  /// same rebuild.
+  ///
+  /// Deferred to after the frame rather than done here: this is a build method,
+  /// and a rule can only change from a tap, a dialog or a route the user just
+  /// came back from — never during a build. The stamp is re-checked inside the
+  /// callback, so a build that queued two of them does the work once.
+  void _watchTextFilterChanges(ReaderPrefs prefs) {
+    if (_html == null) return;
+    if (_stampFor(prefs) == _filterStamp) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _html == null) return;
+      if (_stampFor(sl<ReaderPrefs>()) == _filterStamp) return;
+      unawaited(_reapplyTextFilters());
+    });
+  }
+
+  // ── hiding a sentence from the page and from every other novel ───────────
+
+  /// What a long press found under the finger.
+  ///
+  /// The sentence text *and* the block it came from, because the text alone is
+  /// not enough to hide it: the rule is matched per line, so the block decides
+  /// which line of a chapter the sentence is on and a bare text match could
+  /// take out a paragraph that merely contains the same words somewhere else.
+  ({String text, int blockIndex, int start, int end})? _sentenceAt(Offset global) {
+    final layout = _scrollLayout;
+    final prefs = sl<ReaderPrefs>();
+    if (layout == null || layout.blocks.isEmpty) return null;
+    final base = _baseTextStyle(prefs);
+    final width = (MediaQuery.sizeOf(context).width - prefs.marginWidth * 2)
+        .clamp(1.0, double.infinity);
+
+    int chapterOffset;
+    if (_isPaginated) {
+      if (_pages.isEmpty) return null;
+      final painter = TextPainter(
+        text: _pages[_pageIndex.clamp(0, _pages.length - 1)],
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        textAlign: _textAlign,
+      )..layout(maxWidth: width);
+      final position = painter.getPositionForOffset(
+        Offset(global.dx - prefs.marginWidth, global.dy - 32),
+      );
+      painter.dispose();
+      // The page is a contiguous slice of the chapter, so the page's own start
+      // is the sum of the pages before it — the same accumulate-and-clip walk
+      // `pageSliceFor` uses to go the other way.
+      var pageStart = 0;
+      for (var i = 0; i < _pages.length; i++) {
+        final pageEnd = pageStart + _pages[i].toPlainText().length;
+        if (i == _pageIndex) break;
+        pageStart = pageEnd;
+      }
+      chapterOffset = pageStart + position.offset;
+    } else {
+      final offsets = _blockOffsets;
+      if (offsets == null || !_scrollController.hasClients) return null;
+      // 32 is the `SliverPadding` above the first block, and the body sits under
+      // the system bars only after `SafeArea` has taken them out.
+      final topInContent = global.dy + _scrollController.position.pixels;
+      int? block;
+      var yInBlock = 0.0;
+      for (var b = 0; b + 1 < offsets.length; b++) {
+        final top = offsets[b] + 32;
+        if (topInContent < top) break;
+        if (topInContent < offsets[b + 1] + 32) {
+          block = b;
+          yInBlock = topInContent - top;
+          break;
+        }
+      }
+      if (block == null) return null;
+      final painter = TextPainter(
+        text: TextSpan(
+          style: base,
+          children: novelBlockSpans(layout, block, base: base),
+        ),
+        textDirection: Directionality.of(context),
+        textScaler: MediaQuery.textScalerOf(context),
+        textAlign: _textAlign,
+      )..layout(maxWidth: width);
+      final position = painter.getPositionForOffset(
+        Offset(global.dx - prefs.marginWidth, yInBlock),
+      );
+      painter.dispose();
+      chapterOffset = layout.blocks[block].start + position.offset;
+    }
+
+    if (chapterOffset < 0 || chapterOffset >= layout.length) return null;
+    final hit = _sentenceContaining(chapterOffset);
+    if (hit == null) return null;
+    // The *page's* words, not the sentence the narrator would speak. A TTS
+    // sentence is normalised on the way out — URLs removed, quotes rewritten,
+    // `--` folded into a dash — and a rule built from that would no longer match
+    // the text it is supposed to be hiding. The offsets are exact either way, so
+    // this is a slice, not a re-segmentation.
+    return (
+      text: layout.text.substring(hit.startIndex, hit.endIndex).trim(),
+      blockIndex: hit.blockIndex,
+      start: hit.startIndex,
+      end: hit.endIndex,
+    );
+  }
+
+  /// The segmentation the long press is measured against.
+  ///
+  /// Prefers the one read-aloud is already using — it is the same list the
+  /// panel quotes, so a sentence the user highlights by touch is the sentence
+  /// they would hear. Falls back to segmenting on demand when narration has
+  /// never run, because hiding a sentence must not require starting the voice.
+  ///
+  /// The fallback segments with the narration filter *off*: the sentences
+  /// NarrationFilter drops are the donation pleas and chapter footers, which is
+  /// precisely what somebody long-pressing an ad is trying to get rid of.
+  List<TtsSentence> _sentences() {
+    final aligned = _ttsAligned;
+    if (aligned != null) return aligned.sentences;
+    final layout = _scrollLayout;
+    if (layout == null) return const [];
+    return alignChapter(layout, narrationFilter: false).sentences;
+  }
+
+  TtsSentence? _sentenceContaining(int offset) {
+    for (final s in _sentences()) {
+      if (offset >= s.startIndex && offset < s.endIndex) return s;
+    }
+    return null;
+  }
+
+  /// Body text style for the page — the one thing every renderer, the block
+  /// measurements and the long-press hit test have to agree on.
+  ///
+  /// A second copy of this is not a shortcut, it is a bug waiting: a long press
+  /// measured against a different font size or line height lands on a different
+  /// word, and the sentence it offers to hide is the wrong one.
+  TextStyle _baseTextStyle(ReaderPrefs prefs) => TextStyle(
+    fontFamily: novelFontFamily(prefs.fontFamily),
+    fontSize: prefs.fontSize,
+    height: prefs.lineHeight,
+    letterSpacing: prefs.letterSpacing,
+    wordSpacing: prefs.wordSpacing,
+    color: _readerTheme(prefs.theme).text,
+  );
+
+  /// Long press on a sentence: offer to hide it everywhere.
+  ///
+  /// Deliberately only a hide. Every other thing a reader might want from a
+  /// sentence — copy, share, look up — is a gesture in the app they can already
+  /// reach, and a menu that has grown a submenu since the last time anyone used
+  /// it is a menu nobody reads.
+  Future<void> _onSentenceLongPress(Offset global) async {
+    if (!mounted) return;
+    final hit = _sentenceAt(global);
+    if (hit == null) return;
+    final prefs = sl<ReaderPrefs>();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          hit.text,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          style: AppText.body,
+        ),
+        content: Text(
+          'Hidden in every novel, not just this one — the same line comes back '
+          'in every chapter.',
+          style: AppText.caption,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(context.l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text('Hide'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final rule = await prefs.hideTextEverywhere(hit.text);
+    if (!mounted) return;
+    await _reapplyTextFilters();
+    if (!mounted) return;
+    _undoHideSnack(rule, hit.text);
+  }
+
+  /// Confirms the hide and offers the one-tap way back, because a rule that
+  /// deletes prose has to be reversible from where it was made — a settings
+  /// screen three taps away is not "undo" when the thing that went wrong is one
+  /// sentence of the chapter you are reading.
+  void _undoHideSnack(TextFilterRule rule, String sentence) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Hidden everywhere: ${_shorten(sentence)}'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            final prefs = sl<ReaderPrefs>();
+            unawaited(prefs.removeTextFilterRule(rule.id).then((_) {
+              if (mounted) unawaited(_reapplyTextFilters());
+            }));
+          },
+        ),
+      ),
+    );
+  }
+
+  static String _shorten(String text) =>
+      text.length > 40 ? '${text.substring(0, 40)}…' : text;
+
   @override
   Widget build(BuildContext context) {
     final prefs = sl<ReaderPrefs>();
     final theme = _readerTheme(prefs.theme);
     _isPaginated = prefs.novelPaginated;
+    _watchTextFilterChanges(prefs);
     return Scaffold(
       backgroundColor: _dimmedBg(theme, prefs.novelBgOpacity),
       body: Stack(
@@ -688,6 +1003,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: (d) => _dispatchTap(d.globalPosition),
+              onLongPressStart: (d) => _onSentenceLongPress(d.globalPosition),
               // Touch pauses; lifting resumes after a grace. See the manga
               // reader — stopping outright on a drag made a nudge fatal.
               child: Listener(
@@ -733,13 +1049,35 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
               // Clears the bottom bar's pill, which is SafeArea + 12 padding +
               // the pill itself.
               bottom: 72,
-              child: TtsPlayerBar(
-                cubit: _tts!,
-                onOpenSettings: _openTtsSheet,
-                onClose: () {
-                  setState(() => _ttsPanelOpen = false);
-                  _tts?.stop();
-                },
+              // Hides with the top and bottom bars, on the same terms.
+              //
+              // It is the largest thing on screen and it sits over the prose, so
+              // a listener who is reading along has a third of the page covered
+              // for the whole chapter — which is the opposite of what read-aloud
+              // is for. It was the one piece of chrome that ignored the toggle,
+              // which is why a reader who had just dismissed the top and bottom
+              // bars to get on with the book still had a panel in the way.
+              //
+              // IgnorePointer while hidden, for the reason the other two bars
+              // carry it: an invisible panel left in the tree would keep
+              // swallowing the tap that is supposed to bring the chrome back.
+              // Narration itself is unaffected — it runs in the foreground
+              // service, so hiding this costs the reader nothing but the
+              // controls, and one tap brings them back.
+              child: IgnorePointer(
+                ignoring: !_chromeVisible,
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 200),
+                  opacity: _chromeVisible ? 1 : 0,
+                  child: TtsPlayerBar(
+                    cubit: _tts!,
+                    onOpenSettings: _openTtsSheet,
+                    onClose: () {
+                      setState(() => _ttsPanelOpen = false);
+                      _tts?.stop();
+                    },
+                  ),
+                ),
               ),
             ),
           if (prefs.autoScrollButton)
@@ -795,21 +1133,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // left exactly as it was — same widgets, same restore, same behavior.
     if (prefs.novelPaginated) return _buildPaged(theme, prefs, text);
 
-    final base = TextStyle(
-      fontFamily: novelFontFamily(prefs.fontFamily),
-      fontSize: prefs.fontSize,
-      height: prefs.lineHeight,
-      letterSpacing: prefs.letterSpacing,
-      wordSpacing: prefs.wordSpacing,
-      color: theme.text,
-    );
+    final base = _baseTextStyle(prefs);
     final hasNext = _nextIndex != null;
     // Same condition the old trailing `if (_atEnd && hasNext)` child used —
     // just expressed as one extra sliver, so it only exists (and only adds
     // to maxScrollExtent) once the chapter's actually been scrolled to the
     // bottom.
     final showNext = _atEnd && hasNext;
-    final direction = resolveNovelDirection(prefs, text.html);
+    final direction = resolveNovelDirection(prefs, _html ?? text.html);
     // Measured here, where the width is known, so the follow can reach a block
     // the sliver list has not built. Deferred past the frame: it costs one text
     // layout per block and has no business delaying the chapter's first paint.
@@ -1496,15 +1827,8 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// analogue of the manga reader's tap zones. The scroll reader is untouched
   /// by this path; `prefs.novelPaginated` picks between them in `_buildBody`.
   Widget _buildPaged(_ReaderTheme theme, ReaderPrefs prefs, ChapterText text) {
-    final base = TextStyle(
-      fontFamily: novelFontFamily(prefs.fontFamily),
-      fontSize: prefs.fontSize,
-      height: prefs.lineHeight,
-      letterSpacing: prefs.letterSpacing,
-      wordSpacing: prefs.wordSpacing,
-      color: theme.text,
-    );
-    final direction = resolveNovelDirection(prefs, text.html);
+    final base = _baseTextStyle(prefs);
+    final direction = resolveNovelDirection(prefs, _html ?? text.html);
     return SafeArea(
       child: Directionality(
         // Same auto/user-forced direction as the scroll reader. `textAlign:
@@ -1523,7 +1847,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
               ),
               (constraints.maxHeight - 64).clamp(1.0, double.infinity),
             );
-            _ensurePaginated(text.html, base, pageSize);
+            _ensurePaginated(_html ?? text.html, base, pageSize);
             final pages = _pages;
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -1589,7 +1913,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// the live position so the reader stays roughly in place.
   void _ensurePaginated(String html, TextStyle base, Size pageSize) {
     final key =
-        '${identityHashCode(_text)}|${base.fontSize}|${base.fontFamily}'
+        '${identityHashCode(_html)}|${base.fontSize}|${base.fontFamily}'
         '|${base.height}|${base.letterSpacing}|${base.wordSpacing}'
         '|${pageSize.width.toStringAsFixed(1)}'
         '|${pageSize.height.toStringAsFixed(1)}';
@@ -2822,6 +3146,15 @@ class _ReaderTtsChapterSource implements TtsChapterSource {
   Future<String> chapterTitle(int index) async =>
       _reader.chapterTitleForTts(index);
 
+  /// The chapter for the narrator to read into, cleaned by the same rules the
+  /// page was.
+  ///
+  /// This is the path that runs with the reader closed — narration rolls into
+  /// the next chapter from the notification, or from the lock screen — so it is
+  /// the one place where cleaning has to happen even though nobody is looking at
+  /// a page. Skipping it is how a chapter's donation plea ends up read out loud
+  /// in the background while the reader has spent ten minutes making sure it is
+  /// never spoken.
   @override
   Future<String> chapterText(int index) async {
     final chapter = _reader.chapterAtForTts(index);
@@ -2830,7 +3163,10 @@ class _ReaderTtsChapterSource implements TtsChapterSource {
       chapter.url,
       sourceId: _reader.widget.sourceId,
     );
-    return text.html;
+    return filterNovelHtml(
+      text.html,
+      sl<ReaderPrefs>().textFilterEngine,
+    );
   }
 
   /// The chapter's own URL, so an auto-advanced resume point names a chapter the

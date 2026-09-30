@@ -97,10 +97,11 @@ class TtsCubit extends Cubit<TtsState> {
     required String bookId,
     required String chapterId,
     required String html,
+    bool force = false,
   }) {
     if (chapterId.isEmpty) return;
 
-    if (chapterId == state.chapterId && _loaded.isNotEmpty) {
+    if (!force && chapterId == state.chapterId && _loaded.isNotEmpty) {
       // Same chapter re-opened (a rebuild, or returning from a sub-page):
       // keep the parsed sentences and the live position rather than restarting
       // the parse and losing the highlight.
@@ -139,13 +140,19 @@ class TtsCubit extends Cubit<TtsState> {
   /// [views] must be in reading order and indexed from 0. Preferred over
   /// [loadChapter] for the on-screen chapter: the reader is the only thing that
   /// knows what its own page actually contains.
+  ///
+  /// [force] re-adopts a chapter id that is already loaded. Only for the case
+  /// where the text under that id has genuinely changed — the reader hiding a
+  /// sentence, say — because the point of the same-chapter early return is to
+  /// keep a live narration from being reset by a rebuild.
   void adoptChapter({
     required String bookId,
     required String chapterId,
     required List<TtsSentenceView> views,
+    bool force = false,
   }) {
     if (chapterId.isEmpty) return;
-    if (chapterId == state.chapterId && _loaded.isNotEmpty) return;
+    if (!force && chapterId == state.chapterId && _loaded.isNotEmpty) return;
 
     _loaded = views;
     emit(

@@ -821,5 +821,151 @@ void main() {
       // deleted so the gap stays visible in the suite output.
       skip: true, // see the note above: HtmlWidget no longer renders the chapter
     );
+
+    // A chapter shaped like a real one: prose with a donation plea wedged
+    // between two paragraphs of it. `u3` is registered per test because these
+    // two need the cleanup rules in a known state.
+    const adChapter =
+        '<p>The first paragraph of the story.</p>'
+        '<p>Please support me on Patreon!</p>'
+        '<p>The second paragraph of the story.</p>';
+
+    Widget adHarness() => MaterialApp(
+      home: NovelReaderScreen(
+        sourceId: 'ani:n',
+        showId: 'b1',
+        showTitle: 'Book',
+        cover: null,
+        chapters: [chapter('c1', 'u1'), chapter('c2', 'u2'), chapter('c3', 'u3')],
+        startIndex: 2,
+      ),
+    );
+
+    void registerAdChapter() {
+      ani.register(
+        _FakeReadingProvider('ani:n', {
+          'u1': 'chapter one text',
+          'u2': 'chapter two text',
+          'u3': adChapter,
+        }),
+      );
+    }
+
+    testWidgets('strips an injected ad line from the chapter by default', (
+      tester,
+    ) async {
+      registerAdChapter();
+      await tester.pumpWidget(adHarness());
+      await tester.pumpAndSettle();
+
+      // The rule set is on without anyone asking for it, and the ad line is
+      // simply not on the page: not greyed, not collapsed, gone.
+      expect(
+        find.textContaining('support me on Patreon', findRichText: true),
+        findsNothing,
+      );
+      expect(
+        find.textContaining('first paragraph of the story', findRichText: true),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('second paragraph of the story', findRichText: true),
+        findsOneWidget,
+      );
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+    });
+
+    testWidgets(
+      'a sentence hidden in one chapter is already gone from the next',
+      (tester) async {
+        registerAdChapter();
+        // Hidden before this reader exists, which is the "everywhere" claim: the
+        // rule is global, so a chapter opened afterwards renders clean without
+        // the reader having been open when it was hidden.
+        await tester.runAsync(() async {
+          await sl<ReaderPrefs>()
+              .hideTextEverywhere('Please support me on Patreon!');
+        });
+
+        await tester.pumpWidget(adHarness());
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('support me on Patreon', findRichText: true),
+          findsNothing,
+        );
+        expect(
+          find.textContaining('first paragraph of the story', findRichText: true),
+          findsOneWidget,
+        );
+        expect(sl<ReaderPrefs>().textFilterRules, hasLength(1));
+
+        await tester.runAsync(() async {
+          await tester.pumpWidget(const SizedBox());
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+      },
+    );
+
+    testWidgets('long press names the sentence and offers hide or cancel', (
+      tester,
+    ) async {
+      registerAdChapter();
+      // The built-ins are off for this one, so the long press is aimed at text
+      // the built-in rules would otherwise have removed before it could be
+      // pressed — which is also the case they cannot cover.
+      await tester.runAsync(() async {
+        await sl<ReaderPrefs>().setTextFiltersEnabled(false);
+      });
+
+      await tester.pumpWidget(adHarness());
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('support me on Patreon', findRichText: true),
+        findsOneWidget,
+      );
+
+      await tester.longPress(
+        find.textContaining('support me on Patreon', findRichText: true),
+      );
+      await tester.pumpAndSettle();
+
+      // The dialog quotes the sentence — the page's own words, not the
+      // narrator's normalised copy — and offers exactly two ways out.
+      expect(
+        find.text('Please support me on Patreon!'),
+        findsWidgets,
+      );
+      expect(find.text('Hide'), findsOneWidget);
+      expect(find.text('Cancel'), findsOneWidget);
+      expect(find.textContaining('every novel', findRichText: true),
+          findsOneWidget);
+
+      // Cancel changes nothing: no rule, no rebuild, sentence still there.
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(sl<ReaderPrefs>().textFilterRules, isEmpty);
+      expect(
+        find.textContaining('support me on Patreon', findRichText: true),
+        findsOneWidget,
+      );
+
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+    });
+
+    // The last step of the flow — Hide writes the rule, and the open chapter is
+    // re-cleaned from it — is not asserted through the dialog. The write is real
+    // Hive I/O started from inside the test's faked clock, and making it
+    // observable took a runAsync/pump loop that hung the test rather than
+    // testing the reader. It is covered instead by the two halves it is made
+    // of: `hideTextEverywhere` persisting the rule, and the reader rendering a
+    // chapter clean against a rule saved before it was ever opened.
   });
 }

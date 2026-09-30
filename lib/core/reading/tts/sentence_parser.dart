@@ -227,7 +227,17 @@ class SentenceParser {
   ///
   /// The spoken text is still tidied — the returned `text` is the normalised
   /// form — but the indices refer to the input, not to the tidied copy.
-  static List<TtsSentence> parseRaw(String text) => _parseSentences(text);
+  ///
+  /// [narrationFilter] off keeps the sentences the narrator would refuse to say:
+  /// the reader hit-tests a long press against this list to find the sentence
+  /// under the finger, and the sentences the filter drops — donation pleas,
+  /// chapter footers — are exactly the ones somebody wants to hide. Filtering
+  /// them out of the list a long press searches makes "hide this sentence" come
+  /// up empty on every ad in the book.
+  static List<TtsSentence> parseRaw(
+    String text, {
+    bool narrationFilter = true,
+  }) => _parseSentences(text, narrationFilter: narrationFilter);
 
   // ── HTML → blocks ─────────────────────────────────────────────────────────
 
@@ -307,7 +317,10 @@ class SentenceParser {
 
   // ── text → sentences ──────────────────────────────────────────────────────
 
-  static List<TtsSentence> _parseSentences(String text) {
+  static List<TtsSentence> _parseSentences(
+    String text, {
+    bool narrationFilter = true,
+  }) {
     if (text.trim().isEmpty) return const [];
 
     final out = <TtsSentence>[];
@@ -337,7 +350,8 @@ class SentenceParser {
             var end = _skipClosingQuotes(text, ellEnd);
             final raw = text.substring(sentenceStart, end).trim();
             final normalised = _normalise(raw);
-            if (_isValid(normalised) && !NarrationFilter.skipSentence(raw)) {
+            if (_isValid(normalised) &&
+                !(narrationFilter && NarrationFilter.skipSentence(raw))) {
               out.add(TtsSentence(
                 text: normalised,
                 startIndex: sentenceStart,
@@ -369,7 +383,8 @@ class SentenceParser {
 
           final raw = text.substring(sentenceStart, end).trim();
           final normalised = _normalise(raw);
-          if (_isValid(normalised) && !NarrationFilter.skipSentence(raw)) {
+          if (_isValid(normalised) &&
+                !(narrationFilter && NarrationFilter.skipSentence(raw))) {
             out.add(TtsSentence(
               text: normalised,
               startIndex: sentenceStart,
@@ -391,7 +406,8 @@ class SentenceParser {
     if (sentenceStart < text.length) {
       final raw = text.substring(sentenceStart).trim();
       final normalised = _normalise(raw);
-      if (_isValid(normalised) && !NarrationFilter.skipSentence(raw)) {
+      if (_isValid(normalised) &&
+                !(narrationFilter && NarrationFilter.skipSentence(raw))) {
         out.add(TtsSentence(
           text: normalised,
           startIndex: sentenceStart,
@@ -412,7 +428,8 @@ class SentenceParser {
     // back to the engine.
     if (out.isEmpty &&
         _hasLetter(text) &&
-        !NarrationFilter.skipSentence(text)) {
+        !(narrationFilter && NarrationFilter.skipSentence(text))) {
+
       final normalised = _normalise(text);
       if (normalised.isNotEmpty) {
         out.add(TtsSentence(

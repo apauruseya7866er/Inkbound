@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/di/injector.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/reading/reader_prefs.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../l10n/l10n.dart';
 import '../../core/ui/settings_widgets.dart';
 import 'tap_zones_screen.dart';
+import 'text_filter_settings_screen.dart';
 
 /// Global reader defaults — manga and novel. These are the same
 /// [ReaderPrefs] keys the in-reader settings sheets write; the manga
@@ -266,74 +268,88 @@ class _ReaderSettingsScreenState extends State<ReaderSettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.only(top: 4, bottom: 28),
         children: [
-          SettingsSectionLabel(context.l10n.modeManga, first: true),
+          // Novel-only build: this section used to be headed "Manga" and held
+          // the page-image prefs (fit mode, page background, colour filter,
+          // orientation lock, double-page landscape, crop borders, page
+          // preload) alongside the two the novel reader also reads. Only those
+          // two survive here; the novel section below is where every other
+          // reading pref now lives. The header becomes the generic "Reading"
+          // (the same word the Settings category uses for this page) because it
+          // no longer describes a page-image reader — and NOT `l10n.reader`,
+          // which would print "READER" directly under the app bar's "Reader".
+          SettingsSectionLabel(
+            kNovelOnly ? context.l10n.settingsSectionReading : context.l10n.modeManga,
+            first: true,
+          ),
           SettingsCard(
             children: [
-              _pickerRow(
-                icon: Icons.swap_horiz_rounded,
-                title: context.l10n.readingMode,
-                options: _directionOptions,
-                current: prefs.direction,
-                onPicked: prefs.setDirection,
-              ),
-              _pickerRow(
-                icon: Icons.fit_screen_outlined,
-                title: context.l10n.fit,
-                options: _fitOptions,
-                current: prefs.fitMode,
-                onPicked: prefs.setFitMode,
-              ),
-              _pickerRow(
-                icon: Icons.format_paint_outlined,
-                title: context.l10n.background,
-                options: _backgroundOptions,
-                current: prefs.mangaBackground,
-                onPicked: prefs.setMangaBackground,
-              ),
-              _pickerRow(
-                icon: Icons.filter_b_and_w_rounded,
-                title: context.l10n.colourFilter,
-                options: _filterOptions,
-                current: prefs.colorFilter,
-                onPicked: prefs.setColorFilter,
-              ),
-              _pickerRow(
-                icon: Icons.screen_rotation_outlined,
-                title: context.l10n.orientationLock,
-                options: _orientationOptions,
-                current: prefs.orientation,
-                onPicked: prefs.setOrientation,
-              ),
-              _toggleRow(
-                icon: Icons.vertical_split_rounded,
-                title: context.l10n.doublePageLandscape,
-                subtitle: context.l10n.pairFacingPagesInALandscapeSpread,
-                value: prefs.doublePageLandscape,
-                onChanged: (v) async {
-                  await prefs.setDoublePageLandscape(v);
-                  if (mounted) setState(() {});
-                },
-              ),
-              _toggleRow(
-                icon: Icons.crop_outlined,
-                title: context.l10n.cropBorders,
-                subtitle: context.l10n.trimNearUniformEdgeMarginsFromAPage,
-                value: prefs.cropBorders,
-                onChanged: (v) async {
-                  await prefs.setCropBorders(v);
-                  if (mounted) setState(() {});
-                },
-              ),
-              _sliderRow(
-                icon: Icons.layers_outlined,
-                title: context.l10n.preloadPages,
-                value: prefs.preloadCount.toDouble(),
-                min: 1,
-                max: 8,
-                divisions: 7,
-                format: (v) => '${v.round()}',
-                onChangeEnd: (v) => prefs.setPreloadCount(v.round()),
-              ),
+              if (!kNovelOnly) ...[
+                _pickerRow(
+                  icon: Icons.swap_horiz_rounded,
+                  title: context.l10n.readingMode,
+                  options: _directionOptions,
+                  current: prefs.direction,
+                  onPicked: prefs.setDirection,
+                ),
+                _pickerRow(
+                  icon: Icons.fit_screen_outlined,
+                  title: context.l10n.fit,
+                  options: _fitOptions,
+                  current: prefs.fitMode,
+                  onPicked: prefs.setFitMode,
+                ),
+                _pickerRow(
+                  icon: Icons.format_paint_outlined,
+                  title: context.l10n.background,
+                  options: _backgroundOptions,
+                  current: prefs.mangaBackground,
+                  onPicked: prefs.setMangaBackground,
+                ),
+                _pickerRow(
+                  icon: Icons.filter_b_and_w_rounded,
+                  title: context.l10n.colourFilter,
+                  options: _filterOptions,
+                  current: prefs.colorFilter,
+                  onPicked: prefs.setColorFilter,
+                ),
+                _pickerRow(
+                  icon: Icons.screen_rotation_outlined,
+                  title: context.l10n.orientationLock,
+                  options: _orientationOptions,
+                  current: prefs.orientation,
+                  onPicked: prefs.setOrientation,
+                ),
+                _toggleRow(
+                  icon: Icons.vertical_split_rounded,
+                  title: context.l10n.doublePageLandscape,
+                  subtitle: context.l10n.pairFacingPagesInALandscapeSpread,
+                  value: prefs.doublePageLandscape,
+                  onChanged: (v) async {
+                    await prefs.setDoublePageLandscape(v);
+                    if (mounted) setState(() {});
+                  },
+                ),
+                _toggleRow(
+                  icon: Icons.crop_outlined,
+                  title: context.l10n.cropBorders,
+                  subtitle: context.l10n.trimNearUniformEdgeMarginsFromAPage,
+                  value: prefs.cropBorders,
+                  onChanged: (v) async {
+                    await prefs.setCropBorders(v);
+                    if (mounted) setState(() {});
+                  },
+                ),
+                _sliderRow(
+                  icon: Icons.layers_outlined,
+                  title: context.l10n.preloadPages,
+                  value: prefs.preloadCount.toDouble(),
+                  min: 1,
+                  max: 8,
+                  divisions: 7,
+                  format: (v) => '${v.round()}',
+                  onChangeEnd: (v) => prefs.setPreloadCount(v.round()),
+                ),
+              ],
               _toggleRow(
                 icon: Icons.screen_lock_portrait_outlined,
                 title: context.l10n.keepScreenOn,
@@ -465,6 +481,22 @@ class _ReaderSettingsScreenState extends State<ReaderSettingsScreen> {
                   await prefs.setFullscreen(v);
                   if (mounted) setState(() {});
                 },
+              ),
+              // Its own screen rather than another row: a rule set is a list,
+              // and a settings page of switches cannot show a list. It is also
+              // the one pref here that deletes prose, so every rule needs to be
+              // readable before it runs and removable after it has.
+              SettingsTile(
+                icon: Icons.cleaning_services_outlined,
+                title: 'Regex text cleanup',
+                subtitle:
+                    '${prefs.textFiltersEnabled ? 'On' : 'Off'} — strips ads '
+                    'and injected text from every chapter',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const TextFilterSettingsScreen(),
+                  ),
+                ),
               ),
             ],
           ),

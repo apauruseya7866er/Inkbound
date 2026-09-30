@@ -12,6 +12,8 @@
 /// the tokenizer makes that class of bug impossible to write.
 library;
 
+import '../../core/reading/text_filter.dart';
+
 /// One decoded run of inline HTML: a text run with its bold/italic state, or a
 /// break marker.
 class NovelToken {
@@ -126,6 +128,280 @@ List<NovelToken> tokenizeNovelHtml(String html) {
   flush();
   return tokens;
 }
+
+/// [tokens] back into HTML.
+///
+/// ### Why this exists
+/// The chapter has to be cleaned in more places than the reader: read-aloud
+/// rolls into the next chapter in the background, with the reader widget
+/// already gone, and the *only* handle on that text is its HTML. Handing that
+/// path a different representation — a sentence list, or a set of offsets —
+/// would mean two implementations of "what does this chapter read like", and
+/// the day they disagree the narrator and the page stop telling the same story.
+///
+/// So the cleaned text is turned back into HTML once, here, and everything
+/// downstream tokenizes the same string. The markup is rebuilt rather than
+/// patched, which is safe precisely because [tokenizeNovelHtml] already throws
+/// away everything the reader cannot draw: what survives the round trip is the
+/// text and its bold/italic state, the paragraph boundaries, the soft line
+/// breaks, and whether a block was a heading.
+///
+/// A heading has to survive as a real `<h1>`: without one, a chapter titled
+/// with a tag rather than as a bare first line is no longer recognisable as a
+/// title, and narration reads the title out loud as the opening sentence of the
+/// story.
+String serializeNovelTokens(List<NovelToken> tokens) {
+  final out = StringBuffer();
+  final block = StringBuffer();
+  var bold = false;
+  var italic = false;
+
+  void closeRuns() {
+    if (italic) {
+      block.write('</i>');
+      italic = false;
+    }
+    if (bold) {
+      block.write('</b>');
+      bold = false;
+    }
+  }
+
+  void applyRuns(NovelToken t) {
+    if (bold == t.bold && italic == t.italic) return;
+    // Closed and reopened wholesale rather than individually: a run that loses
+    // bold but keeps italic sits *inside* the bold tag, and closing the outer
+    // one while the inner stays open is not well-formed markup.
+    closeRuns();
+    if (t.bold) {
+      block.write('<b>');
+      bold = true;
+    }
+    if (t.italic) {
+      block.write('<i>');
+      italic = true;
+    }
+  }
+
+  void flushBlock({required bool heading}) {
+    closeRuns();
+    if (block.isEmpty) return;
+    out.write(heading ? '<h1>' : '<p>');
+    out.write(block.toString());
+    out.write(heading ? '</h1>' : '</p>');
+    block.clear();
+  }
+
+  for (final t in tokens) {
+    if (t.isBreak) {
+      if (t.paragraphBreak) {
+        flushBlock(heading: t.heading);
+      } else {
+        block.write('<br/>');
+      }
+      continue;
+    }
+    if (t.text.isEmpty) continue;
+    applyRuns(t);
+    // The token text is already entity-decoded, so it has to be re-escaped:
+    // writing a raw `<` would be read as a tag by the next pass, and a chapter
+    // with "<3" in it would lose the lot.
+    block.write(
+      t.text
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;'),
+    );
+  }
+  flushBlock(heading: false);
+  return out.toString();
+}
+
+/// [html] with every span [engine] covers removed, as HTML.
+///
+/// The one entry point for cleaning a chapter: the reader, and the read-aloud
+/// path that fetches the next chapter in the background, both go through it, so
+/// there is exactly one answer to "what does this chapter say".
+String filterNovelHtml(String html, TextFilterEngine engine) {
+  if (engine.isEmpty) return html;
+  return serializeNovelTokens(
+    filterNovelTokens(tokenizeNovelHtml(html), engine),
+  );
+}
+
+/// Cuts every span [engine] covers out of [tokens].
+///
+/// ### Why the tokens and not the text
+/// The alternative is to strip the text and throw the styling away for anything
+/// a rule touched, which is what Novery does because it keeps styled text and
+/// plain text as two separate strings. Here the styled runs *are* the text, so a
+/// rule that removes one clause out of a bolded line leaves the rest bolded, and
+/// a rule that only ever touches a whole paragraph never costs the chapter its
+/// italics. A token may be split into up to three sub-tokens, so this stays
+/// exact: the concatenation of what comes out is character-for-character the
+/// text the rules left behind, which is the invariant every offset in the
+/// reader rests on.
+///
+/// ### Removed paragraphs leave nothing behind
+/// A line the rules cover whole still has a paragraph break either side of it,
+/// and keeping both turns one hidden ad into a visible gap in the page. A block
+/// with nothing left in it takes its break with it, which is also why the
+/// surviving paragraphs stay separate blocks rather than merging: the break
+/// that *closed* the previous paragraph is what opens the next one.
+///
+/// ### An over-broad rule must not blank a chapter
+/// If the rules would leave nothing at all, the original tokens are returned
+/// unchanged. A filter that deletes prose is one typo away from deleting a
+/// chapter, and an empty reader tells the user nothing about why, whereas the
+/// unfiltered text — with a rule that turned out to be wrong — can be diagnosed.
+List<NovelToken> filterNovelTokens(
+  List<NovelToken> tokens,
+  TextFilterEngine engine,
+) {
+  if (engine.isEmpty || tokens.isEmpty) return tokens;
+
+  // The layout's own text, so the ranges the rules report are ranges into
+  // exactly what [NovelTextLayout] would have built without this.
+  final buffer = StringBuffer();
+  final starts = <int>[];
+  final lengths = <int>[];
+  for (final t in tokens) {
+    starts.add(buffer.length);
+    if (t.isBreak) {
+      buffer.write('\n');
+      lengths.add(1);
+    } else {
+      buffer.write(t.text);
+      lengths.add(t.text.length);
+    }
+  }
+  final text = buffer.toString();
+  final cuts = engine.findFilteredRanges(text);
+  if (cuts.isEmpty) return tokens;
+
+  // Which blocks are left with nothing, so they can take their break with them.
+  final blockStart = <int>[];
+  final blockEnd = <int>[];
+  var blockFrom = 0;
+  for (var i = 0; i < tokens.length; i++) {
+    final t = tokens[i];
+    if (!t.isBreak || !t.paragraphBreak) continue;
+    if (starts[i] > blockFrom) {
+      blockStart.add(blockFrom);
+      blockEnd.add(starts[i]);
+    }
+    blockFrom = starts[i] + 1;
+  }
+  if (text.length > blockFrom) {
+    blockStart.add(blockFrom);
+    blockEnd.add(text.length);
+  }
+  final dead = <bool>[
+    for (var b = 0; b < blockStart.length; b++)
+      !_blockSurvives(text, blockStart[b], blockEnd[b], cuts),
+  ];
+
+  final out = <NovelToken>[];
+  var block = 0;
+  var cutIndex = 0;
+  var justCut = false;
+  var lastKept = '';
+
+  /// Emits `[from, to)` of [t], both of which are offsets into the *chapter*
+  /// text — the same space the cuts are reported in.
+  ///
+  /// Which is why [tokenStart] is passed in rather than assumed: a token's own
+  /// text starts wherever the chapter does not, and slicing it with a chapter
+  /// offset cuts the wrong words out of every token after the first.
+  void emit(NovelToken t, int tokenStart, int from, int to) {
+    if (to <= from) return;
+    final start = from - tokenStart;
+    final end = to - tokenStart;
+    if (end <= start) return;
+    final part = (start == 0 && end == t.text.length)
+        ? t.text
+        : t.text.substring(start, end);
+    // Absorbing the separators beside a cut is what stops "start , TWO end",
+    // but it can also glue two words together, so put one space back when the
+    // cut landed between two word characters.
+    if (justCut &&
+        lastKept.isNotEmpty &&
+        !_isSpaceChar(lastKept) &&
+        _isWordChar(part[0])) {
+      out.add(NovelToken.text(' $part', bold: t.bold, italic: t.italic));
+    } else {
+      out.add(NovelToken.text(part, bold: t.bold, italic: t.italic));
+    }
+    lastKept = part[part.length - 1];
+    justCut = false;
+  }
+
+  for (var i = 0; i < tokens.length; i++) {
+    final t = tokens[i];
+    if (t.isBreak) {
+      if (t.paragraphBreak) {
+        if (block < dead.length && !dead[block]) out.add(t);
+        block++;
+      } else if (block >= dead.length || !dead[block]) {
+        // A `<br>` belongs to the block it sits inside, so it goes when that
+        // block does, or the removed paragraph's soft line breaks survive as
+        // blank lines at the top of the next one.
+        out.add(t);
+      }
+      lastKept = '';
+      justCut = false;
+      continue;
+    }
+    if (block < dead.length && dead[block]) continue;
+
+    final tokenStart = starts[i];
+    final tokenEnd = tokenStart + lengths[i];
+    // Cuts that ended before this token still cut: this token starts after
+    // removed text, so the re-space rule has to know about it.
+    while (cutIndex < cuts.length && cuts[cutIndex].end <= tokenStart) {
+      cutIndex++;
+      justCut = true;
+    }
+    var from = tokenStart;
+    while (cutIndex < cuts.length && cuts[cutIndex].start < tokenEnd) {
+      final cut = cuts[cutIndex];
+      emit(t, tokenStart, from, cut.start < from ? from : cut.start);
+      from = cut.end < from ? from : cut.end;
+      cutIndex++;
+      justCut = true;
+    }
+    emit(t, tokenStart, from, tokenEnd);
+  }
+
+  // Nothing survived: hand the chapter back untouched rather than showing a
+  // blank page. See the note on the function.
+  var kept = 0;
+  for (final t in out) {
+    if (!t.isBreak && t.text.trim().isNotEmpty) kept += t.text.length;
+  }
+  if (kept == 0) return tokens;
+  return out;
+}
+
+/// Whether any non-whitespace character of `text[start, end)` survives [cuts].
+bool _blockSurvives(String text, int start, int end, List<TextCut> cuts) {
+  var pos = start;
+  for (final cut in cuts) {
+    if (cut.end <= pos) continue;
+    if (cut.start >= end) break;
+    if (cut.start > pos && text.substring(pos, cut.start).trim().isNotEmpty) {
+      return true;
+    }
+    pos = cut.end > pos ? cut.end : pos;
+  }
+  return pos < end && text.substring(pos, end).trim().isNotEmpty;
+}
+
+final RegExp _wordCharRe = RegExp(r'[\p{L}\p{N}]', unicode: true);
+
+bool _isWordChar(String ch) => _wordCharRe.hasMatch(ch);
+
+bool _isSpaceChar(String ch) => ch.trim().isEmpty;
 
 /// A half-open character range inside a token's text: `[start, end)`.
 class NovelTextRange {

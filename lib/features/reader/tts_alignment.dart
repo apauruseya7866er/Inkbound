@@ -64,7 +64,19 @@ class TtsAlignedChapter {
 /// Position comes from the *non-heading* blocks. A chapter is usually title
 /// then note then story, so counting the heading as the first block would put
 /// the note second and out of reach of the note rules.
-TtsAlignedChapter alignChapter(NovelTextLayout layout) {
+/// Segments [layout]'s text into sentences, one block at a time, skipping
+/// headings.
+///
+/// [narrationFilter] is on for the list read-aloud speaks and off for the list
+/// the reader hit-tests against. A long press has to be able to find the
+/// sentence under the finger whatever it says — and the sentences the filter
+/// drops are exactly the ones somebody most wants to hide, so filtering them out
+/// of the list a long press searches is how "hide this sentence" would come up
+/// empty on every ad in the book.
+TtsAlignedChapter alignChapter(
+  NovelTextLayout layout, {
+  bool narrationFilter = true,
+}) {
   final out = <TtsSentence>[];
 
   final prose = <NovelBlockRange>[];
@@ -78,10 +90,15 @@ TtsAlignedChapter alignChapter(NovelTextLayout layout) {
     // working. The trailing newline that separates blocks is left to the block
     // before it.
     final slice = layout.text.substring(block.start, block.end);
-    if (NarrationFilter.skipBlock(slice, blockIndex: i, blockCount: prose.length)) {
+    if (narrationFilter &&
+        NarrationFilter.skipBlock(
+          slice,
+          blockIndex: i,
+          blockCount: prose.length,
+        )) {
       continue;
     }
-    for (final s in SentenceParser.parseRaw(slice)) {
+    for (final s in SentenceParser.parseRaw(slice, narrationFilter: narrationFilter)) {
       out.add(
         TtsSentence(
           text: s.text,
