@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import '../../core/di/injector.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
-import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/ui/nav_prefs.dart';
@@ -33,14 +32,8 @@ class _NavTabsScreenState extends State<NavTabsScreen> {
 
   late List<DockTab> _shown = List.of(_prefs.tabs);
 
-  /// Everything the reader could add, not everything the enum names.
-  ///
-  /// A tab this build does not offer must not appear under "Not shown" with a
-  /// green plus: the list is the place a reader checks what the bar can hold,
-  /// and an entry that cannot be added is worse than no entry. See
-  /// [NavPrefs.unavailableTabs].
   List<DockTab> get _hidden => [
-    for (final t in NavPrefs.availableTabs)
+    for (final t in DockTab.values)
       if (!_shown.contains(t)) t,
   ];
 
@@ -49,13 +42,9 @@ class _NavTabsScreenState extends State<NavTabsScreen> {
 
   late DockTab _start = _prefs.startTab;
 
-/// The centre button is drawn from a real [DockTab]'s slot count, so it has
-/// to be mirrored here too: it is always on the bar and never editable.
-///
-/// Novel-only build: false. The mode bar and its centre button are both hidden
-/// (see root_shell.dart), so the preview must not draw a sixth icon that isn't
-/// there, nor the "always on the bar" note describing it.
-bool get _hasSwitcher => ZModePrefs.enabled && !kNovelOnly;
+  /// The centre button is drawn from a real [DockTab]'s slot count, so it has
+  /// to be mirrored here too: it is always on the bar and never editable.
+  bool get _hasSwitcher => ZModePrefs.enabled;
 
   Future<void> _save() => _prefs.setTabs(_shown);
 
