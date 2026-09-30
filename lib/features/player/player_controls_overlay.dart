@@ -31,7 +31,6 @@ class _ControlsOverlay extends StatelessWidget {
     required this.megaSkipSeconds,
     required this.onMegaSkip,
     this.onPip,
-    this.onChat,
     this.onInfo,
     this.infoOpen = false,
     this.showQuality = false,
@@ -75,7 +74,6 @@ class _ControlsOverlay extends StatelessWidget {
   final int megaSkipSeconds;
   final VoidCallback onMegaSkip;
   final VoidCallback? onPip; // null = PiP unsupported (hide the button)
-  final VoidCallback? onChat; // in-room chat toggle (null = no active room)
   final VoidCallback? onInfo; // toggle the info panel (null = no fields picked)
   final bool infoOpen; // whether the info panel is currently shown
   final bool
@@ -571,15 +569,6 @@ class _ControlsOverlay extends StatelessWidget {
                     tooltip: context.l10n.settingsTooltip,
                     onPressed: onSettings,
                   ),
-                  if (onChat != null)
-                    IconButton(
-                      icon: const Icon(
-                        Icons.chat_bubble_outline_rounded,
-                        color: Colors.white,
-                      ),
-                      tooltip: context.l10n.chat,
-                      onPressed: onChat,
-                    ),
                 ],
               ),
             ),

@@ -122,8 +122,6 @@ import '../../features/auth/migration_bridge.dart';
 import '../../features/auth/tv_pairing_service.dart';
 import '../../features/home/cubit/home_cache.dart';
 import '../../features/home/cubit/home_cubit.dart';
-import '../../features/watch_together/watch_room_service.dart';
-import '../../features/watch_together/watch_together_controller.dart';
 import '../cast/cast_controller.dart';
 import '../cast/cast_proxy.dart';
 import '../supabase/supabase_service.dart';
@@ -300,10 +298,6 @@ Future<void> initDependencies() async {
   await ReadHistory.init();
   sl.registerSingleton<ReadHistory>(
     ReadHistory(sl<SupabaseService>(), currentUserId),
-  );
-  sl.registerSingleton<WatchRoomService>(WatchRoomService(sl<SupabaseService>()));
-  sl.registerSingleton<WatchTogetherController>(
-    WatchTogetherController(sl<WatchRoomService>()),
   );
   // ListStatusStore is registered BEFORE MyListStore so the latter can wire the
   // status read/hydrate seams straight to it (keeps My List's cloud row + the

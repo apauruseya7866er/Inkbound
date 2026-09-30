@@ -42,7 +42,6 @@ import '../../core/repository/source_repository.dart';
 import '../../core/zmode/playback_resolver.dart';
 import '../../core/zmode/source_matcher.dart';
 import '../../core/zmode/zmode_ids.dart';
-import '../watch_together/model/room_state.dart';
 import 'color_profiles.dart';
 import 'shader_presets.dart';
 import 'subtitle_font_service.dart';
@@ -290,13 +289,6 @@ class PlayerCubit extends Cubit<PlayerState> {
   /// and [_preferredSource]'s language fallback quietly opens a different
   /// server — picking vidplay and landing on vidstream.
   VideoSource? initialSource;
-
-  /// Watch Together: `none` for all normal playback (the hooks below are inert).
-  RoomRole roomRole = RoomRole.none;
-
-  /// Host-mode only: notified on local play/pause/seek/episode so the room can
-  /// broadcast. Null (and never set) outside a room — zero effect on normal use.
-  void Function(String event, Duration pos)? onLocalPlayback;
 
   /// The currently-playing category. Re-resolving sources rewrites the
   /// episode URL's `/sub/` ↔ `/dub/` segment to this. Persisted per-title.
@@ -1189,30 +1181,17 @@ class PlayerCubit extends Cubit<PlayerState> {
     sl<PlaybackPrefs>().setDefaultSpeed(r);
   }
 
-  /// True when the local user is a viewer in a Watch Together room (not the
-  /// host). When this is the case, local transport actions are suppressed so
-  /// the viewer cannot desync from the host's authoritative playback state.
-  bool get _isRoomViewer => roomRole == RoomRole.client;
-
   void togglePlay() {
-    if (_isRoomViewer) return;
-    final willPlay = !player.state.playing;
     player.playOrPause();
-    if (roomRole == RoomRole.host) {
-      onLocalPlayback?.call(willPlay ? 'play' : 'pause', _lastPos);
-    }
   }
   void seekTo(Duration d) {
-    if (_isRoomViewer) return;
     _pendingResume = Duration.zero; // user took control → drop the resume floor
     _markUserSeek(d);
     player.seek(d);
-    if (roomRole == RoomRole.host) onLocalPlayback?.call('seek', d);
   }
 
   /// Seek by [delta] (signed), clamped into 0..duration.
   void seekBy(Duration delta) {
-    if (_isRoomViewer) return;
     _pendingResume = Duration.zero; // user took control → drop the resume floor
     final target = _lastPos + delta;
     final dur = _lastDur;
@@ -1221,7 +1200,6 @@ class PlayerCubit extends Cubit<PlayerState> {
         : (dur > Duration.zero && target > dur ? dur : target);
     _markUserSeek(clamped);
     player.seek(clamped);
-    if (roomRole == RoomRole.host) onLocalPlayback?.call('seek', clamped);
   }
 
   /// Record a deliberate user seek to [target]. Besides flagging the jump as
@@ -1874,18 +1852,14 @@ class PlayerCubit extends Cubit<PlayerState> {
   }
 
   /// Resolves sources for [index] and starts the best one.
-  /// [fromRoom] bypasses the viewer lock so the room can move viewers to the
-  /// host's episode; all other callers leave it false so viewer taps stay blocked.
   ///
   /// [resetSourceCooldowns] is true for episode taps / Retry (try every source
   /// again). Auto next-episode leaves it false so a source that just timed out
   /// is not paid for again mid-binge.
   Future<void> openEpisode(
     int index, {
-    bool fromRoom = false,
     bool resetSourceCooldowns = true,
   }) async {
-    if (_isRoomViewer && !fromRoom) return;
     final gen = ++_gen;
     await _persist(flush: true);
     // Only drop the pending resume when actually switching episodes — a
@@ -1971,7 +1945,6 @@ class PlayerCubit extends Cubit<PlayerState> {
       // return, so the Sources sheet ends up complete. Started here rather than
       // alongside the open above so it can't compete with the stream starting.
       unawaited(_pollForMoreSources(_episodeUrl(currentEpisode)));
-      if (roomRole == RoomRole.host) onLocalPlayback?.call('episode', Duration.zero);
     } on NoSourceMatch catch (e) {
       // No BuildContext down here to call context.l10n — this mirrors
       // AppLocalizationsEn.noSourceHasThisYet verbatim.
@@ -2389,9 +2362,7 @@ class PlayerCubit extends Cubit<PlayerState> {
     emit(state.copyWith(active: () => s, error: () => null));
     // When auto-resume is off, ignore the saved resume mark and start from the
     // explicit seek (a mid-session source/quality switch) or the very start.
-    // In a Watch Together room the room position is authoritative, not the
-    // user's personal mark.
-    final autoResume = sl<PlaybackPrefs>().autoResume && roomRole == RoomRole.none;
+    final autoResume = sl<PlaybackPrefs>().autoResume;
     final mark =
         autoResume ? resume.get(sourceId, _showKey, currentEpisode.id) : null;
     var resumeAt =
@@ -2983,7 +2954,7 @@ class PlayerCubit extends Cubit<PlayerState> {
   /// forward seek and progress never persists), and — in a watch party — the
   /// host's skip carries to the viewers instead of desyncing them.
   void _maybeAutoSkip(Duration pos) {
-    if (_skips.isEmpty || _isRoomViewer) return;
+    if (_skips.isEmpty) return;
     // A resume seek still in flight means the player is briefly reporting ~0,
     // which sits inside the opening. Skipping there would fire seekTo, drop the
     // resume floor, and strand the user at the end of the OP instead of where
@@ -3405,20 +3376,6 @@ class PlayerCubit extends Cubit<PlayerState> {
       if (isClosed || identical(next, episodes)) return;
       episodes = next;
     } catch (_) {/* keep source titles */}
-  }
-
-  /// Client-mode: apply the host's state without re-broadcasting. Seeks only on
-  /// meaningful drift (the controller already gates with needsCorrection).
-  Future<void> applyRemote(
-      {required bool playing, required Duration position, double? rate}) async {
-    if ((_lastPos - position).abs() > const Duration(milliseconds: 2500)) {
-      // Reuse the robust resume machinery so the seek lands on flaky hosts.
-      _pendingResume = position;
-      await player.seek(position);
-    }
-    if (rate != null && rate > 0) player.setRate(rate);
-    if (playing && !player.state.playing) player.play();
-    if (!playing && player.state.playing) player.pause();
   }
 
   @override

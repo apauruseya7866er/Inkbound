@@ -16,7 +16,6 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../core/cache/app_image_cache.dart';
 import '../../core/di/injector.dart';
-import '../../core/repository/source_repository.dart';
 import '../../core/zmode/playback_resolver.dart';
 import '../../core/tracker/tracker_hub.dart';
 import '../../core/playback/external_player.dart';
@@ -46,8 +45,6 @@ import '../../core/ui/subtitle_language_picker.dart';
 import '../detail/cubit/detail_cubit.dart' show seasonOf, seasonsOf;
 import '../../core/cast/cast_controller.dart';
 import '../../core/cast/cast_proxy.dart';
-import '../watch_together/watch_together_controller.dart';
-import '../watch_together/ui/room_panel.dart';
 import '../../core/app_mode.dart';
 import '../../core/tv/tv_focusable.dart';
 import '../settings/settings_screen.dart';
@@ -159,7 +156,6 @@ class PlayerScreen extends StatefulWidget {
     this.imdbId,
     this.peek = false,
     this.availableCategories = const [],
-    this.joinRoomCode,
     this.playerOverride,
     this.initialSource,
   });
@@ -239,10 +235,6 @@ class PlayerScreen extends StatefulWidget {
   /// in the chosen language (see [PlayerCubit.switchCategory]).
   final List<String> availableCategories;
 
-  /// When non-null the player auto-joins this Watch Together room code after
-  /// the session is wired. Used by the Join-from-anywhere flow in the sheet.
-  final String? joinRoomCode;
-
   @override
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
@@ -259,11 +251,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       widget.playerOverride ?? sl<PlaybackPrefs>().externalPlayerPackage;
 
   late final PlayerCubit _c;
-  final WatchTogetherController _room = sl<WatchTogetherController>();
-
-  // Stored so we can remove it in dispose() — the singleton outlives this screen.
-  late final VoidCallback _roomListener;
-  bool _attached = false; // true only after _wireRoom() runs
 
   // Position sampled down to whole seconds. The always-mounted Skip / Next-episode
   // pills only care about second-granularity, but the raw position stream fires
@@ -385,8 +372,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _sleepActive = false; // a timer or end-of-episode stop is armed
   bool _sleepEndOfEpisode = false;
   bool _sleepCloseApp = false; // when it fires, exit the app (not just pause)
-
-  bool _chatOpen = false; // in-room chat panel visible
 
   // ── Chromecast ────────────────────────────────────────────────────────────
   CastState _prevCastState = CastState.unavailable;
@@ -1062,39 +1047,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _bufferingSub = _c.player.stream.buffering.listen((_) => _syncWakelock());
     _syncWakelock();
 
-    _room.attachPlayer(
-      localPosition: () => _c.player.state.position,
-      onApplyRemote: (playing, pos, rate) =>
-          _c.applyRemote(playing: playing, position: pos, rate: rate),
-      onEpisodeChange: (r) {
-        // Follow the host to their episode within the show we already loaded.
-        // Position is then re-synced by the controller's applyRemote tick, so
-        // we only need to switch episodes here. Cross-show following is out of
-        // scope for v1 — if no episode matches the room state, do nothing.
-        var i = _c.episodes.indexWhere((e) => e.id == r.episodeId);
-        if (i < 0 && r.episodeNumber != null) {
-          i = _c.episodes.indexWhere((e) => e.number == r.episodeNumber);
-        }
-        if (i >= 0 && i != _c.state.currentIndex) _c.openEpisode(i, fromRoom: true);
-      },
-      content: {
-        'sourceId': _c.sourceId,
-        'sourceLabel': widget.showTitle ?? '',
-        'showUrl': widget.showUrl ?? '',
-        'showTitle': widget.showTitle ?? '',
-        'cover': widget.cover ?? '',
-        'episodeId': _c.currentEpisode.id,
-        'episodeNumber': _c.currentEpisode.number,
-        'episodeUrl': _c.currentEpisode.url,
-        'category': widget.category ?? 'sub',
-        'malId': widget.malId,
-        'tmdbId': widget.tmdbId,
-        'positionMs': _c.player.state.position.inMilliseconds,
-      },
-    );
-    _wireRoom(_room);
-    if (widget.joinRoomCode != null) _room.join(widget.joinRoomCode!);
-
     // Drive the "Up next" card on episode completion (the controller no longer
     // auto-advances; we show a 5s countdown card instead).
     _completedSub = _c.player.stream.completed.listen((done) {
@@ -1102,33 +1054,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
     if (mounted) setState(() => _ready = true);
     _scheduleHide();
-  }
-
-  void _wireRoom(WatchTogetherController room) {
-    _roomListener = () {
-      _c.roomRole = room.role;
-      if (mounted) setState(() {});
-    };
-    room.addListener(_roomListener);
-    _attached = true;
-    _c.onLocalPlayback = (event, pos) {
-      switch (event) {
-        case 'play':
-          room.broadcastPlay(pos);
-          break;
-        case 'pause':
-          room.broadcastPause(pos);
-          break;
-        case 'seek':
-          room.broadcastSeek(pos);
-          break;
-        case 'episode':
-          final ep = _c.currentEpisode;
-          room.broadcastEpisode(
-              episodeId: ep.id, number: ep.number, episodeUrl: ep.url);
-          break;
-      }
-    };
   }
 
   Future<void> _resolveThenStart() async {
@@ -1153,29 +1078,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  /// When a Watch Together join can't resolve the room's source on this device
-  /// (e.g. it's a CloudStream plugin the joiner hasn't installed), show a clear
-  /// message rather than silently bouncing back. A normal launch keeps the pop.
-  ///
-  /// Two distinct cases:
-  ///  - Source NOT installed → guide the user to install it.
-  ///  - Source IS installed but episode resolution returned empty/failed →
-  ///    transient failure message (provider-side issue, not a missing source).
-  void _failJoinOrPop() {
-    if (widget.joinRoomCode != null) {
-      final sourceInstalled = sl<SourceRepository>().hasSource(widget.sourceId);
-      setState(() => _loadError = sourceInstalled
-          ? "Couldn't load this show right now.\n\n"
-                "The source is available on your device, but the episode list "
-                'came back empty. Tap Back and try again.'
-          : "Couldn't open this room's video source on your device.\n\n"
-                "The host is watching on a source you don't have installed. Add it "
-                'from Settings → Add CloudStream repository, or ask the host to use a '
-                'built-in source.');
-    } else {
-      _leavePlayer();
-    }
-  }
+  /// A load failure just leaves the player — there is no remote session whose
+  /// host could explain the problem.
+  void _failJoinOrPop() => _leavePlayer();
 
   // Last back press for the "double back to exit" close mode.
   DateTime? _lastBackPress;
@@ -1275,13 +1180,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     WakelockPlus.disable();
     if (_ready) _c.close();
-    // Detach from the app-level party controller (nulls out player hooks and,
-    // if this client is host, marks the room lobby). Does NOT leave the party —
-    // closing the player keeps the party alive in the background.
-    if (_attached) {
-      _room.removeListener(_roomListener);
-      _room.detachPlayer();
-    }
     // On TV the app is always landscape — restoring portrait here (correct for
     // phones) would squish the 10-foot layout into a narrow strip after exiting
     // the player. So on TV we restore landscape; phones keep portrait as before.
@@ -3036,9 +2934,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       megaSkipEnabled: _megaSkipEnabled,
                       megaSkipSeconds: _megaSkipSeconds,
                       onMegaSkip: _megaSkip,
-                      onChat: (_room.room != null)
-                          ? () => setState(() => _chatOpen = !_chatOpen)
-                          : null,
                       onInfo: _infoFields.isEmpty
                           ? null
                           : () {
@@ -3183,24 +3078,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // 7. Up-next card (auto-advance countdown).
               if (_upNext) _buildUpNextCard(),
 
-              // 8. In-room chat panel — slides in from the right when _chatOpen.
-              // Gated on an active room; collapsed when leaving.
-              if (_room.room != null && _chatOpen)
-                Positioned(
-                  top: 0,
-                  bottom: 0,
-                  right: 0,
-                  child: SafeArea(
-                    left: false,
-                    right: false,
-                    child: RoomChatPanel(
-                      controller: _room,
-                      onClose: () => setState(() => _chatOpen = false),
-                    ),
-                  ),
-                ),
-
-              // 9. Cast remote panel — replaces the normal gesture + controls
+              // 8. Cast remote panel — replaces the normal gesture + controls
               // layer while a Chromecast session is active. Consumes all taps so
               // the gesture layer underneath is inert during casting.
               AnimatedBuilder(

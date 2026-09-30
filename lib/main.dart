@@ -54,7 +54,6 @@ import 'features/home/cubit/home_cubit.dart';
 import 'features/onboarding/boot_error_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'features/shell/root_shell.dart';
-import 'features/watch_together/ui/party_bar.dart';
 
 Future<void> main() async {
   // Run inside a guarded zone so uncaught async errors land in the shareable
@@ -717,24 +716,9 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
           : const [],
       home: _buildHome(),
       builder: (_, child) {
-        final content = shellFeatures
-            ? Stack(
-                children: [
-                  ?child,
-                  const Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    child: SafeArea(
-                      child: Align(
-                        alignment: Alignment.topCenter,
-                        child: PartyBar(),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            : (child ?? const SizedBox.shrink());
+        // The party bar that used to sit in this Stack is gone, so there is no
+        // longer anything to layer over the app.
+        final content = child ?? const SizedBox.shrink();
         final isTv = sl.isRegistered<AppMode>() && sl<AppMode>().isTv;
         return isTv ? TvViewport(child: content) : content;
       },
