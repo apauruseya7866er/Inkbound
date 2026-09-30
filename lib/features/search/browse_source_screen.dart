@@ -252,6 +252,18 @@ class _BrowseSourceViewState extends State<_BrowseSourceView> {
                 ? null
                 : (page) =>
                       sl<SourceRepository>().browseMore(section.more!, page),
+            // The screen's own source, not the section's: a row can be
+            // synthesized (the fallback Popular/Latest rows carry no `more`), and
+            // searching is about "this source's catalogue", which the row is a
+            // slice of either way.
+            onSearch: (query, page) async {
+              final res = await sl<SourceRepository>().searchStatus(
+                query,
+                sourceId: widget.sourceId,
+                page: page,
+              );
+              return res.items;
+            },
           ),
         ),
       );

@@ -16,6 +16,7 @@ import '../../core/mihon/mihon_extension_service.dart';
 import '../../core/mihon/mihon_image_provider.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/models/watch_status.dart';
 import '../../core/tracker/tracker_hub.dart';
 import '../../core/notify/notification_service.dart';
@@ -1002,12 +1003,34 @@ class _HomeViewState extends State<_HomeView>
           // stamp the Z Mode source id, everything else is a real source.
           onLoadMore: section.more == null
               ? null
-              // Compare the source id, NOT ZmodeIds.isZ — that tests a zm://
+              // Compare the source id, NOT ZmodeIds.isZ - that tests a zm://
               // URL, and a sourceId is never one, so every metadata row would
               // have been sent to the source repository instead.
               : (page) => section.more!.sourceId == ZmodeIds.sourceId
                     ? sl<MetadataRepository>().browseMore(section.more!, page)
                     : sl<SourceRepository>().browseMore(section.more!, page),
+          // The same split for search. A home row is one slice of a
+          // catalogue, so somebody who came to Home for one particular title
+          // had no way to type it — the field is the row's own back door to
+          // the source it came from, and the source id is what decides which
+          // repository answers.
+          onSearch: section.more == null
+              ? null
+              : (query, page) async {
+                  final items = section.more!.sourceId == ZmodeIds.sourceId
+                      ? await sl<MetadataRepository>().searchStatus(
+                          query,
+                          sourceId: ZmodeIds.sourceId,
+                          page: page,
+                        )
+                      : await sl<SourceRepository>().searchStatus(
+                          query,
+                          sourceId: section.more!.sourceId,
+                          page: page,
+                        );
+                  return items.items;
+                },
+
         ),
       ),
     ).then((_) {
@@ -1077,7 +1100,7 @@ class _HomeViewState extends State<_HomeView>
         // Z Mode drives the mode from its own controls, so the switcher cards
         // would duplicate them. The hub card stays in BOTH modes: with no
         // Schedule dock tab and no tracker cards, it is the only way in.
-        final others = ZModePrefs.enabled
+        final others = ZModePrefs.enabled || kNovelOnly
             ? const <ContentMode>[]
             : ContentMode.values.where((m) => m != current).toList();
         // One row now. Schedule and the tracker libraries used to be a card
@@ -1219,7 +1242,12 @@ class _HomeViewState extends State<_HomeView>
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
-                        context.l10n.scheduleAndLists,
+                        // Novel-only build: the Schedule half of this label is
+                        // the anime airing calendar, which ListsHubScreen no
+                        // longer offers a row for.
+                        kNovelOnly
+                            ? context.l10n.listsOnly
+                            : context.l10n.scheduleAndLists,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: AppText.body.copyWith(
@@ -1381,6 +1409,10 @@ class _HomeViewState extends State<_HomeView>
   /// A representative cover for [m] from the user's own history — last watched
   /// show (streaming) or last read manga/novel. Null when there's nothing yet.
   ({String? cover, Map<String, String>? headers}) _modeArt(ContentMode m) {
+    // Novel-only build: the hub card asked for the streaming art while the app
+    // sits in Novel mode, which painted a last-watched show over a novel app.
+    // Borrowing the novel art keeps the card filled from the user's own reading.
+    if (kNovelOnly) m = kOnlyMode;
     if (m == ContentMode.anime) {
       if (!Hive.isBoxOpen(WatchHistory.boxName))
         return (cover: null, headers: null);
@@ -2226,8 +2258,12 @@ class _SourceUnavailable extends StatelessWidget {
 /// testable without pumping the whole [HomeScreen] (whose initState makes a
 /// real update-check network call and opens community/announcement Hive
 /// boxes).
+///
+/// Novel-only build: manga rows can still exist in a restored backup or a
+/// pre-fork history box, so the `manga` branch is skipped rather than trusted
+/// to have no callers — every entry opens in the novel reader.
 Widget readerFor(ReadEntry e, Episode chapter) {
-  if (e.type == ProviderType.manga) {
+  if (e.type == ProviderType.manga && !kNovelOnly) {
     return MangaReaderScreen(
       sourceId: e.sourceId,
       showId: e.showId,
