@@ -60,9 +60,16 @@ void _driftGuard() {
       'mangabaka': 'oauth token',
       'discord': 'rpc token',
       'auth_cache': 'session cache',
+  // Derived cache, rebuilt on demand from the network. Restoring it would pin
+  // every row to whatever the other device had last fetched, and can be
+  // megabytes of home-screen payloads the user cannot edit.
+  'home_cache': 'derived cache',
       // Device-specific: holds a SAF content:// URI that is meaningless (and
       // unwritable) on another device.
       'download_prefs': 'device-specific download location',
+      // Same story: the auto-backup folder is a SAF content:// URI, so it is
+      // unwritable on another install. The restoring device picks its own.
+      'backup_folder': 'device-specific backup folder',
       // Reference source ids the restoring device may not have installed.
       'pinned_sources': 'source ids',
       'subscriptions': 'source ids',

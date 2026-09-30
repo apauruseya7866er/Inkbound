@@ -14,7 +14,7 @@ import '../../core/tv/tv_focusable.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../core/ui/states.dart';
 import '../../l10n/l10n.dart';
-import '../settings/download_location_screen.dart' show folderLabelFromUri;
+import '../../core/platform/saf_uri.dart' show folderLabelFromUri;
 import 'downloads_screen.dart';
 
 /// TV Downloads: a full-screen focusable list of downloaded episodes backed by

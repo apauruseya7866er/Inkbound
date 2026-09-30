@@ -1,22 +1,18 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/app_mode.dart';
-import '../../core/backup/backup_cloud.dart';
 import '../../core/backup/backup_file.dart';
+import '../../core/backup/backup_folder.dart';
 import '../../core/backup/backup_payload.dart';
 import '../../core/backup/backup_service.dart';
 import '../../core/di/injector.dart';
-import '../../core/supabase/supabase_service.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../core/ui/app_dialog.dart';
 import '../../core/ui/settings_widgets.dart';
-import '../auth/auth_cubit.dart';
-import '../auth/auth_screens.dart';
 import '../../l10n/l10n.dart';
 
 class BackupScreen extends StatefulWidget {
@@ -31,31 +27,10 @@ class _BackupScreenState extends State<BackupScreen> {
   bool _busy = false;
 
   BackupService get _service => sl<BackupService>();
-  BackupCloud _cloud() => BackupCloud(sl<SupabaseService>());
+  BackupFolder get _folder => sl<BackupFolder>();
+  BackupFolderPrefs get _prefs => sl<BackupFolderPrefs>();
 
   bool get _isTv => sl<AppMode>().isTv;
-
-  Future<void> _backupToCloud() async {
-    if (!requireLogin(context, action: context.l10n.signInToBackUpToCloud))
-      return;
-    final uid = context.read<AuthCubit>().state.user?.id;
-    if (uid == null) return;
-    setState(() => _busy = true);
-    try {
-      await _cloud().upload(uid, _service.build(_selected));
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.backedUpToCloud)));
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.cloudBackupFailed)));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
 
   Future<void> _saveToFile() async {
     setState(() => _busy = true);
@@ -83,27 +58,36 @@ class _BackupScreenState extends State<BackupScreen> {
     }
   }
 
-  Future<void> _restoreFromCloud() async {
-    if (!requireLogin(context, action: context.l10n.signInToRestoreFromCloud))
-      return;
-    final uid = context.read<AuthCubit>().state.user?.id;
-    if (uid == null) return;
+  /// Writes straight into the picked folder, bypassing the retention check so
+  /// "Back up now" always means now.
+  Future<void> _backUpToFolder() async {
     setState(() => _busy = true);
-    late final RestoreReport report;
+    String? name;
     try {
-      final p = await _cloud().download(uid);
-      if (!mounted) return;
-      if (p == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.noCloudBackupFound)),
-        );
-        return;
-      }
-      report = await _service.restore(p, _selected);
+      name = await _folder.write(_service.build(_selected));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-    if (mounted) _showResultAfterBusy(report);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          name == null
+              ? 'Could not write to that folder. It may have been moved or '
+                    'the permission was revoked.'
+              : 'Backed up to ${_prefs.treeLabel ?? 'your folder'} ($name)',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickFolder() async {
+    final label = await _folder.pick();
+    if (!mounted || label == null) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Backing up to $label')),
+    );
   }
 
   Future<void> _restoreFromFile() async {
@@ -309,7 +293,8 @@ class _BackupScreenState extends State<BackupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final uid = context.watch<AuthCubit>().state.user?.id;
+    final prefs = _prefs;
+    final configured = prefs.isConfigured;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -322,8 +307,10 @@ class _BackupScreenState extends State<BackupScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
                 child: Text(
-                  'Save your sources, list and settings — to a file on your '
-                  'device or to your Zangetsu account. Restoring only adds '
+                  'Save your sources, list and settings as a file. Nothing is '
+                  'uploaded and there is no account: point the backup folder at '
+                  'Google Drive (or any folder your phone already syncs) and '
+                  'your copies leave the device anyway. Restoring only adds '
                   'things back; it never deletes what you already have.',
                   style: AppText.caption,
                 ),
@@ -348,21 +335,73 @@ class _BackupScreenState extends State<BackupScreen> {
                   ),
                 ],
               ),
-              const SettingsSectionLabel('Create a backup'),
+              const SettingsSectionLabel('Automatic backup'),
               SettingsCard(
                 children: [
                   SettingsTile(
                     autofocus: true,
+                    icon: Icons.drive_folder_upload_outlined,
+                    title: 'Back up to a folder',
+                    subtitle: configured
+                        ? prefs.treeLabel ?? 'Folder chosen'
+                        : 'Pick once, then Zangetsu writes a backup every day. '
+                              'Google Drive works.',
+                    onTap: _busy ? null : _pickFolder,
+                  ),
+                  if (configured) ...[
+                    SettingsTile(
+                      icon: prefs.autoEnabled
+                          ? Icons.check_box_rounded
+                          : Icons.check_box_outline_blank_rounded,
+                      title: 'Back up automatically',
+                      subtitle: prefs.autoEnabled
+                          ? 'A backup is written when you close the app'
+                          : 'Off — only "Back up now" writes a file',
+                      onTap: _busy
+                          ? null
+                          : () async {
+                              await prefs.setAutoEnabled(!prefs.autoEnabled);
+                              if (mounted) setState(() {});
+                            },
+                    ),
+                    SettingsTile(
+                      icon: Icons.save_alt_outlined,
+                      title: 'Back up now',
+                      subtitle: prefs.lastBackupAt == null
+                          ? 'No backup written yet'
+                          : 'Last: ${_fmtDt(prefs.lastBackupAt!)}',
+                      onTap: _busy ? null : _backUpToFolder,
+                    ),
+                    SettingsTile(
+                      icon: Icons.folder_off_outlined,
+                      title: 'Stop backing up to this folder',
+                      onTap: _busy
+                          ? null
+                          : () async {
+                              await prefs.setFolder(null, null);
+                              if (mounted) setState(() {});
+                            },
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                      child: Text(
+                        'Keeps the newest ${prefs.keep} backups in that folder '
+                        'and deletes the older ones. Files you put there '
+                        'yourself are never touched.',
+                        style: AppText.caption,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+              const SettingsSectionLabel('Create a backup by hand'),
+              SettingsCard(
+                children: [
+                  SettingsTile(
                     icon: Icons.save_alt_outlined,
                     title: context.l10n.saveToAFile,
                     subtitle: context.l10n.saveABackupFileToYourDownloadsFolder,
                     onTap: _busy ? null : _saveToFile,
-                  ),
-                  SettingsTile(
-                    icon: Icons.cloud_upload_outlined,
-                    title: context.l10n.backUpToCloud,
-                    subtitle: context.l10n.saveACopyToYourAccountNeedsSignIn,
-                    onTap: _busy ? null : _backupToCloud,
                   ),
                 ],
               ),
@@ -372,34 +411,14 @@ class _BackupScreenState extends State<BackupScreen> {
                   SettingsTile(
                     icon: Icons.folder_open_outlined,
                     title: context.l10n.restoreFromAFile,
-                    subtitle: context.l10n.pickABackupFileYouSavedEarlier,
+                    subtitle: configured
+                        ? 'Your backup folder is just one tap away in the '
+                              'picker'
+                        : context.l10n.pickABackupFileYouSavedEarlier,
                     onTap: _busy ? null : _restoreFromFile,
-                  ),
-                  SettingsTile(
-                    icon: Icons.cloud_download_outlined,
-                    title: context.l10n.restoreFromCloud,
-                    subtitle: context.l10n.bringBackYourLatestCloudBackup,
-                    onTap: _busy ? null : _restoreFromCloud,
                   ),
                 ],
               ),
-              if (uid != null)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: FutureBuilder<DateTime?>(
-                    future: _cloud().lastBackupAt(uid),
-                    builder: (_, snap) {
-                      final dt = snap.data;
-                      final label = dt == null
-                          ? context.l10n.never
-                          : _fmtDt(dt);
-                      return Text(
-                        'Last cloud backup: $label',
-                        style: AppText.caption,
-                      );
-                    },
-                  ),
-                ),
             ],
           ),
           if (_busy)

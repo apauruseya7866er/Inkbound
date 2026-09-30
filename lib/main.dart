@@ -18,6 +18,9 @@ import 'core/ui/splash_style.dart';
 import 'core/hive/safe_box.dart';
 import 'core/discord/discord_rpc.dart';
 import 'core/environment.dart';
+import 'core/backup/backup_folder.dart';
+import 'core/backup/backup_payload.dart';
+import 'core/backup/backup_service.dart';
 import 'core/logging/app_logger.dart';
 import 'core/logging/crash_reports.dart';
 import 'core/platform/apple_tv.dart';
@@ -258,6 +261,9 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
               if (sl.isRegistered<AppMode>() && sl<AppMode>().isTv) {
                 unawaited(_finishTvProviderBoot());
               }
+              // A phone that opens straight into the reader never pauses, so
+              // the launch pass is what gets a first-time folder its file.
+              unawaited(_autoBackup());
             });
           }
           if (!_handledLaunchTaps) {
@@ -434,6 +440,10 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
       // Opening the in-app player (native surface / immersive) fires paused
       // even though the user is still watching. Do not drop Rich Presence.
       discord?.onPaused();
+      // Backgrounding is the last reliable moment before the process can be
+      // killed, and a backup is exactly the thing you want written before
+      // that. No-op unless a folder is picked and one is due.
+      unawaited(_autoBackup());
     } else if (state == AppLifecycleState.detached) {
       _foregroundSync?.cancel();
       _foregroundSync = null;
@@ -447,6 +457,26 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
   /// the DB). Also flushes any un-synced My List adds.
   void _syncOnResume() =>
       _syncLibrary(maxAge: _syncFreshness, forceMyList: true);
+
+  /// Writes an automatic backup into the folder the user picked, if one is due.
+  ///
+  /// The local app's answer to cloud sync: no account, no server, just a JSON
+  /// file in a folder — point that folder at Google Drive (or any synced
+  /// folder) and the copy leaves the device for free. Everything is included,
+  /// because a backup you have to configure is a backup you don't make.
+  Future<void> _autoBackup() async {
+    if (!sl.isRegistered<BackupFolder>()) return;
+    try {
+      await sl<BackupFolder>().runIfDue(
+        build: () =>
+            sl<BackupService>().build({...BackupBundle.values}),
+      );
+    } catch (e, st) {
+      // Never let a backup failure surface as a crash or block the pause
+      // handler; the next opportunity retries.
+      AppLogger.instance.logError(e, st);
+    }
+  }
 
   void _startForegroundSync() {
     _foregroundSync?.cancel();

@@ -90,6 +90,7 @@ import '../tracker/relay/tracker_relay.dart';
 import '../app_mode.dart';
 import '../appwrite/appwrite_service.dart';
 import '../backup/backup_service.dart';
+import '../backup/backup_folder.dart';
 import '../backup/sources_backup.dart';
 import '../backup/library_backup.dart';
 import '../backup/settings_backup.dart';
@@ -723,6 +724,13 @@ Future<void> initDependencies() async {
     LibraryBackup(),
     SettingsBackup(),
   ));
+  // Automatic backup to a folder the user picked. Account-free: the app writes
+  // a JSON file into a SAF tree it already holds permission for, so a
+  // cloud-synced folder (Drive/OneDrive/Nextcloud) gives off-device backup
+  // without a server or a sign-in.
+  await BackupFolderPrefs.init();
+  sl.registerSingleton<BackupFolderPrefs>(BackupFolderPrefs());
+  sl.registerSingleton<BackupFolder>(BackupFolder(sl<BackupFolderPrefs>()));
 
   // Load bundled extractor BEFORE the providers so getVideoSources can resolve.
   // Extractors are NOT providers — they stay loaded directly on the manager.

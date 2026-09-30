@@ -6,6 +6,7 @@ import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/download/download_manager.dart';
 import 'package:watch_app/core/download/download_prefs.dart';
+import 'package:watch_app/core/platform/saf_uri.dart';
 import 'package:watch_app/features/settings/download_location_screen.dart';
 
 /// The screen asks the manager which volumes exist so it can list them beside
