@@ -56,23 +56,49 @@ void main() {
     });
 
     // Search left the dock for a Home header icon; Schedule left it for the
-    // card row on Home. Sources went the other way — it was a header icon and
-    // is now a destination, which is why Downloads is no longer a default.
-    test('the default dock has neither Search nor Schedule', () {
+    // card row on Home. Sources went the other way in the full build — it was a
+    // header icon and became a destination, which is why Downloads is not a
+    // default there.
+    //
+    // Novel-only build: My List and Sources are not offered at all, so the
+    // default dock is Home and Profile and nothing else.
+    test('the default dock is the tabs this build offers', () {
       expect(NavPrefs.defaultTabs, [
         DockTab.home,
-        DockTab.myList,
-        DockTab.sources,
         DockTab.profile,
       ]);
+      for (final gone in [DockTab.myList, DockTab.sources]) {
+        expect(
+          NavPrefs.availableTabs,
+          isNot(contains(gone)),
+          reason: '$gone is a mixed-media catalogue; a novels-only build has '
+              'nothing to put in it',
+        );
+      }
     });
 
-    // The bar fits five icons and the mode switcher takes one of them
-    // without being a DockTab, so the tab cap has to be four. Picking five
-    // tabs used to draw a sixth icon and squeeze the row.
-    test('the cap leaves a slot for the centre button', () {
+    // A dock saved before the drop names tabs this build no longer offers.
+    // They have to go, not linger as a tab the reader cannot get back to.
+    test('a dock naming an unavailable tab loses exactly that tab', () {
+      expect(
+        sanitized([
+          DockTab.home,
+          DockTab.myList,
+          DockTab.sources,
+          DockTab.profile,
+        ]),
+        [DockTab.home, DockTab.profile],
+      );
+    });
+
+    // The bar fits five icons and the mode switcher took one of them without
+    // being a DockTab, so the cap is four. In the novel-only build the switcher
+    // is gone, so the floor drops to two: with Home and Profile all that is
+    // left, a floor of three would have made the default dock illegal.
+    test('the floor allows the smallest dock this build can offer', () {
       expect(NavPrefs.maxTabs, 4);
-      expect(NavPrefs.defaultTabs.length, NavPrefs.maxTabs);
+      expect(NavPrefs.defaultTabs.length, lessThanOrEqualTo(NavPrefs.maxTabs));
+      expect(sanitized([DockTab.home, DockTab.profile]), hasLength(2));
     });
   });
 
@@ -110,11 +136,10 @@ void main() {
 
       expect(out, contains(DockTab.profile));
       expect(out.length, greaterThanOrEqualTo(NavPrefs.minTabs));
-      // Downloads is in defaultTabs now, but this list was SAVED by the user
-      // and never had it — only the unknown 'search'/'schedule' entries drop.
+      // Three of the five names do not survive: 'search' and 'schedule' no
+      // longer exist, and 'myList' is not a tab this build offers.
       expect(out, [
         DockTab.home,
-        DockTab.myList,
         DockTab.profile,
       ]);
     });
@@ -132,9 +157,24 @@ void main() {
     });
 
     test('a chosen landing tab survives a restart', () async {
+      // It has to be a tab that is ON the bar: `startTab` is validated against
+      // the shown dock, so a landing tab the reader cannot tap is not a choice.
+      await NavPrefs().setTabs([
+        DockTab.home,
+        DockTab.history,
+        DockTab.profile,
+      ]);
+      await NavPrefs().setStartTab(DockTab.history);
+
+      expect(NavPrefs().startTab, DockTab.history);
+    });
+
+    // The app has to land somewhere the dock can navigate away from, and a tab
+    // this build no longer offers is not somewhere at all.
+    test('a landing tab this build dropped falls back to the first tab', () async {
       await NavPrefs().setStartTab(DockTab.myList);
 
-      expect(NavPrefs().startTab, DockTab.myList);
+      expect(NavPrefs().startTab, DockTab.home);
     });
 
     // Launch has to land somewhere the dock can navigate away from. A tab
@@ -147,7 +187,7 @@ void main() {
     });
 
     test('resetting forgets the landing tab too', () async {
-      await NavPrefs().setStartTab(DockTab.myList);
+      await NavPrefs().setStartTab(DockTab.history);
       await NavPrefs().reset();
 
       expect(NavPrefs().startTab, NavPrefs.defaultTabs.first);
