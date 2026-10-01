@@ -208,12 +208,13 @@ void main() {
       }
     });
 
-    test('a sentence beat is long enough to hear', () {
-      // The beats were 40-150ms, which is roughly the space between two lines of
-      // one paragraph: the narration ran the sentences together and read as a
-      // machine working through a list. What has to be true now is that a plain
-      // full stop leaves a gap a person would leave.
-      expect(TtsPause.normal, greaterThanOrEqualTo(250));
+    test('a sentence beat is out of the machine-gun range', () {
+      // The beats were 40-150ms, about the space between two lines of one
+      // paragraph, and ran the sentences together. Widening them fixed that and
+      // then overshot when heard on a real chapter, so the width is a judgement
+      // call and this only pins the floor: a full stop must stay clear of the
+      // range that caused the complaint in the first place.
+      expect(TtsPause.normal, greaterThan(150));
       expect(TtsPause.question, greaterThan(TtsPause.normal));
     });
 

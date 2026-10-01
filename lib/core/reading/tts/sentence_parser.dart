@@ -28,35 +28,37 @@ import 'narration_filter.dart';
 /// Pause after a sentence, in milliseconds, chosen by its terminator.
 ///
 /// These are the gaps a person leaves, not the gaps a machine needs to get
-/// through a queue. They were 40–150ms, which is roughly the space between two
+/// through a queue. They were 40-150ms, which is roughly the space between two
 /// lines of one paragraph: the sentences ran together and the narration read
-/// like something working through a list. What sounds natural is a beat you can
-/// notice without calling it a pause — a few hundred milliseconds — and the
-/// punctuation still legible in it. A question takes the longest of the three
-/// because people leave the floor open at one.
+/// like something working through a list. Widening them fixed that and
+/// overshot — heard on a real chapter, a full stop wanted about 40% less than
+/// the first attempt, which is what these are now. The order never moved: a
+/// question still beats a full stop, an ellipsis still beats both. Only the
+/// width is a judgement call, and it is the reader's to make through
+/// `TtsSentenceGap`.
 class TtsPause {
   const TtsPause._();
 
   /// Comma-ish beat, and after an em/en dash.
-  static const int short = 150;
+  static const int short = 90;
 
   /// A plain sentence end.
-  static const int normal = 340;
+  static const int normal = 204;
 
   /// After `!`.
-  static const int exclamation = 420;
+  static const int exclamation = 252;
 
   /// After `?` — a beat longer than `!`, matching how people actually pause.
-  static const int question = 520;
+  static const int question = 312;
 
   /// After an em/en dash.
   static const int dash = short;
 
   /// After a colon that was used as a divider.
-  static const int colon = 250;
+  static const int colon = 150;
 
   /// After a trailing ellipsis: a held breath, not a full stop.
-  static const int ellipsis = 650;
+  static const int ellipsis = 390;
 
   /// Added on top when the next sentence starts a new paragraph.
   ///
@@ -65,7 +67,7 @@ class TtsPause {
   /// still the longest pause in the passage. It stays a modest addition rather
   /// than a fixed silence of its own, since a novel written in one-sentence
   /// paragraphs would otherwise be mostly gaps.
-  static const int paragraph = 320;
+  static const int paragraph = 192;
 }
 
 /// One speakable sentence, with the gap that should follow it.
