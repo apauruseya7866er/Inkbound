@@ -94,10 +94,18 @@ class TextFilterRule {
 
   /// The rule created by hiding a sentence in the reader.
   ///
-  /// Anchored to the whole line rather than matched anywhere, because the user
-  /// hid *that sentence*, not every sentence containing one of its words.
-  /// Escaped for the same reason: a hidden sentence is prose, and prose
-  /// contains brackets, dots and everything else a regex would read as syntax.
+  /// Word-bounded rather than line-anchored. The long press reports the
+  /// *sentence* under the finger, and a sentence is rarely the whole line —
+  /// injected text routinely arrives with two of them run together on one line,
+  /// and the sentence you tapped was the part in the middle. A `^…$` rule could
+  /// only ever match when the line was exactly that sentence, so hiding one out
+  /// of two silently did nothing: the rule was saved, the re-filter ran, and the
+  /// text stayed until the next launch.
+  ///
+  /// The lookarounds keep it from cutting mid-word (`saw` must not match inside
+  /// `sawtooth`) without including the neighbouring characters in the cut, and
+  /// the sentence is escaped because it is prose: brackets, dots and everything
+  /// else a regex would read as syntax.
   static TextFilterRule hiddenSentence(
     String sentence, {
     required String id,
@@ -109,7 +117,7 @@ class TextFilterRule {
         : trimmed;
     return TextFilterRule(
       id: id,
-      pattern: '^\\s*${RegExp.escape(trimmed)}\\s*\$',
+      pattern: '(?<![\\w])${RegExp.escape(trimmed)}(?![\\w])',
       isRegex: true,
       label: label ?? 'Hidden: $short',
     );

@@ -42,14 +42,14 @@ void main() {
     });
 
     group('hiddenSentence', () {
-      test('escapes the sentence and anchors it to a whole line', () {
+      test('escapes the sentence and bounds it to word edges', () {
         final rule = TextFilterRule.hiddenSentence(
           'The End (vol. 3). Thanks!',
           id: 'h1',
         );
         // Every character that means something in a regex is escaped, so the
         // rule matches the sentence rather than a pattern shaped like it.
-        expect(rule.pattern, r'^\s*The End \(vol\. 3\)\. Thanks!\s*$');
+        expect(rule.pattern, r'(?<![\w])The End \(vol\. 3\)\. Thanks!(?![\w])');
         expect(
           RegExp(rule.pattern, caseSensitive: false).hasMatch(
             '  The End (vol. 3). Thanks!  ',
@@ -58,16 +58,33 @@ void main() {
         );
       });
 
-      test('does not fire on a line that merely contains the sentence', () {
+      test('matches inside a longer line, which is the bug it had', () {
+        // Two pieces of injected text on one line. The long press reports one
+        // of them, so a line-anchored rule could never fire: hiding it saved the
+        // rule, re-ran the filter, and left the text exactly where it was.
+        final rule = TextFilterRule.hiddenSentence(
+          'Read at novelsb.com!',
+          id: 'h1',
+        );
+        final re = RegExp(rule.pattern, caseSensitive: false, multiLine: true);
+        expect(
+          re.hasMatch('If you like it, read at novelsb.com! New chapters daily.'),
+          isTrue,
+        );
+      });
+
+      test('still refuses to cut mid-word', () {
         final rule = TextFilterRule.hiddenSentence('The End', id: 'h1');
-        final re = RegExp(rule.pattern, caseSensitive: false);
+        final re = RegExp(rule.pattern, caseSensitive: false, multiLine: true);
         expect(re.hasMatch('The End'), isTrue);
-        expect(re.hasMatch('And then came The End of it all.'), isFalse);
+        expect(re.hasMatch('And then came The End of it all.'), isTrue);
+        // "The Endeavour" contains "The End" - that must not count.
+        expect(re.hasMatch('The Endeavour began.'), isFalse);
       });
 
       test('trims before escaping, and labels a long sentence briefly', () {
         final rule = TextFilterRule.hiddenSentence('  short  ', id: 'h1');
-        expect(rule.pattern, r'^\s*short\s*$');
+        expect(rule.pattern, r'(?<![\w])short(?![\w])');
         final long = TextFilterRule.hiddenSentence('x' * 60, id: 'h2');
         expect(long.label.contains('…'), isTrue);
         expect(long.label.length, lessThan(50));

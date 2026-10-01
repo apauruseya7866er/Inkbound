@@ -210,5 +210,44 @@ void main() {
       const html = '<p>He looked at the sea.</p><p>It was calm.</p>';
       expect(filterNovelHtml(html, builtins), html);
     });
+
+    // The report that started this: a chapter ended with two pieces of injected
+    // text on one line. Long-pressing one and hitting Hide saved the rule and
+    // re-filtered the chapter, and the sentence stayed put - because the rule
+    // was anchored to the whole line and the line held more than the sentence.
+    test('a hidden sentence is removed from the middle of a line', () {
+      const html = '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
+      final engine = TextFilterEngine([
+        TextFilterRule.hiddenSentence('read at novelsb.com!', id: 'h1'),
+      ]);
+      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
+      expect(text, contains('If you like it'));
+      expect(text, contains('New chapters daily.'));
+      expect(text, isNot(contains('novelsb.com')));
+      // The comma went with the cut: _isSeparator absorbs a comma so an aside
+      // removed mid-sentence does not leave "start , end" behind. Sentence
+      // terminators are deliberately not absorbed; a comma is.
+    });
+
+    test('two sentences hidden from one line both go, and the line survives', () {
+      const html = '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
+      final engine = TextFilterEngine([
+        TextFilterRule.hiddenSentence('read at novelsb.com!', id: 'h1'),
+        TextFilterRule.hiddenSentence('New chapters daily.', id: 'h2'),
+      ]);
+      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
+      // What is left is still a line with real prose in it, not a collapsed
+      // empty paragraph.
+      expect(text.trim(), 'If you like it');
+    });
+
+    test('hiding the last sentence of a line does not take the stop with it', () {
+      const html = '<p>Stay with me.</p><p>Read at novelsb.com!</p>';
+      final engine = TextFilterEngine([
+        TextFilterRule.hiddenSentence('Read at novelsb.com!', id: 'h1'),
+      ]);
+      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
+      expect(text.trim(), 'Stay with me.');
+    });
   });
 }

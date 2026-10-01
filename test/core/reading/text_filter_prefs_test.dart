@@ -64,7 +64,7 @@ void main() {
   });
 
   group('hideTextEverywhere', () {
-    test('adds an anchored rule that matches the sentence', () async {
+    test('adds a rule that matches the sentence on its own line', () async {
       final rule = await prefs.hideTextEverywhere('VOTE FOR ME ON GOODNOVELS');
       expect(prefs.textFilterRules.map((r) => r.id), [rule.id]);
       expect(
@@ -73,6 +73,17 @@ void main() {
         ),
         'The battle began.\nThe rain fell.',
       );
+    });
+
+    // The bug this replaced: the long press reports a sentence, and two pieces
+    // of injected text often share a line, so a line-anchored rule never fired.
+    test('a sentence sharing a line with other text is still removed', () async {
+      await prefs.hideTextEverywhere('VOTE FOR ME ON GOODNOVELS');
+      final stripped = prefs.textFilterEngine.stripFiltered(
+        'He frowned. VOTE FOR ME ON GOODNOVELS New chapters daily.',
+      );
+      expect(stripped, isNot(contains('GOODNOVELS')));
+      expect(stripped, contains('New chapters daily.'));
     });
 
     test('hiding the same sentence twice does not duplicate the rule', () async {
@@ -84,7 +95,7 @@ void main() {
 
     test('trims before matching, so trailing whitespace is not stored', () async {
       final rule = await prefs.hideTextEverywhere('  The End  ');
-      expect(rule.pattern, r'^\s*The End\s*$');
+      expect(rule.pattern, r'(?<![\w])The End(?![\w])');
     });
 
     test('removeTextFilterRule brings the sentence back', () async {
