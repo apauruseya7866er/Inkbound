@@ -384,6 +384,28 @@ class TtsCubit extends Cubit<TtsState> {
 
   Future<void> toggle() => state.isSpeaking ? pause() : play();
 
+  /// Drops a session the engine no longer has.
+  ///
+  /// Narration can end without this cubit being told: the notification's stop
+  /// button, a media key, or the app being swiped out of the task switcher,
+  /// which stops the service natively (see `TtsService.onTaskRemoved`). While
+  /// the app is not on screen nobody sees the difference. Coming back to it is
+  /// where it shows — a panel offering pause and a sentence counter for a
+  /// voice that has been silent since before the reader reopened the chapter,
+  /// and a play button that then appears to do nothing.
+  ///
+  /// Checks the service rather than assuming: this is the only place that can
+  /// tell the two apart, and [TtsPlatform.serviceRunning] is a single channel
+  /// round trip on a path that only runs when the reader appears.
+  Future<void> syncWithEngine() async {
+    if (!state.isActive) return;
+    if (await _platform.serviceRunning()) return;
+    // The position is kept: the sentence list is still the one on screen, and a
+    // reader who presses play expects to carry on from where the voice stopped,
+    // not from the top.
+    await stop(clearPosition: false);
+  }
+
   /// Stops reading.
   ///
   /// [clearPosition] distinguishes the two reasons to stop. Pressing the stop

@@ -139,6 +139,33 @@ class TtsService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Swiping the app out of the task switcher ends the narration.
+     *
+     * ### Why the background features survive this
+     *
+     * Everything else the app does in the background — the home button, another
+     * app in front, the screen off, the lock screen, a headset key — leaves the
+     * task in place, so none of it comes through here and all of it keeps
+     * reading. What this callback catches is the one gesture that means "I am
+     * finished with this app": the card is thrown away.
+     *
+     * Leaving the voice running after that is worse than the absence of a
+     * feature. There is no screen, no panel and no chapter behind it any more,
+     * so the only things that can stop it are the notification or the lock
+     * screen — and a reader who swipes a task away is not looking for either.
+     * It reads as the app refusing to be closed, and the cure nobody knows about
+     * is the one control nobody can reach.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Same path as the notification's stop button, so the queue, the wake
+        // lock, the audio focus, the session and the notification all end
+        // together — stopping only the engine would leave a foreground
+        // notification claiming something is playing.
+        stopEverything()
+        super.onTaskRemoved(rootIntent)
+    }
+
     // ── foreground / wakelock ────────────────────────────────────────────────
 
     private fun startForegroundCompat(n: Notification) {

@@ -875,6 +875,64 @@ void main() {
       await cubit.close();
     });
 
+    // Narration can end without this cubit hearing about it — the notification,
+    // a media key, or the app being swiped out of the task switcher, which stops
+    // the service natively. Returning to the reader must not leave a panel
+    // offering to pause a voice that stopped minutes ago.
+    group('syncWithEngine', () {
+      test('drops a session the service no longer has', () async {
+        final cubit = await build();
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
+        platform.emit(const TtsSentenceStarted(2));
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.isActive, isTrue);
+
+        // The service died behind our back.
+        platform.serviceUp = false;
+        await cubit.syncWithEngine();
+
+        expect(cubit.state.isActive, isFalse);
+        expect(cubit.state.status, TtsStatus.idle);
+        // The sentence list is still the one on screen, so play has to carry on
+        // from where the voice stopped rather than from the top.
+        expect(prefs.resumePoint('b1')?.sentenceIndex, 2);
+        await cubit.close();
+      });
+
+      test('leaves a live session alone', () async {
+        final cubit = await build();
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
+        platform.emit(const TtsSentenceStarted(2));
+        await Future<void>.delayed(Duration.zero);
+        final stopsBefore = platform.stopCalls;
+
+        await cubit.syncWithEngine();
+
+        expect(cubit.state.isActive, isTrue);
+        expect(platform.stopCalls, stopsBefore);
+        await cubit.close();
+      });
+
+      test('does not ask the platform when nothing is playing', () async {
+        final cubit = await build();
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+
+        await cubit.syncWithEngine();
+
+        // No channel round trip on a path that runs every time the reader opens.
+        expect(cubit.state.status, TtsStatus.idle);
+        await cubit.close();
+      });
+    });
+
     test('closing the reader leaves the service running', () async {
       final cubit = await build();
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
