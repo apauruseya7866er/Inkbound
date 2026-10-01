@@ -881,7 +881,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     }
 
     if (chapterOffset < 0 || chapterOffset >= layout.length) return null;
-    final hit = _sentenceContaining(chapterOffset);
+    final hit = hideableRangeAt(layout, chapterOffset, _sentences());
     if (hit == null) return null;
     // The *page's* words, not the sentence the narrator would speak. A TTS
     // sentence is normalised on the way out — URLs removed, quotes rewritten,
@@ -889,10 +889,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // the text it is supposed to be hiding. The offsets are exact either way, so
     // this is a slice, not a re-segmentation.
     return (
-      text: layout.text.substring(hit.startIndex, hit.endIndex).trim(),
+      text: hit.text,
       blockIndex: hit.blockIndex,
-      start: hit.startIndex,
-      end: hit.endIndex,
+      start: hit.start,
+      end: hit.end,
     );
   }
 
@@ -914,14 +914,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     return alignChapter(layout, narrationFilter: false).sentences;
   }
 
-  TtsSentence? _sentenceContaining(int offset) {
-    for (final s in _sentences()) {
-      if (offset >= s.startIndex && offset < s.endIndex) return s;
-    }
-    return null;
-  }
-
-  /// Body text style for the page — the one thing every renderer, the block
+/// Body text style for the page - the one thing every renderer, the block
   /// measurements and the long-press hit test have to agree on.
   ///
   /// A second copy of this is not a shortcut, it is a bug waiting: a long press

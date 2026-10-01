@@ -117,6 +117,49 @@ TtsAlignedChapter alignChapter(
   return TtsAlignedChapter(layout: layout, sentences: out);
 }
 
+/// The range a long press at [offset] should offer to hide.
+///
+/// Prefers the read-aloud sentence covering the offset: it is the same list the
+/// panel quotes, so the sentence someone highlights by touch is the sentence
+/// they would hear.
+///
+/// Falls back to the whole block when no sentence covers it. That fallback is
+/// not defensive padding — it is the only way a heading block can be reached at
+/// all. Read-aloud skips headings, so a source that marks its injected line up
+/// as `<h3>` produces text that is plainly on screen and absent from
+/// [sentences]; asking only the sentence list made such a line impossible to
+/// hide, and the long press ended in silence with no dialog to explain why.
+///
+/// Returns null when the offset is outside the chapter or in the gap between
+/// blocks, where there is nothing under the finger to hide.
+({String text, int start, int end, int blockIndex})? hideableRangeAt(
+  NovelTextLayout layout,
+  int offset,
+  List<TtsSentence> sentences,
+) {
+  if (offset < 0 || offset >= layout.length) return null;
+  for (final s in sentences) {
+    if (offset >= s.startIndex && offset < s.endIndex) {
+      return (
+        text: layout.text.substring(s.startIndex, s.endIndex).trim(),
+        start: s.startIndex,
+        end: s.endIndex,
+        blockIndex: s.blockIndex,
+      );
+    }
+  }
+  final index = layout.blockAt(offset);
+  if (index < 0 || index >= layout.blocks.length) return null;
+  final block = layout.blocks[index];
+  if (offset < block.start || offset >= block.end) return null;
+  return (
+    text: block.textOf(layout),
+    start: block.start,
+    end: block.end,
+    blockIndex: block.index,
+  );
+}
+
 /// The spans for one block of [layout], with an optional highlighted range.
 ///
 /// ### Why scroll mode builds its own spans instead of using `HtmlWidget`
