@@ -541,6 +541,20 @@ const List<TextFilterRule> builtinTextFilterRules = [
         r'^\s*(?:www\.)?[a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)*\.(?:com|net|org|io|gg|me|ru|xyz|top|shop|info|co|cc|tv|link|site|online|mobi|ink|pro|vip)\b\S*\s*$',
     label: 'Bare links / watermarks',
   ),
+  // A line made of nothing but rule characters - "--------", "________",
+  // "========", "******" - is a scene break or the rule above an ad, and it is
+  // almost always one of the two. They arrive attached to injected text, so
+  // removing the ad and leaving its underline reads as a half-cleaned chapter.
+  //
+  // Whole-line anchored, so "He stopped --- and said nothing" is untouched: the
+  // rule only takes a line that is *entirely* separator characters. Three is the
+  // floor because two is a dialogue dash, which is real punctuation. Dots are
+  // deliberately absent: a line of them is an ellipsis, which is prose.
+  TextFilterRule(
+    id: 'builtin_separator_line',
+    pattern: r'^\s*[-_=*~#•·—–+]{3,}\s*$',
+    label: 'Separator / rule lines',
+  ),
   TextFilterRule(
     id: 'builtin_email',
     pattern: r'^\s*[\w.+-]+@[\w-]+(?:\.[\w-]+)+\s*$',

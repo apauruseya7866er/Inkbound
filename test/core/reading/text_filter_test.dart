@@ -316,6 +316,18 @@ void main() {
         'if you enjoy': 'If you enjoyed this novel, consider supporting it',
         'follow me': 'Follow me on twitter',
         'email': 'translator@example.com',
+        // Separator / rule lines. These arrive attached to the ads above, and
+        // removing the ad while leaving its underline behind reads as a
+        // half-cleaned chapter.
+        'dashes': '-----------------',
+        'underscores': '______________',
+        'equals': '==========',
+        'asterisks': '******',
+        'hashes': '####',
+        'mixed rule': '-=-=-=-',
+        'em dashes': '—————————',
+        'tildes': '~~~~~',
+        'indented rule': '   ******   ',
       };
 
       cases.forEach((label, line) {
@@ -323,6 +335,59 @@ void main() {
           expect(builtins().isFiltered(line), isTrue, reason: line);
           expect(builtins().stripFiltered(line)?.trim(), isEmpty);
         });
+      });
+
+      test('a rule line does not take the sentence that uses a dash', () {
+        // The false positive that matters: dashes, underscores and equals are
+        // all real punctuation inside a line of prose. Only a line that is
+        // ENTIRELY separators goes.
+        const prose = [
+          'He stopped --- and said nothing at all.',
+          'She wrote her name on the line and ___ waited.',
+          'The door was ajar -- a hand on the frame.',
+        ];
+        final engine = builtins();
+        for (final line in prose) {
+          expect(engine.isFiltered(line), isFalse, reason: line);
+        }
+      });
+
+      test('a two-character dash is left alone, it is a dialogue dash', () {
+        // Three is the floor on purpose: below it the line is punctuation.
+        expect(builtins().isFiltered('--'), isFalse);
+        expect(builtins().isFiltered('=='), isFalse);
+        expect(builtins().isFiltered('***'), isTrue);
+      });
+
+      test('a line of dots stays, it is an ellipsis', () {
+        expect(builtins().isFiltered('...'), isFalse);
+        expect(builtins().isFiltered('. . . . .'), isFalse);
+      });
+
+      test('the underline under a markdown heading goes, the title stays', () {
+        // `Title\n=====` is a heading, and taking only the rule is correct:
+        // the title is content.
+        const chapter = 'Chapter 12\n====================\nThe rain had not stopped.';
+        expect(
+          builtins().stripFiltered(chapter),
+          'Chapter 12\nThe rain had not stopped.',
+        );
+      });
+
+      test('the rule above an ad is removed with it', () {
+        const chapter =
+            'This training was the same method Kitazawa used on Hinata.\n'
+            '\n'
+            '-------------------\n'
+            '\n'
+            'AN: Check out my P@treon For +40 extra Chapters.';
+        final out = builtins().stripFiltered(chapter);
+        expect(out, isNot(contains('---')));
+        expect(
+          out,
+          'This training was the same method Kitazawa used on Hinata.\n'
+          'AN: Check out my P@treon For +40 extra Chapters.',
+        );
       });
 
       test('removes a bare link without eating the sentence around it', () {

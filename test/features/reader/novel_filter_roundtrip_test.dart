@@ -91,11 +91,53 @@ void main() {
     });
 
     test('a paragraph that becomes empty is dropped, not left blank', () {
-      const only = '<p>He put the phone down.</p><p>READ AT NOVELSB.COM<br></p>';
+      const only =
+          '<p>He put the phone down.</p><p>READ AT NOVELSB.COM<br></p>';
       final engine = engineFor([
         TextFilterRule.hiddenSentence('READ AT NOVELSB.COM', id: 'h1'),
       ]);
       expect(layoutOf(only, engine).trim(), 'He put the phone down.');
+    });
+  });
+
+  // The rule-line built-in is the one built-in that has to survive being a
+  // whole line of a bigger block, because a source is free to ship the rule
+  // and the ad as one <p> separated by a <br> instead of as two paragraphs.
+  group('separator lines, through the real chapter pipeline', () {
+    final builtins = TextFilterEngine(builtinTextFilterRules);
+
+    test('a rule line in its own paragraph takes the paragraph with it', () {
+      const chapter =
+          '<p>He sheathed the sword.</p>'
+          '<p>-------------------<br></p>'
+          '<p>End of chapter.<br></p>';
+      expect(
+        layoutOf(chapter, builtins).trim(),
+        'He sheathed the sword.\nEnd of chapter.',
+      );
+    });
+
+    test('a rule line sharing a paragraph with the ad still goes', () {
+      const chapter =
+          '<p>He sheathed the sword.<br>'
+          '-------------------<br>'
+          'AN: Check out my P@treon For +40 extra Chapters.<br></p>'
+          '<p>End of chapter.<br></p>';
+      final text = layoutOf(chapter, builtins);
+      expect(text, isNot(contains('---')));
+      // The heading is its own block, so the rule and the ad both leave and the
+      // prose on either side is untouched.
+      expect(text, contains('He sheathed the sword.'));
+      expect(text, contains('End of chapter.'));
+    });
+
+    test('prose that merely contains a dash survives the whole pipeline', () {
+      const chapter =
+          '<p>"Fine," Tsunade agreed -- her voice softened slightly.</p>'
+          '<p>He wrote --- and then stopped.</p>';
+      final text = layoutOf(chapter, builtins);
+      expect(text, contains('her voice softened slightly.'));
+      expect(text, contains('He wrote --- and then stopped.'));
     });
   });
 }
