@@ -1,35 +1,44 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The Undo bar the reader shows after a sentence is hidden.
 ///
-/// It is a plain [SnackBar], so Flutter owns the timing - this does not test
-/// the framework, it pins the two things a change here could actually break:
-/// that the bar says what happened and offers the way back, and that it is a
-/// real SnackBar rather than something pinned open.
+/// It is a [SnackBar] carrying a [SnackBarAction], and on this Flutter version
+/// that combination is NOT auto-dismissed — the bar stayed on screen until the
+/// app was restarted. The reader therefore takes it down itself with a Timer
+/// (see `novel_reader_screen._undoHideSnack`), and these tests pin both halves
+/// of that: the bar says what happened and offers Undo, and an explicit hide is
+/// what actually removes it.
 ///
-/// The dismissal assertion advances the clock in one jump. Pumped in many small
-/// steps the messenger's internal timer does not settle, which looks like a
-/// stuck bar and is only an artefact of how the harness drives time.
+/// If a future Flutter restores auto-dismissal, the second test failing is the
+/// signal that the Timer can go.
 void main() {
-  testWidgets('the Undo bar says what happened and offers the way back',
-      (tester) async {
+  Future<GlobalKey<ScaffoldMessengerState>> mount(WidgetTester t) async {
     final key = GlobalKey<ScaffoldMessengerState>();
-    await tester.pumpWidget(
+    await t.pumpWidget(
       MaterialApp(
         scaffoldMessengerKey: key,
         home: const Scaffold(body: SizedBox.expand()),
       ),
     );
+    return key;
+  }
 
-    key.currentState!
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: const Text('Hidden everywhere: read at novelsb.com!'),
-          action: SnackBarAction(label: 'Undo', onPressed: () {}),
-        ),
-      );
+  void showUndo(ScaffoldMessengerState m) => m
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(
+        content: Text('Hidden everywhere: read at novelsb.com!'),
+        action: SnackBarAction(label: 'Undo', onPressed: _noop),
+      ),
+    );
+
+  testWidgets('the bar names what was hidden and offers the way back',
+      (tester) async {
+    final key = await mount(tester);
+    showUndo(key.currentState!);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -37,27 +46,28 @@ void main() {
     expect(find.text('Undo'), findsOneWidget);
   });
 
-  testWidgets('it is a SnackBar that takes the default duration, so it leaves',
+  testWidgets('a SnackBar with an action is not dismissed by its own duration',
       (tester) async {
-    final key = GlobalKey<ScaffoldMessengerState>();
-    await tester.pumpWidget(
-      MaterialApp(
-        scaffoldMessengerKey: key,
-        home: const Scaffold(body: SizedBox.expand()),
-      ),
-    );
-
-    key.currentState!.showSnackBar(
-      const SnackBar(
-        content: Text('Hidden everywhere: something'),
-        action: SnackBarAction(label: 'Undo', onPressed: _noop),
-      ),
-    );
+    // The reason the reader does not trust the default. Explicit `duration` and
+    // `SnackBarBehavior.floating` were both tried and neither helps.
+    final key = await mount(tester);
+    showUndo(key.currentState!);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
+    await tester.pump(const Duration(seconds: 6));
+    await tester.pumpAndSettle();
     expect(find.textContaining('Hidden everywhere:'), findsOneWidget);
+  });
 
-    await tester.pump(const Duration(seconds: 5));
+  testWidgets('an explicit hide after the delay takes it down, as the reader does',
+      (tester) async {
+    final key = await mount(tester);
+    showUndo(key.currentState!);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    Timer(const Duration(seconds: 5), () => key.currentState!.hideCurrentSnackBar());
+    await tester.pump(const Duration(seconds: 6));
     await tester.pumpAndSettle();
     expect(find.textContaining('Hidden everywhere:'), findsNothing);
   });

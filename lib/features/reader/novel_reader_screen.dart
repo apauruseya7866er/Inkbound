@@ -105,6 +105,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   bool _chromeVisible = false;
   bool _atEnd = false;
   int _lastScrollSaveMs = 0;
+
+  /// Takes the Undo bar down on its own — see [_undoHideSnack]. Held so it can
+  /// be cancelled when the reader goes away or Undo is pressed.
+  Timer? _undoSnackTimer;
   // Last scroll permille computed while the controller was still attached.
   // `dispose()` flushes progress AFTER the Scrollable has detached, so
   // `_currentPermille()` can't read the live position then — it falls back to
@@ -271,6 +275,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _flushProgress(); // reader close: don't lose the last-read position
+    _undoSnackTimer?.cancel();
     // Narration may still be running in the background service; it just must
     // not try to advance into a chapter list that is going away.
     _tts?.detachChapterSource();
@@ -977,29 +982,46 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     _undoHideSnack(rule, hit.text);
   }
 
-  /// Confirms the hide and offers the one-tap way back, because a rule that
-  /// deletes prose has to be reversible from where it was made — a settings
-  /// screen three taps away is not "undo" when the thing that went wrong is one
-  /// sentence of the chapter you are reading.
-  void _undoHideSnack(TextFilterRule rule, String sentence) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('Hidden everywhere: ${_shorten(sentence)}'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () {
-            final prefs = sl<ReaderPrefs>();
-            unawaited(prefs.removeTextFilterRule(rule.id).then((_) {
-              if (mounted) unawaited(_reapplyTextFilters());
-            }));
-          },
-        ),
+/// Confirms the hide and offers the one-tap way back, because a rule that
+/// deletes prose has to be reversible from where it was made — a settings
+/// screen three taps away is not "undo" when the thing that went wrong is one
+/// sentence of the chapter you are reading.
+///
+/// The bar is taken down by [Timer] rather than left to the SnackBar's own
+/// duration. A SnackBar carrying a [SnackBarAction] is not auto-dismissed on
+/// this Flutter version — it sat there until the app was restarted, which is
+/// exactly what it is supposed to be telling you is reversible. An explicit
+/// `duration` does not help, and neither does `SnackBarBehavior.floating`;
+/// hiding it through the messenger is the only thing that does. Five seconds is
+/// long enough to hit Undo and short enough that it is not in the way.
+void _undoHideSnack(TextFilterRule rule, String sentence) {
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  if (messenger == null) return;
+  messenger.hideCurrentSnackBar();
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text('Hidden everywhere: ${_shorten(sentence)}'),
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () {
+          _undoSnackTimer?.cancel();
+          final prefs = sl<ReaderPrefs>();
+          unawaited(prefs.removeTextFilterRule(rule.id).then((_) {
+            if (mounted) unawaited(_reapplyTextFilters());
+          }));
+        },
       ),
-    );
-  }
+    ),
+  );
+  _undoSnackTimer?.cancel();
+  _undoSnackTimer = Timer(_undoSnackVisibleFor, () {
+    _undoSnackTimer = null;
+    if (mounted) messenger.hideCurrentSnackBar();
+  });
+}
+
+/// How long the Undo bar stays before the reader takes it down itself.
+static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
 
   static String _shorten(String text) =>
       text.length > 40 ? '${text.substring(0, 40)}…' : text;
