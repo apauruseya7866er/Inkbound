@@ -7,7 +7,8 @@
 //   Auto-update extensions — Android-only, gated with CloudStream toggles
 //
 // The app is local-only, so there is no account to provide and the "Sync
-// library to cloud" entry that used to sit inside Account & sync is gone.
+// library to cloud" entry that used to sit inside this section is gone. The
+// section is now just Connections & backup: trackers, Discord and backups.
 //
 // STILL OWED elsewhere:
 //   root_shell_tv.dart  active-source pill in the nav rail
@@ -170,7 +171,7 @@ void main() {
       await tester.pumpAndSettle();
 
       for (final section in const [
-        'Account & sync',
+        'Connections & backup',
         'Sources',
         'Downloads',
         'Interface',

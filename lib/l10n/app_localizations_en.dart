@@ -263,7 +263,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get settingsSectionAccount => 'Account & sync';
+  String get settingsSectionAccount => 'Connections & backup';
 
   @override
   String get settingsSectionSources => 'Sources';
@@ -293,7 +293,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSectionAbout => 'About';
 
   @override
-  String get settingsSectionAccountSummary => 'Trackers, Discord, backup, sync';
+  String get settingsSectionAccountSummary => 'Trackers, Discord, backups';
 
   @override
   String get settingsSectionSourcesSummary =>
@@ -323,6 +323,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsSectionAboutSummary => 'Updates, support, version';
+
+  @override
+  String get settingsSectionDownloadsSummaryNovels =>
+      'Downloaded chapters, storage';
+
+  @override
+  String get settingsSectionHistorySummaryNovels => 'Novels you\'ve read';
+
+  @override
+  String get settingsSectionNotificationsSummaryNovels => 'New-chapter alerts';
+
+  @override
+  String get settingsSectionReadingSummaryNovels => 'Novel reader defaults';
 
   @override
   String get couldNotExportLogs => 'Could not export logs';
@@ -943,6 +956,26 @@ class AppLocalizationsEn extends AppLocalizations {
       'Anime, manga and novels — all in one app, set up your way.';
 
   @override
+  String get downloadsSubtitleNovel => 'Manage your downloaded chapters';
+
+  @override
+  String get historySubtitleNovels => 'Novels you\'ve read';
+
+  @override
+  String get listsOnly => 'Lists';
+
+  @override
+  String get notificationsSubtitleNovel =>
+      'New-chapter alerts for subscribed novels';
+
+  @override
+  String get onboardingIntroNovels =>
+      'Novels from every source you install, set up your way.';
+
+  @override
+  String get readerSubtitleNovels => 'Novel reader defaults';
+
+  @override
   String get youChooseWhatsInside => 'You choose what\'s inside';
 
   @override
@@ -953,6 +986,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get pickStreamingMangaOrNovels => 'Pick streaming, manga or novels';
+
+  @override
+  String get pickNovels => 'Pick novel sources';
 
   @override
   String get pasteInARepositoryLink => 'Paste in a repository link';

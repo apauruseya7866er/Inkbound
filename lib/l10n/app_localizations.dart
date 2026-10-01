@@ -610,7 +610,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSectionAccount.
   ///
   /// In en, this message translates to:
-  /// **'Account & sync'**
+  /// **'Connections & backup'**
   String get settingsSectionAccount;
 
   /// No description provided for @settingsSectionSources.
@@ -670,7 +670,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsSectionAccountSummary.
   ///
   /// In en, this message translates to:
-  /// **'Trackers, Discord, backup, sync'**
+  /// **'Trackers, Discord, backups'**
   String get settingsSectionAccountSummary;
 
   /// No description provided for @settingsSectionSourcesSummary.
@@ -726,6 +726,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Updates, support, version'**
   String get settingsSectionAboutSummary;
+
+  /// No description provided for @settingsSectionDownloadsSummaryNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloaded chapters, storage'**
+  String get settingsSectionDownloadsSummaryNovels;
+
+  /// No description provided for @settingsSectionHistorySummaryNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Novels you\'ve read'**
+  String get settingsSectionHistorySummaryNovels;
+
+  /// No description provided for @settingsSectionNotificationsSummaryNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'New-chapter alerts'**
+  String get settingsSectionNotificationsSummaryNovels;
+
+  /// No description provided for @settingsSectionReadingSummaryNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Novel reader defaults'**
+  String get settingsSectionReadingSummaryNovels;
 
   /// No description provided for @couldNotExportLogs.
   ///
@@ -1825,6 +1849,42 @@ abstract class AppLocalizations {
   /// **'Anime, manga and novels — all in one app, set up your way.'**
   String get onboardingIntro;
 
+  /// No description provided for @downloadsSubtitleNovel.
+  ///
+  /// In en, this message translates to:
+  /// **'Manage your downloaded chapters'**
+  String get downloadsSubtitleNovel;
+
+  /// No description provided for @historySubtitleNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Novels you\'ve read'**
+  String get historySubtitleNovels;
+
+  /// No description provided for @listsOnly.
+  ///
+  /// In en, this message translates to:
+  /// **'Lists'**
+  String get listsOnly;
+
+  /// No description provided for @notificationsSubtitleNovel.
+  ///
+  /// In en, this message translates to:
+  /// **'New-chapter alerts for subscribed novels'**
+  String get notificationsSubtitleNovel;
+
+  /// No description provided for @onboardingIntroNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Novels from every source you install, set up your way.'**
+  String get onboardingIntroNovels;
+
+  /// No description provided for @readerSubtitleNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Novel reader defaults'**
+  String get readerSubtitleNovels;
+
   /// No description provided for @youChooseWhatsInside.
   ///
   /// In en, this message translates to:
@@ -1848,6 +1908,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pick streaming, manga or novels'**
   String get pickStreamingMangaOrNovels;
+
+  /// No description provided for @pickNovels.
+  ///
+  /// In en, this message translates to:
+  /// **'Pick novel sources'**
+  String get pickNovels;
 
   /// No description provided for @pasteInARepositoryLink.
   ///

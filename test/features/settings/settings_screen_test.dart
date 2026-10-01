@@ -132,7 +132,7 @@ void main() {
 
     // Each section is now a single drill-down row.
     for (final section in const [
-      'Account & sync',
+      'Connections & backup',
       'Sources',
       'Downloads',
       'Interface',
