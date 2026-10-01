@@ -1642,6 +1642,31 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                                 apply(() => tts.setPitch(v)),
                           ),
                         ),
+                        readerSheetRow(
+                          icon: Icons.more_time_rounded,
+                          label: 'Gap between sentences',
+                          trailing: Text(
+                            TtsSentenceGap.labelAt(state.sentenceGap),
+                            style: AppText.body.copyWith(
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                          child: Slider(
+                            value: state.sentenceGap
+                                .clamp(TtsSentenceGap.min, TtsSentenceGap.max)
+                                .toDouble(),
+                            min: TtsSentenceGap.min.toDouble(),
+                            max: TtsSentenceGap.max.toDouble(),
+                            // One step per gap, and no more. A continuous gap
+                            // gives a slider that rests between two labels while
+                            // showing one of them, which reads as a control that
+                            // is not quite doing what it says.
+                            divisions:
+                                TtsSentenceGap.max - TtsSentenceGap.min,
+                            onChanged: (v) =>
+                                apply(() => tts.setSentenceGap(v.round())),
+                          ),
+                        ),
                       ]),
                       readerSheetSection('Session'),
                       readerSheetGroup([

@@ -83,6 +83,13 @@ class FakeTtsPlatform implements TtsPlatform {
   @override
   Future<void> setPitch(double pitch) async => lastPitch = pitch;
 
+  /// Every value the cubit has pushed, in order: the setting is re-asserted on
+  /// each start, so "the last one" and "only one" are different questions.
+  final List<double> pauseScales = <double>[];
+
+  @override
+  Future<void> setPauseScale(double scale) async => pauseScales.add(scale);
+
   @override
   Future<List<TtsVoice>> voices() async => voiceList;
 
@@ -780,6 +787,159 @@ void main() {
       ];
       final cubit = await build();
       expect(await cubit.voices(), hasLength(1));
+      await cubit.close();
+    });
+  });
+
+  // The gap is what stops the narration sounding like a machine reading a list,
+  // and these cover the two halves of it: the paragraph beat is decided in Dart
+  // from the sentence list, while the reader's chosen width is applied by the
+  // engine so it can change without re-sending the chapter.
+  group('the gap between sentences', () {
+    test('the last sentence of a paragraph gets the longer beat', () async {
+      final cubit = await build();
+      cubit.loadChapter(
+        bookId: 'b1',
+        chapterId: 'c1',
+        html: '<p>One here. Two here.</p><p>Three here. Four here.</p>',
+      );
+
+      final s = cubit.state.sentences;
+      expect(s, hasLength(4));
+      // Sentence 1 ends its paragraph, so it beats plain sentence 0 by exactly
+      // the paragraph amount on top of the punctuation's own.
+      expect(s[1].pauseAfterMs, s[0].pauseAfterMs + TtsPause.paragraph);
+      // Sentence 2 is mid-paragraph again.
+      expect(s[2].pauseAfterMs, s[0].pauseAfterMs);
+      await cubit.close();
+    });
+
+    test('the paragraph beat is added on the reader path too', () async {
+      // The reader does not use loadChapter: it adopts its own segmentation so
+      // the highlight lines up. The beat has to survive that door as well, or
+      // it only exists for the background narration nobody listens to.
+      final cubit = await build();
+      cubit.adoptChapter(
+        bookId: 'b1',
+        chapterId: 'c1',
+        views: const [
+          TtsSentenceView(
+            index: 0,
+            text: 'One here.',
+            blockIndex: 0,
+            pauseAfterMs: TtsPause.normal,
+          ),
+          TtsSentenceView(
+            index: 1,
+            text: 'Two here.',
+            blockIndex: 1,
+            pauseAfterMs: TtsPause.normal,
+          ),
+        ],
+      );
+
+      final s = cubit.state.sentences;
+      expect(s[0].pauseAfterMs, TtsPause.normal + TtsPause.paragraph);
+      expect(s[1].pauseAfterMs, TtsPause.normal);
+      await cubit.close();
+    });
+
+    test('the final sentence of the chapter keeps the plain beat', () async {
+      // Nothing follows it, so the beat would be dead air before the engine
+      // reports the chapter finished.
+      final cubit = await build();
+      cubit.loadChapter(
+        bookId: 'b1',
+        chapterId: 'c1',
+        html: '<p>Only paragraph here. And more.</p>',
+      );
+
+      expect(
+        cubit.state.sentences.last.pauseAfterMs,
+        TtsPause.normal,
+      );
+      await cubit.close();
+    });
+
+    test('a note block the narration drops leaves the beats alone', () async {
+      // The break is decided by block index, and a block the narrator skips is
+      // not a paragraph anybody heard the end of. The two sentences that are
+      // left are still one paragraph, so neither picks up a break — otherwise
+      // every chapter with a translator's tag would gain a pause where nothing
+      // was said.
+      final cubit = await build();
+      cubit.loadChapter(
+        bookId: 'b1',
+        chapterId: 'c1',
+        html: '<p>One here. Two here.</p><p>[TN: BornToBe]</p>',
+      );
+
+      final s = cubit.state.sentences;
+      expect(s, hasLength(2));
+      expect(s[0].pauseAfterMs, TtsPause.normal);
+      expect(s[1].pauseAfterMs, TtsPause.normal);
+      await cubit.close();
+    });
+
+    test('choosing a step sends its multiplier and is remembered', () async {
+      final cubit = await build();
+      await cubit.setSentenceGap(TtsSentenceGap.max);
+
+      expect(platform.pauseScales.last, TtsSentenceGap.scales.last);
+      expect(cubit.state.sentenceGap, TtsSentenceGap.max);
+      expect(prefs.sentenceGap, TtsSentenceGap.max);
+      await cubit.close();
+    });
+
+    test('a step out of range is clamped rather than throwing', () async {
+      final cubit = await build();
+      await cubit.setSentenceGap(99);
+
+      expect(cubit.state.sentenceGap, TtsSentenceGap.max);
+      expect(prefs.sentenceGap, TtsSentenceGap.max);
+      await cubit.close();
+    });
+
+    test('picking the step already chosen does not talk to the engine', () async {
+      final cubit = await build();
+      await cubit.setSentenceGap(TtsSentenceGap.min);
+      final after = platform.pauseScales.length;
+
+      await cubit.setSentenceGap(TtsSentenceGap.min);
+
+      expect(platform.pauseScales, hasLength(after));
+      await cubit.close();
+    });
+
+    test('the saved step is restored and re-sent once the engine is ready',
+        () async {
+      await prefs.setSentenceGap(TtsSentenceGap.max);
+      platform = FakeTtsPlatform();
+      final cubit = await build();
+
+      platform.becomeReady();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(cubit.state.sentenceGap, TtsSentenceGap.max);
+      expect(platform.pauseScales.last, TtsSentenceGap.scales.last);
+      await cubit.close();
+    });
+
+    test('starting narration re-asserts the scale', () async {
+      // The service is a separate component the system can tear down and rebuild;
+      // a fresh one starts at 1.0 and would quietly narrate with the wrong gap
+      // until the setting was touched again.
+      final cubit = await build();
+      await cubit.setSentenceGap(TtsSentenceGap.max);
+      platform.becomeReady();
+      await Future<void>.delayed(Duration.zero);
+      final before = platform.pauseScales.length;
+
+      cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+      await cubit.play();
+
+      expect(platform.pauseScales.length, greaterThan(before));
+      expect(platform.pauseScales.last, TtsSentenceGap.scales.last);
       await cubit.close();
     });
   });

@@ -207,6 +207,30 @@ void main() {
         expect(p, lessThan(1000), reason: 'a sub-second beat or it is a silence');
       }
     });
+
+    test('a sentence beat is long enough to hear', () {
+      // The beats were 40-150ms, which is roughly the space between two lines of
+      // one paragraph: the narration ran the sentences together and read as a
+      // machine working through a list. What has to be true now is that a plain
+      // full stop leaves a gap a person would leave.
+      expect(TtsPause.normal, greaterThanOrEqualTo(250));
+      expect(TtsPause.question, greaterThan(TtsPause.normal));
+    });
+
+    test('the paragraph beat cannot turn a pause into dead air', () {
+      // Added on top of the punctuation's own beat rather than standing in for
+      // it, so the worst case is the longest pause plus this — which still has
+      // to land under the range `playSilentUtterance` is given.
+      expect(
+        TtsPause.ellipsis + TtsPause.paragraph,
+        lessThanOrEqualTo(2000),
+      );
+    });
+
+    test('the paragraph beat is a pause, not a second of silence', () {
+      expect(TtsPause.paragraph, greaterThan(0));
+      expect(TtsPause.paragraph, lessThan(TtsPause.normal));
+    });
   });
 
   group('HTML to blocks', () {

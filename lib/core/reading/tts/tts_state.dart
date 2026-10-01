@@ -13,6 +13,7 @@ class TtsState extends Equatable {
     this.rate = 1.0,
     this.pitch = 1.0,
     this.sleepTimerMinutes = 0,
+    this.sentenceGap = 1,
     this.backgroundPlayback = true,
     this.errorMessage,
     this.sentences = const [],
@@ -37,6 +38,13 @@ class TtsState extends Equatable {
   final double rate;
   final double pitch;
   final int sleepTimerMinutes;
+
+  /// Which step of the sentence gap is selected, an index into
+  /// `TtsSentenceGap.labels`.
+  ///
+  /// An index rather than a multiplier so the control and the stored value can
+  /// never disagree about which step is showing.
+  final int sentenceGap;
 
   /// Whether narration keeps going with the app backgrounded / screen off.
   /// Defaults on: a read-aloud feature that stops when you lock your phone
@@ -88,6 +96,7 @@ class TtsState extends Equatable {
     double? rate,
     double? pitch,
     int? sleepTimerMinutes,
+    int? sentenceGap,
     bool? backgroundPlayback,
     String? errorMessage,
     bool clearError = false,
@@ -103,6 +112,7 @@ class TtsState extends Equatable {
     rate: rate ?? this.rate,
     pitch: pitch ?? this.pitch,
     sleepTimerMinutes: sleepTimerMinutes ?? this.sleepTimerMinutes,
+    sentenceGap: sentenceGap ?? this.sentenceGap,
     backgroundPlayback: backgroundPlayback ?? this.backgroundPlayback,
     errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
     sentences: sentences ?? this.sentences,
@@ -120,6 +130,7 @@ class TtsState extends Equatable {
     rate,
     pitch,
     sleepTimerMinutes,
+    sentenceGap,
     backgroundPlayback,
     errorMessage,
     sentences,
@@ -180,6 +191,20 @@ class TtsSentenceView extends Equatable {
 
   /// True when this sentence can be highlighted in the page.
   bool get isHighlightable => end > start;
+
+  /// The same sentence with a different gap after it.
+  ///
+  /// Only the pause varies. Everything else either places the sentence in the
+  /// chapter or points at its words on screen, and changing one of those to
+  /// adjust a beat would move a highlight.
+  TtsSentenceView copyWith({int? pauseAfterMs}) => TtsSentenceView(
+        index: index,
+        text: text,
+        blockIndex: blockIndex,
+        pauseAfterMs: pauseAfterMs ?? this.pauseAfterMs,
+        start: start,
+        end: end,
+      );
 
   @override
   List<Object?> get props => [index, text, blockIndex, pauseAfterMs, start, end];

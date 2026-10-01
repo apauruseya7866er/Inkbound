@@ -192,6 +192,15 @@ abstract class TtsPlatform {
 
   Future<void> setPitch(double pitch);
 
+  /// Scales every gap between sentences by [scale], where 1.0 is exactly what
+  /// the units asked for.
+  ///
+  /// Held by the engine rather than folded into the unit list on the way in, so
+  /// that changing it while narration is running applies to the sentences the
+  /// engine has not queued yet — the ones a second from now — instead of only
+  /// taking effect on the next chapter.
+  Future<void> setPauseScale(double scale);
+
   /// Every installed voice, for the picker.
   Future<List<TtsVoice>> voices();
 

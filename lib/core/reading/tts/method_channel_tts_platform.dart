@@ -84,6 +84,10 @@ class MethodChannelTtsPlatform implements TtsPlatform {
   Future<void> setPitch(double pitch) => _invoke('setPitch', {'pitch': pitch});
 
   @override
+  Future<void> setPauseScale(double scale) =>
+      _invoke('setPauseScale', {'scale': scale});
+
+  @override
   Future<List<TtsVoice>> voices() async {
     final raw = await _methods.invokeListMethod<Object?>('voices');
     if (raw == null) return const [];

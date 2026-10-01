@@ -54,6 +54,24 @@ object TtsEngine {
     /** Pause before the first retry of a queue that was flushed a moment ago. */
     private const val FLUSH_RETRY_MS = 120L
 
+    /**
+     * Longest silence handed to `playSilentUtterance`, and the ceiling the
+     * bridge clamps raw pauses to.
+     *
+     * Matches the bridge so a gap that arrives already at the limit and the same
+     * gap after scaling cannot disagree about whether it fits.
+     */
+    private const val MAX_PAUSE_MS = 2000L
+
+    /**
+     * Largest multiplier accepted for the reader's gap setting.
+     *
+     * Beyond this a "Relaxed" chapter stops being read aloud and starts being
+     * waited through, and the limit is what stops a bad channel value from
+     * turning every sentence into a five-second hole.
+     */
+    private const val MAX_PAUSE_SCALE = 4.0
+
     private const val KIND_SENTENCE = 's'
     private const val KIND_PAUSE = 'p'
 
@@ -92,6 +110,19 @@ object TtsEngine {
     private var highestQueued = -1
     private var paused = false
     private var resumeIndex = 0
+
+    /**
+     * Multiplies every gap between sentences. 1.0 is exactly what the units asked
+     * for.
+     *
+     * Held here rather than folded into [units] on the way in, because the
+     * engine refills its queue from the list over the next few sentences: a scale
+     * applied at enqueue time reaches the sentences that have not been spoken
+     * yet, so changing it mid-read is heard within a second instead of only at
+     * the next chapter. Not cleared by [stop] — it is a preference, not a
+     * property of a session.
+     */
+    private var pauseScale = 1.0
 
     /** Set when [start] was called before the engine finished initialising. */
     private var pendingStart: Int? = null
@@ -272,12 +303,30 @@ object TtsEngine {
         // the completion callback.
         if (index < units.size - 1 && unit.pauseAfterMs > 0) {
             engine.playSilentUtterance(
-                unit.pauseAfterMs.toLong(),
+                scaledPause(unit.pauseAfterMs),
                 TextToSpeech.QUEUE_ADD,
                 idOf(KIND_PAUSE, index),
             )
         }
         return true
+    }
+
+    /**
+     * [pauseMs] through the reader's chosen gap, held inside the range
+     * `playSilentUtterance` is given at the bridge.
+     *
+     * Clamped rather than trusted: the scale arrives over a channel, and a value
+     * that produced an out-of-range duration would be dropped by the engine —
+     * silently, which for this setting means the narration goes back to running
+     * the sentences together with no sign that anything is wrong.
+     */
+    private fun scaledPause(pauseMs: Int): Long =
+        (pauseMs * pauseScale).toLong().coerceIn(0L, MAX_PAUSE_MS)
+
+    /** Sets the multiplier applied to every gap between sentences. */
+    fun setPauseScale(scale: Double) {
+        if (!scale.isFinite() || scale <= 0.0) return
+        pauseScale = scale.coerceAtMost(MAX_PAUSE_SCALE)
     }
 
     /**

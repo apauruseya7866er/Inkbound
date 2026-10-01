@@ -26,29 +26,46 @@ library;
 import 'narration_filter.dart';
 
 /// Pause after a sentence, in milliseconds, chosen by its terminator.
+///
+/// These are the gaps a person leaves, not the gaps a machine needs to get
+/// through a queue. They were 40–150ms, which is roughly the space between two
+/// lines of one paragraph: the sentences ran together and the narration read
+/// like something working through a list. What sounds natural is a beat you can
+/// notice without calling it a pause — a few hundred milliseconds — and the
+/// punctuation still legible in it. A question takes the longest of the three
+/// because people leave the floor open at one.
 class TtsPause {
   const TtsPause._();
 
   /// Comma-ish beat, and after an em/en dash.
-  static const int short = 40;
+  static const int short = 150;
 
   /// A plain sentence end.
-  static const int normal = 80;
+  static const int normal = 340;
 
   /// After `!`.
-  static const int exclamation = 90;
+  static const int exclamation = 420;
 
   /// After `?` — a beat longer than `!`, matching how people actually pause.
-  static const int question = 100;
+  static const int question = 520;
 
   /// After an em/en dash.
   static const int dash = short;
 
   /// After a colon that was used as a divider.
-  static const int colon = 60;
+  static const int colon = 250;
 
   /// After a trailing ellipsis: a held breath, not a full stop.
-  static const int ellipsis = 150;
+  static const int ellipsis = 650;
+
+  /// Added on top when the next sentence starts a new paragraph.
+  ///
+  /// Added rather than substituted for the punctuation's own beat, because a
+  /// paragraph break does not erase it: a paragraph ending in a question is
+  /// still the longest pause in the passage. It stays a modest addition rather
+  /// than a fixed silence of its own, since a novel written in one-sentence
+  /// paragraphs would otherwise be mostly gaps.
+  static const int paragraph = 320;
 }
 
 /// One speakable sentence, with the gap that should follow it.

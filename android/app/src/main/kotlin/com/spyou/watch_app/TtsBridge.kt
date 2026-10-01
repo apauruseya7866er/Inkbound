@@ -112,6 +112,12 @@ object TtsBridge : TtsEngine.Listener {
                 result.success(null)
             }
 
+            "setPauseScale" -> {
+                val scale = (call.argument<Number>("scale") ?: 1.0).toDouble()
+                TtsEngine.setPauseScale(scale)
+                result.success(null)
+            }
+
             "setPitch" -> {
                 TtsEngine.setPitch((call.argument<Number>("pitch") ?: 1.0).toFloat())
                 result.success(null)

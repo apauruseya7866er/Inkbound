@@ -97,6 +97,23 @@ class TtsPrefs {
   Future<void> setSleepTimerMinutes(int value) =>
       _box.put('sleepTimerMinutes', value < 0 ? 0 : value);
 
+  /// Which step of [TtsSentenceGap] the reader is on.
+  ///
+  /// Stored as the index rather than the multiplier so a later build that
+  /// retunes the steps moves everybody along with it instead of leaving a
+  /// "0.55" sitting in the box that no longer means anything.
+  int get sentenceGap {
+    final value =
+        (_box.get('sentenceGap', defaultValue: TtsSentenceGap.defaultIndex)
+                as num?)
+            ?.toInt() ??
+        TtsSentenceGap.defaultIndex;
+    return TtsSentenceGap.clampIndex(value);
+  }
+
+  Future<void> setSentenceGap(int value) =>
+      _box.put('sentenceGap', TtsSentenceGap.clampIndex(value));
+
   /// Whether narration keeps going with the app backgrounded.
   ///
   /// Defaults to true. Read with a default rather than a stored-on-first-write
@@ -224,4 +241,55 @@ class TtsSpeed {
         : rounded.toStringAsFixed(1);
     return '${text}x';
   }
+}
+
+/// How long the gap between two spoken sentences is.
+///
+/// A multiplier on the parser's punctuation pauses rather than a second set of
+/// millisecond values, so the three steps keep the differences the punctuation
+/// already encodes — a question still beats a full stop — and only change how
+/// wide all of them are.
+///
+/// ### Why a setting and not just better numbers
+/// The tuned pauses in `TtsPause` are one voice on one engine. What sounds
+/// natural to the person who tuned them can be dead air to somebody else, and
+/// the engine matters as much as the numbers: some ignore the silence entirely,
+/// some round it to their own rhythm. A control turns a judgement call into
+/// something the reader settles in a second, instead of a guess baked into a
+/// release.
+class TtsSentenceGap {
+  TtsSentenceGap._();
+
+  /// Multiplier per step, tightest first.
+  ///
+  /// [scales[defaultIndex]] is 1.0, so the default is exactly what the parser
+  /// asked for and the setting starts as a no-op rather than as a hidden nudge.
+  static const List<double> scales = <double>[0.55, 1.0, 1.7];
+
+  /// What each step is called in the UI, tightest first.
+  ///
+  /// "Short", "Medium" and "Long" would be describing the gap; these describe
+  /// the reading, which is what somebody is actually choosing between.
+  static const List<String> labels = <String>['Tight', 'Natural', 'Relaxed'];
+
+  /// The middle step: the tuned pauses, unscaled.
+  static const int defaultIndex = 1;
+
+  static const int min = 0;
+  static const int max = 2;
+
+  /// The multiplier for [index], clamped.
+  ///
+  /// Clamped because the stored value is a plain int in an untyped box: a value
+  /// written by a build with more steps, or hand-edited, must not index off the
+  /// end of [scales] and take the narration down.
+  static double scaleAt(int index) =>
+      scales[index.clamp(min, max) % scales.length];
+
+  /// The label for [index], clamped the same way as [scaleAt].
+  static String labelAt(int index) =>
+      labels[index.clamp(min, max) % labels.length];
+
+  /// [index] brought into range, for storing and for the control's position.
+  static int clampIndex(int index) => index.clamp(min, max);
 }

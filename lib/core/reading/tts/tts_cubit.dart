@@ -30,6 +30,7 @@ class TtsCubit extends Cubit<TtsState> {
            rate: prefs.rate,
            pitch: prefs.pitch,
            sleepTimerMinutes: prefs.sleepTimerMinutes,
+          sentenceGap: prefs.sentenceGap,
            backgroundPlayback: prefs.backgroundPlayback,
          ),
        ) {
@@ -109,16 +110,18 @@ class TtsCubit extends Cubit<TtsState> {
     }
 
     final parsed = SentenceParser.parseHtml(html);
-    final views = parsed.sentences
-        .map(
-          (s) => TtsSentenceView(
-            index: s.index,
-            text: s.text,
-            blockIndex: s.blockIndex,
-            pauseAfterMs: s.pauseAfterMs,
-          ),
-        )
-        .toList(growable: false);
+    final views = _withParagraphBeats(
+      parsed.sentences
+          .map(
+            (s) => TtsSentenceView(
+              index: s.index,
+              text: s.text,
+              blockIndex: s.blockIndex,
+              pauseAfterMs: s.pauseAfterMs,
+            ),
+          )
+          .toList(growable: false),
+    );
     _loaded = views;
 
     emit(
@@ -154,12 +157,16 @@ class TtsCubit extends Cubit<TtsState> {
     if (chapterId.isEmpty) return;
     if (!force && chapterId == state.chapterId && _loaded.isNotEmpty) return;
 
-    _loaded = views;
+    // One list, held by both `_loaded` and the state: a reader that is told a
+    // different gap than the one about to be spoken is a bug waiting to be
+    // debugged from the wrong place.
+    final withBeats = _withParagraphBeats(views);
+    _loaded = withBeats;
     emit(
       state.copyWith(
         chapterId: chapterId,
         bookId: bookId,
-        sentences: views,
+        sentences: withBeats,
         totalSentences: views.length,
         currentIndex: 0,
         status: state.available ? TtsStatus.idle : state.status,
@@ -351,6 +358,10 @@ class TtsCubit extends Cubit<TtsState> {
     await _ensureService();
 
     try {
+      // Re-asserted on every start, not only when the setting changes: the
+      // service is a separate process entry the system can tear down and rebuild
+      // underneath us, and a fresh one starts at 1.0.
+      await _platform.setPauseScale(TtsSentenceGap.scaleAt(state.sentenceGap));
       await _platform.start(units: _units(), startIndex: startIndex);
       await _syncServiceSentence();
       // Warm the following chapter now, so finishing this one does not mean a
@@ -472,6 +483,19 @@ class TtsCubit extends Cubit<TtsState> {
     emit(state.copyWith(pitch: pitch));
     await _platform.setPitch(pitch);
     await _prefs.setPitch(pitch);
+  }
+
+  /// Sets how wide the gap between sentences is, as a step of `TtsSentenceGap`.
+  ///
+  /// Takes effect on the sentences the engine has not queued yet, so a change
+  /// mid-sentence is heard within a second or two rather than at the next
+  /// chapter.
+  Future<void> setSentenceGap(int index) async {
+    final clamped = TtsSentenceGap.clampIndex(index);
+    if (clamped == state.sentenceGap) return;
+    emit(state.copyWith(sentenceGap: clamped));
+    await _platform.setPauseScale(TtsSentenceGap.scaleAt(clamped));
+    await _prefs.setSentenceGap(clamped);
   }
 
   Future<List<TtsVoice>> voices() => _platform.voices();
@@ -629,6 +653,10 @@ class TtsCubit extends Cubit<TtsState> {
     if (!ready) return;
     unawaited(_platform.setRate(state.rate));
     unawaited(_platform.setPitch(state.pitch));
+    // Same reason as the two above, and the same engine that starts at 1.0.
+    unawaited(
+      _platform.setPauseScale(TtsSentenceGap.scaleAt(state.sentenceGap)),
+    );
     final voice = state.voiceName;
     if (voice != null) unawaited(_platform.setVoice(voice));
   }
@@ -745,6 +773,30 @@ class TtsCubit extends Cubit<TtsState> {
   }
 
   // ── unit list ─────────────────────────────────────────────────────────────
+
+  /// [views] with the paragraph-end beat added to every paragraph's last
+  /// sentence.
+  ///
+  /// Done here rather than in the parser because a chapter reaches the queue by
+  /// two doors — [loadChapter] parses the HTML itself, [adoptChapter] takes the
+  /// reader's own segmentation so the highlight lines up — and working out which
+  /// sentence ends a paragraph needs the whole chapter as one list. Writing the
+  /// rule into both parsers would be the same rule maintained twice, and the two
+  /// would drift.
+  List<TtsSentenceView> _withParagraphBeats(List<TtsSentenceView> views) {
+    if (views.length < 2) return views;
+    final out = List<TtsSentenceView>.of(views);
+    for (var i = 0; i < out.length - 1; i++) {
+      // Only the sentence before a change of block knows it ends a paragraph.
+      // A block that was skipped outright — an ad the narration filter dropped —
+      // moves the index by more than one, which is still a break on screen.
+      if (out[i].blockIndex == out[i + 1].blockIndex) continue;
+      out[i] = out[i].copyWith(
+        pauseAfterMs: out[i].pauseAfterMs + TtsPause.paragraph,
+      );
+    }
+    return out;
+  }
 
   /// Engine input starting at [from].
   ///
