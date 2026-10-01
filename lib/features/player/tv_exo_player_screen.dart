@@ -1623,8 +1623,7 @@ class _TvExoPlayerScreenState extends State<TvExoPlayerScreen> {
         duration: Duration(milliseconds: c.duration.value),
         updatedAt: DateTime.now().millisecondsSinceEpoch,
         malId: widget.malId,
-      ),
-      flush: flush,
+      )
     );
   }
 

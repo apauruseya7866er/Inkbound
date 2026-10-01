@@ -666,8 +666,7 @@ class TvNativePlayer {
         duration: Duration(milliseconds: durMs),
         updatedAt: DateTime.now().millisecondsSinceEpoch,
         malId: _malId,
-      ),
-      flush: true,
+      )
     );
     _tracker?.maybeScrobble(
       index: index,

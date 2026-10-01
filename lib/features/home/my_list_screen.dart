@@ -32,7 +32,6 @@ import '../../core/ui/list_status_sheet.dart';
 import '../../core/ui/poster_card.dart';
 import '../../core/ui/states.dart';
 import '../../core/ui/tracker_entry_sheet.dart';
-import '../auth/auth_cubit.dart';
 import '../detail/detail_screen.dart';
 import 'cubit/my_list_cubit.dart';
 import 'library_tabs.dart';
@@ -182,8 +181,8 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    // Own My List is Hive; tracker chips cache a fetch. While this screen is
-    // mounted, keep both aligned with other devices — TV never backgrounds.
+    // Own My List is local Hive; tracker chips cache a fetch. While this screen
+    // is mounted, keep the tracker side fresh — TV never backgrounds.
     _liveSync = Timer.periodic(const Duration(seconds: 15), (_) {
       _refreshLibrary();
     });
@@ -204,9 +203,6 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
 
   void _refreshLibrary() {
     if (!mounted) return;
-    if (sl.isRegistered<MyListStore>()) {
-      unawaited(sl<MyListStore>().pullFromCloud());
-    }
     unawaited(context.read<TrackerListCubit>().refresh());
   }
 
@@ -688,14 +684,11 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
   // ── Accounts button (connected avatars + ＋, else "Connect") ───────────────
 
   /// The header's round avatar: the tracker's own picture on a pinned screen,
-  /// and yours on My List. 30px — big enough to read as a face, small enough
-  /// that the capsule stays one line.
+  /// and the app's mark on My List — there is no account to show a face for.
+  /// 30px — big enough to read, small enough that the capsule stays one line.
   Widget _headerAvatar(BuildContext context, Tracker? pinned) {
-    final url = pinned != null
-        ? pinned.viewerAvatar
-        : (sl.isRegistered<AuthCubit>()
-              ? sl<AuthCubit>().state.avatarUrl
-              : null);
+    // No account, so only a pinned tracker can have a picture here.
+    final url = pinned?.viewerAvatar;
     final letter = pinned?.displayName.isNotEmpty == true
         ? pinned!.displayName[0]
         : 'Z';
@@ -829,7 +822,9 @@ class _MyListViewState extends State<_MyListView> with WidgetsBindingObserver {
         return RefreshIndicator(
           color: AppColors.accent,
           backgroundColor: AppColors.surface,
-          onRefresh: () => sl<MyListStore>().pullFromCloud(),
+          // My List is local Hive, so a pull has nothing to fetch — kept only
+          // so the gesture still feels responsive.
+          onRefresh: () async {},
           child: entries.isEmpty
               ? ListView(
                   physics: const AlwaysScrollableScrollPhysics(),

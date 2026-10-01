@@ -3272,8 +3272,7 @@ class PlayerCubit extends Cubit<PlayerState> {
           duration: _lastDur,
           updatedAt: DateTime.now().millisecondsSinceEpoch,
           malId: malId,
-        ),
-        flush: flush,
+        )
       );
     }
     _maybeScrobble();

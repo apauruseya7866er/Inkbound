@@ -15,11 +15,9 @@ import 'package:hive/hive.dart';
 import 'package:watch_app/core/playback/history_merge.dart';
 import 'package:watch_app/core/playback/resume_store.dart';
 import 'package:watch_app/core/playback/watch_history.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/zmode/match_store.dart';
 import 'package:watch_app/core/zmode/zmode_ids.dart';
 
-import 'watch_history_supabase_test.dart' show FakeHistoryRemote;
 
 HistoryEntry _sourceRow({
   String sourceId = 'animecube',
@@ -50,7 +48,6 @@ void main() {
   late WatchHistory history;
   late ResumeStore resume;
   late MatchStore matches;
-  late FakeHistoryRemote remote;
 
   const canonicalUrl = 'zm://anime/mal:5114';
   const canonical = ZCanonical(ZKind.anime, 'mal:5114');
@@ -66,8 +63,7 @@ void main() {
     Hive.init(dir.path);
     await WatchHistory.init();
     await ResumeStore.init();
-    remote = FakeHistoryRemote();
-    history = WatchHistory(SupabaseService(), () => 'user1', remote: remote);
+    history = WatchHistory();
     resume = ResumeStore();
     matches = await MatchStore.open();
   });
@@ -122,14 +118,17 @@ void main() {
     expect(mark?.duration, const Duration(minutes: 24));
   });
 
-  test('the old row is dropped from the cloud too', () async {
+  test('the old row is dropped from the box too', () async {
     await history.save(_sourceRow());
-    expect(remote.rows.any((r) => r['source_id'] == 'animecube'), isTrue);
+    expect(
+      history.all().any((e) => e.sourceId == 'animecube'),
+      isTrue,
+    );
 
     await run();
 
-    expect(remote.rows.any((r) => r['source_id'] == 'animecube'), isFalse);
-    expect(remote.rows.any((r) => r['source_id'] == ZmodeIds.sourceId), isTrue);
+    expect(history.all().any((e) => e.sourceId == 'animecube'), isFalse);
+    expect(history.all().any((e) => e.sourceId == ZmodeIds.sourceId), isTrue);
   });
 
   group('what it refuses to touch', () {

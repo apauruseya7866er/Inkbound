@@ -25,7 +25,6 @@ import 'package:watch_app/core/reading/read_store.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/features/reader/novel_reader_screen.dart';
@@ -155,19 +154,18 @@ class _FlakyReadingProvider implements BaseProvider, ReadingProvider {
   }
 }
 
-/// Records every `flush` value passed to [ReadHistory.save] (synchronously,
-/// before delegating to the real implementation) so the carry-forward
-/// requirement — flush on chapter change + on dispose — is provable without
-/// reaching into private reader state.
+/// Counts every [ReadHistory.save] call so a test can prove the reader writes
+/// once per user action (chapter change, dispose, seek commit) rather than
+/// once per frame or per drag tick — without reaching into private reader state.
+/// Only manga_reader_test.dart has save-count tests today; kept here so the two
+/// reader suites keep identical harnesses.
 class _SpyReadHistory extends ReadHistory {
-  _SpyReadHistory(super.service, super.currentUserId);
-
-  final List<bool> flushCalls = [];
+  int saveCalls = 0;
 
   @override
-  Future<void> save(ReadEntry e, {bool flush = false}) {
-    flushCalls.add(flush);
-    return super.save(e, flush: flush);
+  Future<void> save(ReadEntry e) {
+    saveCalls++;
+    return super.save(e);
   }
 }
 
@@ -413,7 +411,7 @@ void main() {
       await ReaderPrefs.init();
 
       sl.registerSingleton<ReadStore>(ReadStore());
-      spyHistory = _SpyReadHistory(SupabaseService(), () => null);
+      spyHistory = _SpyReadHistory();
       sl.registerSingleton<ReadHistory>(spyHistory);
       sl.registerSingleton<ReaderPrefs>(ReaderPrefs());
 
@@ -484,39 +482,6 @@ void main() {
         await tester.pumpWidget(const SizedBox());
         await Future<void>.delayed(const Duration(milliseconds: 50));
       });
-    });
-
-    testWidgets('flushes ReadHistory on chapter change and on dispose', (
-      tester,
-    ) async {
-      await tester.pumpWidget(harness());
-      await tester.pumpAndSettle();
-
-      // Scroll body is a lazy sliver HTML view inside a CustomScrollView now.
-      await tester.tap(find.byType(CustomScrollView));
-      await tester.pumpAndSettle();
-
-      await tester.runAsync(() async {
-        await tester.tap(find.byIcon(Icons.skip_next_rounded));
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
-      await tester.pumpAndSettle();
-
-      expect(spyHistory.flushCalls, contains(true));
-      final flushesAfterChapterChange = spyHistory.flushCalls
-          .where((f) => f)
-          .length;
-      expect(flushesAfterChapterChange, greaterThanOrEqualTo(1));
-
-      // Tear the whole tree down — this disposes NovelReaderScreen's State.
-      await tester.runAsync(() async {
-        await tester.pumpWidget(const SizedBox());
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
-      await tester.pumpAndSettle();
-
-      final flushesAfterDispose = spyHistory.flushCalls.where((f) => f).length;
-      expect(flushesAfterDispose, greaterThan(flushesAfterChapterChange));
     });
 
     testWidgets(

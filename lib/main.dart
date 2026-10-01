@@ -8,7 +8,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import 'core/analytics/analytics.dart';
 import 'core/app_config.dart';
@@ -17,7 +16,6 @@ import 'core/di/injector.dart';
 import 'core/ui/splash_style.dart';
 import 'core/hive/safe_box.dart';
 import 'core/discord/discord_rpc.dart';
-import 'core/environment.dart';
 import 'core/backup/backup_folder.dart';
 import 'core/backup/backup_payload.dart';
 import 'core/backup/backup_service.dart';
@@ -31,12 +29,9 @@ import 'core/ui/home_rows_prefs.dart';
 import 'core/ui/route_observer.dart';
 import 'core/notify/subscription_checker.dart';
 import 'core/notify/subscription_store.dart';
-import 'core/playback/category_store.dart';
-import 'core/playback/my_list.dart';
 import 'core/playback/history_merge.dart';
 import 'core/playback/resume_store.dart';
 import 'core/playback/watch_history.dart';
-import 'core/reading/read_history.dart';
 import 'core/state/active_source_cubit.dart';
 import 'core/locale/locale_controller.dart';
 import 'core/zmode/match_store.dart';
@@ -49,7 +44,6 @@ import 'core/tv/tv_route_pop_guard.dart';
 import 'core/tv/tv_viewport.dart';
 import 'l10n/app_localizations.dart';
 import 'core/ui/global_messenger.dart';
-import 'features/auth/auth_cubit.dart';
 import 'features/home/cubit/home_cubit.dart';
 import 'features/onboarding/boot_error_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
@@ -107,33 +101,9 @@ Future<void> main() async {
       } catch (e, st) {
         AppLogger.instance.logError(e, st);
       }
-      // Resolve Apple TV before Supabase / media_kit — Dart reports tvOS as iOS,
-      // and the version string often has no "tvos" token, so we ask the native
-      // runner. Must run before Supabase: its default auth deep-link observer uses
-      // app_links, which has no tvOS plugin (MissingPluginException).
+      // Resolve Apple TV before media_kit — Dart reports tvOS as iOS, and the
+      // version string often has no "tvos" token, so we ask the native runner.
       final appleTv = await resolveAppleTv();
-      // Bounded + guarded like Firebase/MediaKit: on a dead/slow network the
-      // session-restore inside initialize can HANG (a hang never throws, so a
-      // try/catch alone wouldn't save us), and this runs BEFORE runApp — an
-      // unbounded hang here traps the app on the splash forever. Time it out so
-      // boot always proceeds; cloud features degrade to local-only until the next
-      // launch on a live network (SupabaseService.currentUserId tolerates an
-      // uninitialized client).
-      var supabaseOk = false;
-      try {
-        await Supabase.initialize(
-          url: Environment.supabaseUrl,
-          anonKey: Environment.supabaseAnonKey,
-          // TV auth uses QR pairing, not OAuth redirect deep links.
-          authOptions: FlutterAuthClientOptions(detectSessionInUri: !appleTv),
-        ).timeout(const Duration(seconds: 8));
-        supabaseOk = true;
-      } catch (e, st) {
-        AppLogger.instance.logError(e, st);
-      }
-      // Boot init failed (dead/slow network) → keep retrying in the background so
-      // login + cloud sync self-heal when the network returns, no restart needed.
-      if (!supabaseOk) unawaited(_retrySupabaseInit());
       // media_kit (libmpv) has no tvOS libs — Apple TV plays via AVPlayer instead.
       // Calling ensureInitialized here prints + throws and used to derail boot.
       // On old Android 8 / Fire TV the native libs can also fail to load; guard
@@ -169,45 +139,6 @@ Future<void> main() async {
       CrashReports.record(error, stack, fatal: true);
     },
   );
-}
-
-/// True once Supabase.initialize has set up its singleton. Accessing
-/// Supabase.instance asserts when init never ran, so probe it via try/catch.
-bool _supabaseReady() {
-  try {
-    Supabase.instance;
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-/// After a boot-time Supabase init failure (dead/slow network), keep retrying in
-/// the background. Once it comes up, re-run the auth restore so a logged-in
-/// user's login + cloud sync reappear WITHOUT an app restart (AuthCubit only
-/// restores once, at boot). Fire-and-forget and bounded — gives up quietly if
-/// the network stays down (next launch will try again).
-Future<void> _retrySupabaseInit() async {
-  for (var attempt = 0; attempt < 15; attempt++) {
-    await Future.delayed(const Duration(seconds: 15));
-    if (_supabaseReady()) break; // a prior attempt already set the client
-    try {
-      await Supabase.initialize(
-        url: Environment.supabaseUrl,
-        anonKey: Environment.supabaseAnonKey,
-        authOptions: FlutterAuthClientOptions(detectSessionInUri: !isAppleTv),
-      ).timeout(const Duration(seconds: 8));
-      break; // initialized
-    } catch (_) {
-      // still down — try again next loop
-    }
-  }
-  // Client is up now → refresh auth so the UI reflects the restored session.
-  if (_supabaseReady() && sl.isRegistered<AuthCubit>()) {
-    try {
-      await sl<AuthCubit>().restore();
-    } catch (_) {}
-  }
 }
 
 /// Boots the app: runs [initDependencies] behind a splash, then builds the
@@ -331,18 +262,6 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
   bool? _onboardedOverride; // set true once onboarding finishes this session
   bool _handledLaunchTaps = false; // route a notification-tap launch once
 
-  /// How stale the local library may be before a launch/resume re-pull. Short
-  /// enough that switching devices shows fresh data on open, long enough to
-  /// debounce app-switching so the DB isn't hammered.
-  static const Duration _syncFreshness = Duration(minutes: 2);
-
-  /// TV (and a phone left on My List) stays in [AppLifecycleState.resumed]
-  /// for hours, so [_syncOnResume] never fires again. Poll while foregrounded
-  /// so a watch/add/remove on another device lands without relaunching.
-  static const Duration _foregroundPoll = Duration(seconds: 30);
-
-  Timer? _foregroundSync;
-
   void _onThemeChanged() {
     if (mounted) {
       setState(() {}); // accent changed → rebuild so the app recolours
@@ -412,7 +331,6 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
     MetadataProviderPrefs.revision.removeListener(_onMetadataProviderChanged);
     HomeRowsPrefs.revision.removeListener(_onHomeRowsChanged);
     WidgetsBinding.instance.removeObserver(this);
-    _foregroundSync?.cancel();
     _tvShellGate.dispose();
     super.dispose();
   }
@@ -422,20 +340,10 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
     final discord = sl.isRegistered<DiscordRpc>() ? sl<DiscordRpc>() : null;
     if (state == AppLifecycleState.resumed) {
       discord?.onForeground();
-      // A blink of no network makes the startup session check fail, which
-      // raises the "Reconnect to sync" banner — and nothing re-tested it,
-      // because restore() only runs at launch. No-op unless that banner is up.
-      if (sl.isRegistered<AuthCubit>()) {
-        unawaited(sl<AuthCubit>().revalidateIfFlagged());
-      }
-      _syncOnResume();
-      _startForegroundSync();
       // The wallpaper may have changed while we were away. No-op unless
       // Material You is on, and only rebuilds if the colours actually moved.
       ThemeController.refresh();
     } else if (state == AppLifecycleState.paused) {
-      _foregroundSync?.cancel();
-      _foregroundSync = null;
       // Opening the in-app player (native surface / immersive) fires paused
       // even though the user is still watching. Do not drop Rich Presence.
       discord?.onPaused();
@@ -444,18 +352,9 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
       // that. No-op unless a folder is picked and one is due.
       unawaited(_autoBackup());
     } else if (state == AppLifecycleState.detached) {
-      _foregroundSync?.cancel();
-      _foregroundSync = null;
       discord?.onDetached();
     }
   }
-
-  /// Cross-device freshness: when the app returns to the foreground, re-pull the
-  /// library if it's older than [_syncFreshness] (debounced inside
-  /// [MyListStore.pullFromCloudIfStale], so rapid app-switching doesn't hammer
-  /// the DB). Also flushes any un-synced My List adds.
-  void _syncOnResume() =>
-      _syncLibrary(maxAge: _syncFreshness, forceMyList: true);
 
   /// Writes an automatic backup into the folder the user picked, if one is due.
   ///
@@ -475,33 +374,6 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
       // handler; the next opportunity retries.
       AppLogger.instance.logError(e, st);
     }
-  }
-
-  void _startForegroundSync() {
-    _foregroundSync?.cancel();
-    // Don't wait for the first period — TV sits in resumed and phone
-    // app-switch used to skip a pull for two minutes.
-    _syncLibrary(maxAge: _foregroundPoll, forceMyList: true);
-    _foregroundSync = Timer.periodic(_foregroundPoll, (_) {
-      _syncLibrary(maxAge: _foregroundPoll, forceMyList: true);
-    });
-  }
-
-  void _syncLibrary({required Duration maxAge, bool forceMyList = false}) {
-    if (!sl.isRegistered<AuthCubit>() || !sl<AuthCubit>().state.isLoggedIn) {
-      return;
-    }
-    if (forceMyList) {
-      unawaited(sl<MyListStore>().pullFromCloud());
-    } else {
-      unawaited(sl<MyListStore>().pullFromCloudIfStale(maxAge: maxAge));
-    }
-    unawaited(sl<WatchHistory>().pullFromCloudIfStale(maxAge: maxAge));
-    unawaited(sl<ReadHistory>().pullFromCloudIfStale(maxAge: maxAge));
-    // My List categories ride the same trigger — two small SELECTs, and they
-    // have to arrive with the list they label.
-    unawaited(sl<CategoryStore>().pullFromCloud());
-    unawaited(sl<MyListStore>().retryPending());
   }
 
   /// Init deps, then (for returning users) kick off the Home fetch so its rows
@@ -527,43 +399,10 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
         '===== session started · v${info.version} (build ${info.buildNumber}) =====',
       );
     } catch (_) {}
-    // Restore a persisted Appwrite session (bounded so a slow network can't
-    // trap the splash). If signed in, pull the cloud library into the local
-    // cache before Home warms so Continue Watching + My List are populated.
-    try {
-      await sl<AuthCubit>().restore().timeout(const Duration(seconds: 5));
-      if (sl<AuthCubit>().state.isLoggedIn) {
-        Future<void> cloudSync() async {
-          await Future.wait([
-            sl<MyListStore>().seedCloudIfNeeded(),
-            sl<WatchHistory>().seedCloudIfNeeded(),
-            sl<ReadHistory>().seedCloudIfNeeded(),
-          ]).timeout(const Duration(seconds: 8));
-          await Future.wait([
-            sl<MyListStore>().pullFromCloudIfStale(maxAge: _syncFreshness),
-            sl<WatchHistory>().pullFromCloudIfStale(maxAge: _syncFreshness),
-            sl<ReadHistory>().pullFromCloudIfStale(maxAge: _syncFreshness),
-            sl<CategoryStore>().pullFromCloud(),
-          ]).timeout(const Duration(seconds: 6));
-          unawaited(sl<MyListStore>().retryPending());
-        }
-
-        // tvOS: never block the splash on cloud I/O — sync after the shell is up.
-        if (isAppleTv) {
-          unawaited(cloudSync().catchError((_) {}));
-        } else {
-          await cloudSync();
-        }
-        // Launch never delivers [AppLifecycleState.resumed] if the app started
-        // in the foreground (TV sits there all day). Start the poll now.
-        _startForegroundSync();
-      }
-    } catch (_) {}
     // Rows saved under a source before the browse screen started resolving
     // titles to the catalogue: move them onto the show they belong to so
-    // Continue Watching stops listing the same title twice. Once, after the
-    // cloud pull so rows from another device are covered, and unawaited so it
-    // never sits in front of the splash.
+    // Continue Watching stops listing the same title twice. Once, and unawaited
+    // so it never sits in front of the splash.
     if (sl.isRegistered<MatchStore>()) {
       unawaited(
         HistoryCanonicalMerge.runOnce(
@@ -600,40 +439,6 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
     // to be 2000ms, which sat there doing nothing for ~400ms.
     const minSplash = Duration(milliseconds: 1700);
     if (elapsed < minSplash) await Future.delayed(minSplash - elapsed);
-  }
-
-  /// Cloud-sync the library on in-session auth changes: pull on login, wipe the
-  /// local cache on logout. Boot-time restore is handled in [_run] (before this
-  /// listener mounts, so no double pull).
-  Future<void> _onAuthChange(BuildContext context, AuthState state) async {
-    if (state.status == AuthStatus.authenticated) {
-      Future<void> sync() async {
-        await sl<MyListStore>().seedCloudIfNeeded();
-        await sl<WatchHistory>().seedCloudIfNeeded();
-        await sl<ReadHistory>().seedCloudIfNeeded();
-        await sl<MyListStore>().pullFromCloud();
-        await sl<WatchHistory>().pullFromCloud();
-        await sl<ReadHistory>().pullFromCloud();
-        unawaited(sl<MyListStore>().retryPending());
-        if (!sl.isRegistered<AppMode>() ||
-            !sl<AppMode>().isTv ||
-            tvosProvidersReady) {
-          sl<HomeCubit>().load();
-        }
-      }
-
-      if (isAppleTv) {
-        unawaited(
-          sync().timeout(const Duration(seconds: 20)).catchError((_) {}),
-        );
-      } else {
-        await sync();
-      }
-    } else if (state.status == AuthStatus.unauthenticated) {
-      await sl<MyListStore>().clearLocal();
-      await sl<WatchHistory>().clearLocal();
-      await sl<ReadHistory>().clearLocal();
-    }
   }
 
   Widget _buildShellHome() {
@@ -737,13 +542,8 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
     return MultiBlocProvider(
       providers: [
         BlocProvider<ActiveSourceCubit>.value(value: sl<ActiveSourceCubit>()),
-        BlocProvider<AuthCubit>.value(value: sl<AuthCubit>()),
       ],
-      child: BlocListener<AuthCubit, AuthState>(
-        listenWhen: (p, c) => p.status != c.status,
-        listener: _onAuthChange,
-        child: app,
-      ),
+      child: app,
     );
   }
 }

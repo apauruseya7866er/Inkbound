@@ -9,14 +9,14 @@
 //
 // ContinueWatchingRow/ContinueReadingRow (the actual card content — title,
 // subtitle, tap wiring) are pumped directly against a resolved list.
-// ContinueSection's gating (login / box-not-open) is exercised without
-// opening a real Hive box; its LIVE branch selection (box open, real
-// ValueListenableBuilder mount) is exercised in the group below with
-// `tester.runAsync()` — real Hive I/O called directly inside a `testWidgets`
-// body (no runAsync) hangs indefinitely in this environment (bare
-// `Hive.init`/`openBox`, nothing feature-specific); `runAsync` is the
-// standard Flutter-test fix for exactly this class of hang, and it works
-// here. See task-12-report.md for the full writeup.
+// ContinueSection's box-not-open guard is exercised without opening a real
+// Hive box; its LIVE branch selection (box open, real ValueListenableBuilder
+// mount) is exercised in the group below with `tester.runAsync()` — real Hive
+// I/O called directly inside a `testWidgets` body (no runAsync) hangs
+// indefinitely in this environment (bare `Hive.init`/`openBox`, nothing
+// feature-specific); `runAsync` is the standard Flutter-test fix for exactly
+// this class of hang, and it works here. See task-12-report.md for the full
+// writeup.
 //
 // The real HomeScreen isn't pumped at all — its initState fires a one-time,
 // un-DI'd update-check + real network call (UpdateService()) and opens
@@ -40,12 +40,9 @@ import 'package:watch_app/core/playback/list_status_store.dart';
 import 'package:watch_app/core/playback/my_list.dart';
 import 'package:watch_app/core/playback/watch_history.dart';
 import 'package:watch_app/core/reading/read_history.dart';
-import 'package:watch_app/core/supabase/auth_user.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/ui/content_row.dart';
 import 'package:watch_app/core/ui/continue_card.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
 import 'package:watch_app/features/home/continue_section.dart';
 import 'package:watch_app/features/home/home_screen.dart' show readerFor;
 import 'package:watch_app/features/home/my_list_screen.dart';
@@ -87,16 +84,6 @@ class _FakeListStatusStore implements ListStatusStore {
   @override
   WatchStatus? statusOf(MediaItem m) => null;
 
-  @override
-  noSuchMethod(Invocation i) => super.noSuchMethod(i);
-}
-
-/// Bare authenticated [AuthCubit] stand-in — only needed to reach
-/// MyListScreen's `_empty()` branch (gated on `context.watch<AuthCubit>()`),
-/// which the existing mode-filter tests never hit (their fixture list is
-/// never actually empty).
-class _FakeAuthCubit extends Cubit<AuthState> implements AuthCubit {
-  _FakeAuthCubit(super.initial);
   @override
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
@@ -302,10 +289,10 @@ void main() {
     );
   });
 
-  // ── Part A: ContinueSection gating (login / box-open guard) ──────────────
+  // ── Part A: ContinueSection box guard ─────────────────────────────────────
   // No Hive box is ever opened here, so Hive.isBoxOpen() is always false —
-  // exercising exactly the "signed-out / test-env" guard branch the
-  // original code's comment described, for both modes.
+  // exercising exactly the "nothing to read from yet" guard branch, for both
+  // modes.
 
   group('ContinueSection box guard', () {
     setUp(() async {
@@ -399,12 +386,8 @@ void main() {
           await WatchHistory.init();
           await ReadHistory.init();
         });
-        sl.registerSingleton<WatchHistory>(
-          WatchHistory(SupabaseService(), () => null),
-        );
-        sl.registerSingleton<ReadHistory>(
-          ReadHistory(SupabaseService(), () => null),
-        );
+        sl.registerSingleton<WatchHistory>(WatchHistory());
+        sl.registerSingleton<ReadHistory>(ReadHistory());
         await tester.runAsync(
           () => sl<WatchHistory>().save(
             HistoryEntry(
@@ -467,12 +450,8 @@ void main() {
           await WatchHistory.init();
           await ReadHistory.init();
         });
-        sl.registerSingleton<WatchHistory>(
-          WatchHistory(SupabaseService(), () => null),
-        );
-        sl.registerSingleton<ReadHistory>(
-          ReadHistory(SupabaseService(), () => null),
-        );
+        sl.registerSingleton<WatchHistory>(WatchHistory());
+        sl.registerSingleton<ReadHistory>(ReadHistory());
         await tester.runAsync(
           () => sl<ReadHistory>().save(
             ReadEntry(
@@ -590,23 +569,12 @@ void main() {
 
   // ── Part B: My List empty-state wording (Task E2) ─────────────────────────
   // Both of MyListScreen's EmptyStates were watch-centric wording no matter
-  // the content mode. `_empty()` (truly nothing in the list, any type) needs
-  // a logged-in AuthCubit above it — the mode-filter group above never hits
-  // that branch because its fixture list is never actually empty.
+  // the content mode. My List is local, so there is no account to sign in to
+  // and `_empty()` (truly nothing in the list, any type) needs nothing above
+  // it — the mode-filter group above never hits that branch because its
+  // fixture list is never actually empty.
 
   group('MyListScreen empty-state wording', () {
-    const authedState = AuthState(
-      status: AuthStatus.authenticated,
-      user: AuthUser(id: 'u1', name: 'Tester', email: 't@example.com'),
-    );
-
-    Widget authed(Widget child) => MaterialApp(
-      home: BlocProvider<AuthCubit>.value(
-        value: _FakeAuthCubit(authedState),
-        child: child,
-      ),
-    );
-
     setUp(() async {
       await sl.reset();
       sl.registerSingleton<AppMode>(const AppMode(isTv: false));
@@ -627,7 +595,7 @@ void main() {
           _FakeContentModeCubit(ContentMode.anime),
         );
 
-        await tester.pumpWidget(authed(const MyListScreen()));
+        await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
         await tester.pumpAndSettle();
 
         expect(find.text('Titles you add appear here'), findsOneWidget);
@@ -642,7 +610,7 @@ void main() {
         _FakeContentModeCubit(ContentMode.manga),
       );
 
-      await tester.pumpWidget(authed(const MyListScreen()));
+      await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
       await tester.pumpAndSettle();
 
       expect(find.text('Manga you add appear here'), findsOneWidget);
@@ -656,7 +624,7 @@ void main() {
         _FakeContentModeCubit(ContentMode.novel),
       );
 
-      await tester.pumpWidget(authed(const MyListScreen()));
+      await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
       await tester.pumpAndSettle();
 
       expect(find.text('Novels you add appear here'), findsOneWidget);
@@ -664,8 +632,10 @@ void main() {
 
     // The un-gate: My List is local, so an empty list on a device that has
     // never had an account says the same thing as an empty list on a device
-    // that had one. It used to render a "Sign in to build your list" wall
-    // with a sign-in button instead, which made the whole list unreachable.
+    // that had one. It used to render a "Sign in to build your list" wall with
+    // a sign-in button instead, which made the whole list unreachable. The
+    // ABSENCE assertions below are the point of this test — the wording above
+    // is already covered by the test beside it.
     testWidgets('no account at all - the empty list is still an empty list, '
         'not a sign-in wall', (tester) async {
       sl.registerSingleton<MyListStore>(_FakeMyListStore(const []));
@@ -703,7 +673,7 @@ void main() {
           _FakeContentModeCubit(ContentMode.novel),
         );
 
-        await tester.pumpWidget(authed(const MyListScreen()));
+        await tester.pumpWidget(const MaterialApp(home: MyListScreen()));
         await tester.pumpAndSettle();
 
         expect(find.text('No novels here in this filter'), findsOneWidget);

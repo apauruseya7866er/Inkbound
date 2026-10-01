@@ -39,7 +39,6 @@ import 'package:watch_app/core/reading/read_store.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
 import 'package:watch_app/core/repository/catalogue_repository.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/trailer/trailer_service.dart';
 import 'package:watch_app/features/detail/detail_screen.dart';
@@ -217,7 +216,7 @@ class _KeyedReadStore extends ReadStore {
 /// [ReadStore]. Doesn't touch Hive (the real ReadHistory only does that inside
 /// methods this override bypasses), so no ReadHistory.init() is needed here.
 class _FakeReadHistory extends ReadHistory {
-  _FakeReadHistory([this.entry]) : super(SupabaseService(), () => null);
+  _FakeReadHistory([this.entry]);
   final ReadEntry? entry;
 
   @override
@@ -456,9 +455,7 @@ void main() {
     // Only needed for the anime test: building the pushed PlayerScreen WIDGET
     // (not its State — see _RecordingNavigatorObserver) still evaluates every
     // sl<T>() in _openPlayer's constructor-argument list, including this one.
-    sl.registerSingleton<WatchHistory>(
-      WatchHistory(SupabaseService(), () => null),
-    );
+    sl.registerSingleton<WatchHistory>(WatchHistory());
   });
 
   tearDown(() async {
@@ -594,7 +591,7 @@ void main() {
 
   testWidgets(
     'with no ReadStore mark, the Read button falls back to ReadHistory — '
-    'the cloud-synced last-read chapter — instead of starting at chapter 1',
+    'the last-read chapter — instead of starting at chapter 1',
     (tester) async {
       tester.view.physicalSize = const Size(800, 2400);
       tester.view.devicePixelRatio = 1.0;
@@ -604,8 +601,8 @@ void main() {
         _StubSourceRepository(_novelDetail),
       );
       sl.registerSingleton<CatalogueRepository>(sl<SourceRepository>());
-      // ReadStore stays empty (setUp's default) — nothing marked on THIS
-      // device — but ReadHistory (synced from elsewhere) says chapter 1 was
+      // ReadStore stays empty (setUp's default) — nothing marked by the
+      // per-chapter position store — but ReadHistory says chapter 1 was
       // finished, so the reader should resume on chapter 2, same as a local
       // mark would, and the button should read Continue.
       sl.unregister<ReadHistory>();

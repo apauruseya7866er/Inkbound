@@ -3,9 +3,11 @@
 // Features restored after the z-mode merge (097192ba) that dropped them from
 // the old flat TV list — now reachable via the unified section drill-down:
 //
-//   Sync library to cloud — boot sync only seeds and PULLS
 //   Watch History — History category opens HistoryScreen directly
 //   Auto-update extensions — Android-only, gated with CloudStream toggles
+//
+// The app is local-only, so there is no account to provide and the "Sync
+// library to cloud" entry that used to sit inside Account & sync is gone.
 //
 // STILL OWED elsewhere:
 //   root_shell_tv.dart  active-source pill in the nav rail
@@ -21,7 +23,6 @@ import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/anilist/anilist_service.dart';
 import 'package:watch_app/core/app_mode.dart';
-import 'package:watch_app/core/appwrite/appwrite_service.dart';
 import 'package:watch_app/core/download/download_prefs.dart';
 import 'package:watch_app/core/locale/locale_controller.dart';
 import 'package:watch_app/core/playback/playback_prefs.dart';
@@ -29,23 +30,14 @@ import 'package:watch_app/core/playback/search_prefs.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/theme/theme_controller.dart';
 import 'package:watch_app/core/torrent/torrent_prefs.dart';
 import 'package:watch_app/core/tracker/mal_service.dart';
 import 'package:watch_app/core/tracker/simkl_service.dart';
 import 'package:watch_app/core/tv/tv_focusable.dart';
 import 'package:watch_app/core/tv/tv_list_focusable.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
-import 'package:watch_app/features/auth/migration_bridge.dart';
 import 'package:watch_app/features/settings/settings_screen.dart';
 import 'package:watch_app/l10n/app_localizations.dart';
-
-MigrationBridge _fakeBridge() => MigrationBridge(
-      invoke: (_, __) async => const {'ok': false},
-      signInPassword: (_, __) async => false,
-      verifyOtp: (_, __) async => false,
-    );
 
 // ── Minimal stubs ─────────────────────────────────────────────────────────────
 
@@ -120,15 +112,9 @@ void _mockPathProvider(WidgetTester tester) {
   );
 }
 
-Widget _buildUnderTest({
-  required AuthCubit authCubit,
-  required ActiveSourceCubit activeCubit,
-}) =>
-    MultiBlocProvider(
-      providers: [
-        BlocProvider<AuthCubit>.value(value: authCubit),
-        BlocProvider<ActiveSourceCubit>.value(value: activeCubit),
-      ],
+Widget _buildUnderTest({required ActiveSourceCubit activeCubit}) =>
+    BlocProvider<ActiveSourceCubit>.value(
+      value: activeCubit,
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
@@ -159,25 +145,17 @@ void main() {
   });
 
   testWidgets(
-    'TV SettingsScreen shows the local identity header, not a sign-in tile',
+    'TV SettingsScreen shows the local identity header',
     (tester) async {
       _mockPathProvider(tester);
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
 
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
+      await tester.pumpWidget(_buildUnderTest(activeCubit: activeCubit));
       await tester.pumpAndSettle();
 
       // Local-only app: the header names the app and says the library lives on
-      // this device. There is no account to sign in to, so the sign-in tile
-      // that used to sit here is gone and nothing opens a login.
+      // this device.
       expect(find.text('Zangetsu'), findsOneWidget);
       expect(find.text('On this device'), findsOneWidget);
-      expect(find.text('Sign in'), findsNothing);
-      expect(find.text('Profile'), findsNothing);
     },
   );
 
@@ -188,13 +166,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1280, 2200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
-
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
+      await tester.pumpWidget(_buildUnderTest(activeCubit: activeCubit));
       await tester.pumpAndSettle();
 
       for (final section in const [
@@ -227,13 +199,8 @@ void main() {
     'TV SettingsScreen History category is D-pad reachable',
     (tester) async {
       _mockPathProvider(tester);
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
 
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
+      await tester.pumpWidget(_buildUnderTest(activeCubit: activeCubit));
       await tester.pumpAndSettle();
 
       expect(find.text('History'), findsOneWidget);
@@ -249,47 +216,11 @@ void main() {
   );
 
   testWidgets(
-    'TV SettingsScreen offers sync library inside Account & sync',
-    (tester) async {
-      _mockPathProvider(tester);
-      await tester.binding.setSurfaceSize(const Size(1280, 2200));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
-
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
-
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.text('Account & sync'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Sync library to cloud'), findsOneWidget);
-      expect(
-        find.ancestor(
-          of: find.text('Sync library to cloud'),
-          matching: find.byType(TvListFocusable),
-        ),
-        findsOneWidget,
-      );
-      expect(find.text('Backup & Restore'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
     'TV SettingsScreen only the first TvFocusable has autofocus=true',
     (tester) async {
       _mockPathProvider(tester);
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
 
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
+      await tester.pumpWidget(_buildUnderTest(activeCubit: activeCubit));
       await tester.pumpAndSettle();
 
       final focusables =
@@ -310,13 +241,7 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1280, 2200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
-
-      await tester.pumpWidget(
-        _buildUnderTest(authCubit: authCubit, activeCubit: activeCubit),
-      );
+      await tester.pumpWidget(_buildUnderTest(activeCubit: activeCubit));
       await tester.pumpAndSettle();
 
       // SettingsTile wraps TV rows in TvListFocusable(semanticLabel: title) with

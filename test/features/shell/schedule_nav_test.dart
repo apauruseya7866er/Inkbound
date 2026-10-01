@@ -7,7 +7,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/ui/dock_visibility.dart';
-import 'package:watch_app/core/appwrite/appwrite_service.dart';
 import 'package:watch_app/core/anilist/anilist_service.dart';
 import 'package:watch_app/core/announce/announcement.dart';
 import 'package:watch_app/core/announce/announcement_service.dart';
@@ -35,7 +34,6 @@ import 'package:watch_app/core/schedule/coming_soon_service.dart';
 import 'package:watch_app/core/schedule/schedule_models.dart';
 import 'package:watch_app/core/search/title_suggestion_service.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/theme/app_colors.dart';
 import 'package:watch_app/core/theme/theme_controller.dart';
 import 'package:watch_app/core/tracker/mal_service.dart';
@@ -44,8 +42,6 @@ import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/download/chapter_download_store.dart';
 import 'package:watch_app/core/zmode/metadata_repository.dart';
 import 'package:watch_app/core/zmode/zmode_prefs.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
-import 'package:watch_app/features/auth/migration_bridge.dart';
 import 'package:watch_app/features/home/cubit/home_cubit.dart';
 import 'package:watch_app/features/home/home_screen.dart';
 import 'package:watch_app/features/shell/root_shell.dart';
@@ -61,12 +57,6 @@ List<Color> _cardFill(WidgetTester tester, String key) {
   );
   return ((box.decoration as BoxDecoration).gradient! as LinearGradient).colors;
 }
-
-MigrationBridge _fakeBridge() => MigrationBridge(
-  invoke: (_, __) async => const {'ok': false},
-  signInPassword: (_, __) async => false,
-  verifyOtp: (_, __) async => false,
-);
 
 // ── Minimal fakes (same shape as root_shell_tv_test.dart's harness) ────────
 
@@ -333,7 +323,6 @@ class _FakeAnnouncementService extends AnnouncementService {
 
 void main() {
   late ActiveSourceCubit activeSource;
-  late AuthCubit authCubit;
   late ContentModeCubit contentMode;
 
   setUpAll(() {
@@ -366,7 +355,6 @@ void main() {
     final dio = Dio();
     final fakeRepo = _FakeSourceRepository();
     activeSource = ActiveSourceCubit();
-    authCubit = AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
     // This suite reuses a fixed on-disk Hive dir (not a fresh temp dir) across
     // runs, so a mode persisted by an earlier run would otherwise leak in here
     // and start tests in the wrong mode.
@@ -419,7 +407,6 @@ void main() {
           null,
         );
     await sl.reset();
-    authCubit.close();
     activeSource.close();
     await contentMode.close();
     await Hive.close();
@@ -428,13 +415,10 @@ void main() {
   // Only supportsFilters is read while Home builds the card row.
   // (declared below main's helpers so the tests above stay readable)
 
-  Widget wrap(Widget child) => MultiBlocProvider(
-    providers: [
-      BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-      BlocProvider<AuthCubit>.value(value: authCubit),
-    ],
-    child: MaterialApp(home: child),
-  );
+  Widget wrap(Widget child) => BlocProvider<ActiveSourceCubit>.value(
+        value: activeSource,
+        child: MaterialApp(home: child),
+      );
 
   // Home now has its own Schedule card (Anime mode only, same label as the
   // dock tab — task 11), so a bare `find.text('Schedule')` can match either

@@ -540,8 +540,7 @@ class PhoneNativePlayer {
             duration: Duration(milliseconds: durationMs),
             updatedAt: DateTime.now().millisecondsSinceEpoch,
             malId: _malId,
-          ),
-          flush: flush,
+          )
         ),
       );
     }

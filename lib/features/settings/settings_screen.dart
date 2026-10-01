@@ -29,10 +29,7 @@ import '../player/tv_exo_spike_screen.dart';
 import '../../core/di/injector.dart';
 import '../../core/platform/apple_tv.dart';
 import '../../core/playback/external_player.dart';
-import '../../core/playback/my_list.dart';
 import '../../core/playback/playback_prefs.dart';
-import '../../core/playback/watch_history.dart';
-import '../auth/reconnect.dart';
 import '../../core/privacy/incognito_mode.dart';
 import '../../core/playback/search_prefs.dart';
 import '../../core/playback/subtitle_language.dart';
@@ -68,7 +65,6 @@ import '../../core/ui/dock_visibility.dart';
 import '../../core/ui/team_section.dart';
 import 'contributors_screen.dart';
 import 'donate_screen.dart';
-import '../auth/auth_cubit.dart';
 import '../backup/backup_screen.dart';
 import '../onboarding/how_it_works.dart';
 import '../notify/subscriptions_screen.dart';
@@ -853,51 +849,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         },
       ),
 
-    _SettingsEntry(
-      section: SettingsSection.account,
-      icon: Icons.cloud_upload_outlined,
-      title: l10n.syncLibraryToCloud,
-      subtitle: l10n.syncLibraryToCloudSubtitle,
-      keywords:
-          'sync cloud upload library history continue watching list device '
-          'cross-device re-sync fix restore',
-      onTap: () async {
-        if (sl<AuthCubit>().state.user == null) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.signInFirst)));
-          return;
-        }
-        // The session may have lapsed (logged-in from cache only). Get a live
-        // one first — otherwise every upsert silently no-ops ("Synced 0").
-        final live = await ensureLiveSession(context);
-        if (!mounted) return;
-        if (!live) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(l10n.reconnectToSyncLibrary)));
-          return;
-        }
-        final messenger = ScaffoldMessenger.of(context);
-        messenger
-          ..clearSnackBars()
-          ..showSnackBar(SnackBar(content: Text(l10n.syncingLibraryToCloud)));
-        final h = (await sl<WatchHistory>().pushAllLocalToCloud()).pushed;
-        final l = (await sl<MyListStore>().pushAllLocalToCloud()).pushed;
-        if (!mounted) return;
-        messenger
-          ..clearSnackBars()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                h == 0 && l == 0
-                    ? l10n.syncLibraryAlreadySynced
-                    : l10n.syncLibraryPushed(h, l),
-              ),
-            ),
-          );
-      },
-    ),
     _SettingsEntry(
       section: SettingsSection.account,
       icon: Icons.cloud_sync_outlined,

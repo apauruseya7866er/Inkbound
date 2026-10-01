@@ -8,7 +8,6 @@ import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/anilist/anilist_service.dart';
 import 'package:watch_app/core/app_mode.dart';
-import 'package:watch_app/core/appwrite/appwrite_service.dart';
 import 'package:watch_app/core/download/download_prefs.dart';
 import 'package:watch_app/core/playback/playback_prefs.dart';
 import 'package:watch_app/core/playback/search_prefs.dart';
@@ -16,21 +15,12 @@ import 'package:watch_app/core/reading/reader_prefs.dart';
 import 'package:watch_app/core/torrent/torrent_prefs.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/locale/locale_controller.dart';
 import 'package:watch_app/core/theme/theme_controller.dart';
 import 'package:watch_app/core/tracker/mal_service.dart';
 import 'package:watch_app/core/tracker/simkl_service.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
-import 'package:watch_app/features/auth/migration_bridge.dart';
 import 'package:watch_app/features/settings/settings_screen.dart';
 import 'package:watch_app/l10n/app_localizations.dart';
-
-MigrationBridge _fakeBridge() => MigrationBridge(
-      invoke: (_, __) async => const {'ok': false},
-      signInPassword: (_, __) async => false,
-      verifyOtp: (_, __) async => false,
-    );
 
 // ── Minimal stubs (mirrors settings_screen_tv_test.dart / AppMode wiring) ────
 
@@ -123,17 +113,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(1000, 2200));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    final authCubit =
-        AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-    addTearDown(authCubit.close);
-    GetIt.instance.registerSingleton<AuthCubit>(authCubit);
-
     await tester.pumpWidget(
-      MultiBlocProvider(
-        providers: [
-          BlocProvider<AuthCubit>.value(value: authCubit),
-          BlocProvider<ActiveSourceCubit>.value(value: activeCubit),
-        ],
+      BlocProvider<ActiveSourceCubit>.value(
+        value: activeCubit,
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
@@ -152,7 +134,6 @@ void main() {
     for (final section in const [
       'Account & sync',
       'Sources',
-      'Playback',
       'Downloads',
       'Interface',
       'Advanced',
@@ -160,6 +141,11 @@ void main() {
     ]) {
       expect(find.text(section), findsOneWidget, reason: 'category: $section');
     }
+    // Novel-only build: Playback is gone. Every row in it (quality, autoplay,
+    // speed, decoder, audio/subtitle defaults, resume) drives the MPV player,
+    // which this build has no route to — so the whole category is hidden rather
+    // than relabelled.
+    expect(find.text('Playback'), findsNothing);
     // Notifications is Android-only (its sole entry), so its category is absent
     // on the non-Android test host.
     expect(find.text('Notifications'), findsNothing);
@@ -205,8 +191,15 @@ void main() {
     await tester.tap(find.text('Reader'));
     await tester.pumpAndSettle();
 
-    expect(find.text('MANGA'), findsOneWidget);
+    // Novel-only build: the page used to open on a "MANGA" section of
+    // page-image prefs. What's left is the shared pair (Keep Screen On,
+    // Fullscreen) under a generic "READING" header, then the Novel section.
+    // The header is "READING", not "READER" — `l10n.reader` would print
+    // "READER" directly under the app bar, which already reads "Reader".
+    expect(find.text('READING'), findsOneWidget);
     expect(find.text('NOVEL'), findsOneWidget);
+    // The Manga section header is gone with the page-image prefs it headed.
+    expect(find.text('MANGA'), findsNothing);
   });
 
   testWidgets('search cuts across every section (flat filtered list)',

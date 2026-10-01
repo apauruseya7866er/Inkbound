@@ -24,8 +24,8 @@ import 'watch_history.dart';
 class HistoryCanonicalMerge {
   const HistoryCanonicalMerge._();
 
-  /// Lives in the box [WatchHistory] already opens for its sync bookkeeping,
-  /// so this needs no box of its own.
+  /// Lives in the shared migrations box [WatchHistory.syncMetaBox] opens, so
+  /// this needs no box of its own.
   static const String flagKey = 'history_canonical_merge_v1';
 
   /// Returns how many rows were moved. Never throws: a merge that cannot
@@ -117,7 +117,6 @@ class HistoryCanonicalMerge {
               updatedAt: e.updatedAt,
               malId: malId,
             ),
-            flush: true,
           );
           canonicalAt[showUrl] = e.updatedAt;
         }

@@ -1,8 +1,6 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -11,9 +9,9 @@ import 'package:fluttertoast/fluttertoast.dart';
 import '../search/browse_sources_screen.dart';
 import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
-import '../../core/playback/my_list.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/zmode/zmode_prefs.dart';
 import '../../l10n/ui_strings.dart';
@@ -21,7 +19,6 @@ import '../../l10n/l10n.dart';
 import '../../core/ui/nav_prefs.dart';
 import '../downloads/downloads_screen.dart';
 import '../history/history_screen.dart';
-import '../auth/auth_cubit.dart';
 import '../home/cubit/home_cubit.dart';
 import '../home/home_screen.dart';
 import '../home/my_list_screen.dart';
@@ -152,9 +149,6 @@ class _RootShellState extends State<RootShell>
     DockScrollCollapse.reset();
     setState(() => _tab = tab);
     _switchCtrl.forward(from: 0);
-    if (tab == DockTab.myList && sl.isRegistered<MyListStore>()) {
-      unawaited(sl<MyListStore>().pullFromCloud());
-    }
   }
 
   /// Root-level Back: the first press shows a toast, a second within 2s exits.
@@ -287,7 +281,13 @@ class _RootShellState extends State<RootShell>
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (ZModePrefs.enabled)
+                  // Novel-only build: the mode bar only ever offered
+                  // Anime / Movie-TV / Manga / Novel, so with three of the four
+                  // gone there is nothing to switch between — the bar and the
+                  // centre FAB that opens it are both hidden. Both call sites
+                  // still read ZModePrefs so the original layout comes back if
+                  // `kNovelOnly` is flipped to false.
+                  if (ZModePrefs.enabled && !kNovelOnly)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: BlocBuilder<ContentModeCubit, ContentMode>(
@@ -359,7 +359,7 @@ class _RootShellState extends State<RootShell>
                             tabs: _visibleTabs(),
                             active: _tab,
                             onSelected: _onTabSelected,
-                            centre: ZModePrefs.enabled
+                            centre: ZModePrefs.enabled && !kNovelOnly
                                 ? BlocBuilder<ContentModeCubit, ContentMode>(
                                     bloc: sl<ContentModeCubit>(),
                                     builder: (_, mode) => ModeFab(
@@ -725,9 +725,9 @@ class _DockItem extends StatelessWidget {
   }
 }
 
-/// The Profile tab — the user's avatar when signed in (accent ring while
-/// active), a plain person glyph otherwise. Opens the same Settings screen
-/// the gear used to.
+/// The Profile tab — a plain person glyph in a circle (accent ring while
+/// active). The app is local-only, so there is no account to show a face
+/// for. Opens the same Settings screen the gear used to.
 class _ProfileDockItem extends StatelessWidget {
   const _ProfileDockItem({
     required this.selected,
@@ -767,66 +767,26 @@ class _ProfileDockItem extends StatelessWidget {
                       child: Center(
                         child: _DockPop(
                           selected: selected,
-                          child: BlocBuilder<AuthCubit, AuthState>(
-                            builder: (context, auth) {
-                              final ring = selected
+                          // The app is local-only: there is no account, so this
+                          // is always the quiet person glyph in a hairline
+                          // circle rather than someone's face.
+                          child: Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: selected
                                   ? Border.all(
                                       color: AppColors.accent,
                                       width: 1.8,
                                     )
-                                  : null;
-                              if (auth.isLoggedIn) {
-                                final initial = auth.displayName.isNotEmpty
-                                    ? auth.displayName[0].toUpperCase()
-                                    : '?';
-                                return Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: ring,
-                                    color: AppColors.surface2,
-                                    image: auth.avatarUrl != null
-                                        ? DecorationImage(
-                                            image: CachedNetworkImageProvider(
-                                              auth.avatarUrl!,
-                                            ),
-                                            fit: BoxFit.cover,
-                                          )
-                                        : null,
-                                  ),
-                                  alignment: Alignment.center,
-                                  child: auth.avatarUrl == null
-                                      ? Text(
-                                          initial,
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w800,
-                                            color: selected
-                                                ? AppColors.accent
-                                                : AppColors.textPrimary,
-                                          ),
-                                        )
-                                      : null,
-                                );
-                              }
-                              // Signed out — quiet person glyph in a hairline circle.
-                              return Container(
-                                width: 24,
-                                height: 24,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  border:
-                                      ring ??
-                                      Border.all(color: color, width: 1.4),
-                                ),
-                                child: Icon(
-                                  Icons.person_outline,
-                                  size: 15,
-                                  color: color,
-                                ),
-                              );
-                            },
+                                  : Border.all(color: color, width: 1.4),
+                            ),
+                            child: Icon(
+                              Icons.person_outline,
+                              size: 15,
+                              color: color,
+                            ),
                           ),
                         ),
                       ),

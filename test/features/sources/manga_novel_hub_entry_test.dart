@@ -8,10 +8,18 @@
 //
 // What's under test now:
 //  - ProvidersHubScreen (phone view) has no "Zangetsu Manga" row / section —
-//    the existing three streaming rows stay exactly as they are today, and
-//    the ACTIVE-badge exclusivity rule (a reading source must not badge the
-//    Zangetsu streaming row) still holds even with the dedicated row gone.
+//    the ACTIVE-badge exclusivity rule (a source active under the Zangetsu
+//    ecosystem must not badge a row it doesn't belong to) still holds.
 //  - Settings → Sources no longer has a "Manga & Novel" entry.
+//  - ZangetsuSourcesScreen itself, scoped to reading providers and unscoped.
+//
+// Novel-only build: the Zangetsu streaming row and its whole STREAMING section
+// are gone too — the hub's only ecosystem is LNReader under a "NOVEL" header,
+// and the header total is the novel source count. So the cases that read the
+// Zangetsu row's title or count are deleted rather than re-pointed (there is no
+// row left to read), the badge rule is re-pointed at the rule that survives
+// (only an `lnr:` novel extension badges a hub row), and the unscoped screen is
+// pushed directly instead of through the hub row that used to open it.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -22,7 +30,6 @@ import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/anilist/anilist_service.dart';
 import 'package:watch_app/core/app_mode.dart';
-import 'package:watch_app/core/appwrite/appwrite_service.dart';
 import 'package:watch_app/core/download/download_prefs.dart';
 import 'package:watch_app/core/mihon/mihon_manager.dart';
 import 'package:watch_app/core/playback/playback_prefs.dart';
@@ -32,13 +39,10 @@ import 'package:watch_app/core/provider/provider_manager.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
 import 'package:watch_app/core/provider/provider_repo_registry.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/theme/theme_controller.dart';
 import 'package:watch_app/core/torrent/torrent_prefs.dart';
 import 'package:watch_app/core/tracker/mal_service.dart';
 import 'package:watch_app/core/tracker/simkl_service.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
-import 'package:watch_app/features/auth/migration_bridge.dart';
 import 'package:watch_app/features/settings/settings_screen.dart';
 import 'package:watch_app/features/sources/providers_hub_screen.dart';
 import 'package:watch_app/features/sources/zangetsu_sources_screen.dart';
@@ -153,18 +157,6 @@ void main() {
     });
 
     testWidgets(
-      'the existing Zangetsu row is unchanged — same title, desc and '
-      'unfiltered total (reading sources still count toward it, as today)',
-      (tester) async {
-        await pump(tester);
-
-        expect(find.text('Zangetsu'), findsOneWidget);
-        expect(find.text('Built-in JS providers'), findsOneWidget);
-        expect(find.text('3 sources'), findsOneWidget); // all 3, unfiltered
-      },
-    );
-
-    testWidgets(
       'CloudStream and Aniyomi rows are unaffected — still Android-gated, '
       'absent on this (non-Android) test host, same as before',
       (tester) async {
@@ -175,51 +167,33 @@ void main() {
       },
     );
 
-    // ── Fix round 1, finding 1: ACTIVE badge must be exclusive ────────────
+    // Novel-only build: with the Zangetsu streaming row gone, the badge
+    // exclusivity rule it used to be about has no row to land on. What
+    // survives is the discipline behind it — a row badges for its own prefix
+    // only, and the LNReader row (the one that badges for `lnr:` ids) is
+    // pinned in lnreader_hub_entry_test.dart. What belongs here is that a
+    // Zangetsu JS provider, the only other source kind this build loads, is
+    // never badged: it IS the active source and nothing claims it.
     testWidgets(
-      'an anime active source badges the Zangetsu row (unchanged today)',
+      'a Zangetsu JS source active badges no row (only novel extensions do)',
       (tester) async {
         sl.unregister<ActiveSourceCubit>();
         sl.registerSingleton<ActiveSourceCubit>(
-          ActiveSourceCubit(fallback: 'anime1'),
+          ActiveSourceCubit(fallback: 'novel1'),
         );
         await pump(tester);
 
-        // Only row on screen in this (non-Android) test host is Zangetsu —
-        // CS/Aniyomi/Mihon are all Android-gated — so a single ACTIVE badge
-        // sitting right on Zangetsu's line is what "badges the Zangetsu row"
-        // reduces to here.
-        expect(find.text('ACTIVE'), findsOneWidget);
-        final activeY = tester.getTopLeft(find.text('ACTIVE')).dy;
-        final zangetsuY = tester.getTopLeft(find.text('Zangetsu')).dy;
-        expect((activeY - zangetsuY).abs(), lessThan(30));
-      },
-    );
-
-    // The Zangetsu Manga row this used to compare against is gone, but the
-    // rule it guarded is still live: a reading source active under the
-    // Zangetsu ecosystem must not badge the Zangetsu *streaming* row.
-    // (activeIsReading in providers_hub_screen.dart.)
-    testWidgets(
-      'a manga active source does not badge the Zangetsu streaming row',
-      (tester) async {
-        sl.unregister<ActiveSourceCubit>();
-        sl.registerSingleton<ActiveSourceCubit>(
-          ActiveSourceCubit(fallback: 'manga1'),
-        );
-        await pump(tester);
-
-        // No dedicated reading row exists any more to carry the badge
-        // instead, so with the exclusion working, nothing should show
-        // ACTIVE at all.
         expect(find.text('ACTIVE'), findsNothing);
+        expect(find.textContaining('Active: Novel One'), findsOneWidget);
       },
     );
 
     // scopeToReading is still live production behavior of
-    // ZangetsuSourcesScreen — just no longer reachable from this hub. It's
-    // still reachable from Settings → Manga & Novel (untouched), so this
-    // pins the behavior directly rather than losing coverage of it.
+    // ZangetsuSourcesScreen — the JS screen itself is very much alive in this
+    // build (it's where a Zangetsu novel provider is installed and picked, from
+    // the detail screen's source switch, search and the home overflow). The
+    // flag has no caller of its own since the Settings → Manga & Novel entry
+    // went, so its filter is pinned here directly.
     testWidgets(
       'ZangetsuSourcesScreen(scopeToReading: true) scopes the Installed tab '
       'to reading providers, with a Show all escape hatch back to everything',
@@ -249,12 +223,13 @@ void main() {
       },
     );
 
+    // Novel-only build: the hub no longer lists Zangetsu at all, so the
+    // unscoped screen is pushed directly rather than through a row that isn't
+    // there. What it shows is unchanged: every provider, no scoping UI.
     testWidgets(
-      'tapping Zangetsu (unscoped) still shows every provider, no scoping UI',
+      'ZangetsuSourcesScreen unscoped shows every provider, no scoping UI',
       (tester) async {
-        await pump(tester);
-
-        await tester.tap(find.text('Zangetsu'));
+        await tester.pumpWidget(const MaterialApp(home: ZangetsuSourcesScreen()));
         await tester.pumpAndSettle();
 
         expect(find.text('Anime One'), findsOneWidget);
@@ -311,17 +286,9 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1000, 2200));
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
-      final authCubit =
-          AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge());
-      addTearDown(authCubit.close);
-      GetIt.instance.registerSingleton<AuthCubit>(authCubit);
-
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<AuthCubit>.value(value: authCubit),
-            BlocProvider<ActiveSourceCubit>.value(value: activeCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeCubit,
           child: const MaterialApp(home: SettingsScreen()),
         ),
       );
@@ -370,12 +337,6 @@ void main() {
     });
   });
 }
-
-MigrationBridge _fakeBridge() => MigrationBridge(
-      invoke: (_, __) async => const {'ok': false},
-      signInPassword: (_, __) async => false,
-      verifyOtp: (_, __) async => false,
-    );
 
 class _StubSearchPrefs extends SearchPrefs {
   @override

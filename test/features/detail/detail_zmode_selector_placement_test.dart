@@ -36,7 +36,6 @@ import 'package:watch_app/core/reading/read_store.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
 import 'package:watch_app/core/repository/catalogue_repository.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/trailer/trailer_service.dart';
 import 'package:watch_app/core/zmode/match_store.dart';
@@ -293,10 +292,8 @@ void main() {
       () => ChapterDownloader(sl<SourceRepository>(), sl<ChapterDownloadStore>()),
     );
     sl.registerSingleton<ReadStore>(_FakeReadStore());
-    sl.registerSingleton<ReadHistory>(ReadHistory(SupabaseService(), () => null));
-    sl.registerSingleton<WatchHistory>(
-      WatchHistory(SupabaseService(), () => null),
-    );
+    sl.registerSingleton<ReadHistory>(ReadHistory());
+    sl.registerSingleton<WatchHistory>(WatchHistory());
 
     // MatchLine's own dependencies — the source list is empty, so it settles
     // straight into the "no source" state without any async matcher work.

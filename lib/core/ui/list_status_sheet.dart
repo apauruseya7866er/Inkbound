@@ -102,7 +102,6 @@ Future<void> showListStatusSheet(
   final status = picked as WatchStatus;
   await myList.add(item);
   await statusStore.setStatus(item, status);
-  await myList.pushStatus(item); // sync the watch status to the cloud row
   onChanged?.call();
   _syncToTrackers(
     item,

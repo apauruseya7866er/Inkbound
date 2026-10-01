@@ -59,62 +59,25 @@ void main() {
     return done.future.timeout(const Duration(seconds: 10));
   }
 
-  Future<void> seedThrottle(String key) async {
-    final meta = await Hive.openBox(MyListStore.syncMetaBox);
-    await meta.put(key, DateTime.now().millisecondsSinceEpoch);
+  // An unreadable box must not fail the launch: openBoxSafely quarantines it
+  // (or deletes it, when the file is still locked) and reopens it empty, so the
+  // person gets a working app with an empty list and can restore a backup. The
+  // byte-level mechanics of that recovery are covered in safe_box's own tests;
+  // what matters per store is that its init() goes through openBoxSafely and
+  // comes back.
+  for (final entry in <({String box, String label, Future<void> Function() init})>[
+    (box: MyListStore.boxName, label: 'My List', init: MyListStore.init),
+    (box: WatchHistory.boxName, label: 'history', init: WatchHistory.init),
+    (box: ReadHistory.boxName, label: 'reading history', init: ReadHistory.init),
+  ]) {
+    test('a quarantined ${entry.label} reopens empty instead of failing the '
+        'launch', () async {
+      await breakBox(entry.box);
+
+      // Completes without throwing: that IS the property under test.
+      await initIgnoringOrphanError(entry.init);
+
+      expect(quarantinedBoxes, contains(entry.box));
+    });
   }
-
-  test('a quarantined My List clears the pull throttle so cloud can restore it',
-      () async {
-    await breakBox(MyListStore.boxName);
-    await seedThrottle('mylist_lastPullMs');
-
-    await initIgnoringOrphanError(MyListStore.init);
-
-    expect(quarantinedBoxes, contains(MyListStore.boxName));
-    // Without this the next launch reads a fresh timestamp, skips the pull,
-    // and the user stares at an empty list for 12 hours.
-    expect(
-      Hive.box(MyListStore.syncMetaBox).get('mylist_lastPullMs'),
-      isNull,
-    );
-  });
-
-  test('a quarantined history clears its own pull throttle', () async {
-    await breakBox(WatchHistory.boxName);
-    await seedThrottle('history_lastPullMs');
-
-    await initIgnoringOrphanError(WatchHistory.init);
-
-    expect(quarantinedBoxes, contains(WatchHistory.boxName));
-    expect(
-      Hive.box(WatchHistory.syncMetaBox).get('history_lastPullMs'),
-      isNull,
-    );
-  });
-
-  test('a quarantined reading history clears its own pull throttle', () async {
-    await breakBox(ReadHistory.boxName);
-    await seedThrottle('reading_history_lastPullMs');
-
-    await initIgnoringOrphanError(ReadHistory.init);
-
-    expect(quarantinedBoxes, contains(ReadHistory.boxName));
-    expect(
-      Hive.box(ReadHistory.syncMetaBox).get('reading_history_lastPullMs'),
-      isNull,
-    );
-  });
-
-  test('a healthy My List leaves the throttle alone', () async {
-    await seedThrottle('mylist_lastPullMs');
-
-    await MyListStore.init();
-
-    expect(quarantinedBoxes, isEmpty);
-    expect(
-      Hive.box(MyListStore.syncMetaBox).get('mylist_lastPullMs'),
-      isNotNull, // a normal launch must still be throttled
-    );
-  });
 }

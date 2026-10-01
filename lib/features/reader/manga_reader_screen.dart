@@ -1147,8 +1147,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen>
         total: total,
         updatedMs: DateTime.now().millisecondsSinceEpoch,
         type: ProviderType.manga,
-      ),
-      flush: flush,
+      )
     );
     if (sl<ReadStore>().finished(widget.sourceId, widget.showId, ep.id)) {
       _maybeScrobble(ep);

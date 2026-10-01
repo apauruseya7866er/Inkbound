@@ -11,10 +11,14 @@ import '../../core/tracker/tracker.dart';
 import '../../core/tv/tv_back_button.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../l10n/l10n.dart';
-import '../auth/tv_tracker_connect_screen.dart';
 
-/// TV-native tracker Connections: each of AniList / MAL / Simkl with its status
-/// and a D-pad Connect (per-tracker relay QR) / Disconnect (local-only).
+/// TV-native tracker Connections: each tracker with its status. Disconnect is
+/// local to the TV.
+///
+/// There is no Connect here. Connecting a tracker used to be a relay: the TV
+/// showed a QR, the phone completed the OAuth and pushed the token through the
+/// account-backed pairing rendezvous. Pairing is gone, so a tracker is connected on
+/// the phone and this screen only reflects and can undo that.
 class ConnectionsScreenTv extends StatefulWidget {
   const ConnectionsScreenTv({super.key});
 
@@ -29,15 +33,6 @@ class _ConnectionsScreenTvState extends State<ConnectionsScreenTv> {
     (id: 'simkl', label: 'Simkl', t: sl<SimklService>()),
     (id: 'mangabaka', label: 'MangaBaka', t: sl<MangaBakaService>()),
   ];
-
-  Future<void> _connect(String id) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TvTrackerConnectScreen(trackerId: id),
-      ),
-    );
-    if (mounted) setState(() {});
-  }
 
   Future<void> _disconnect(Tracker t) async {
     await t.disconnect();
@@ -82,7 +77,9 @@ class _ConnectionsScreenTvState extends State<ConnectionsScreenTv> {
                 return TvListFocusable(
                   autofocus: i == 0,
                   semanticLabel: '${r.label}, $who',
-                  onTap: () => connected ? _disconnect(r.t) : _connect(r.id),
+                  // Nothing to tap when it isn't connected: Connect needs the
+                  // pairing relay, which is gone.
+                  onTap: connected ? () => _disconnect(r.t) : () {},
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 20,
@@ -117,7 +114,7 @@ class _ConnectionsScreenTvState extends State<ConnectionsScreenTv> {
                         Text(
                           connected
                               ? context.l10n.disconnect
-                              : context.l10n.connect,
+                              : 'Connect on your phone',
                           style: AppText.body.copyWith(
                             color: connected
                                 ? Colors.redAccent

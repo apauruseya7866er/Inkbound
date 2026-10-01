@@ -84,7 +84,10 @@ class NovelReaderScreen extends StatefulWidget {
 }
 
 class _NovelReaderScreenState extends State<NovelReaderScreen>
-    with ReaderComfortMixin<NovelReaderScreen>, TickerProviderStateMixin {
+    with
+        ReaderComfortMixin<NovelReaderScreen>,
+        TickerProviderStateMixin,
+        WidgetsBindingObserver {
   /// Hands-free scrolling — scroll mode only; paged mode turns whole pages.
   late final ReaderAutoScroll _autoScroll;
   late int _index;
@@ -229,6 +232,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _index = widget.startIndex;
     _scrollController = ScrollController()..addListener(_onScroll);
     _pageController = PageController();
@@ -265,6 +269,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _flushProgress(); // reader close: don't lose the last-read position
     // Narration may still be running in the background service; it just must
     // not try to advance into a chapter list that is going away.
@@ -280,6 +285,17 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   }
 
   Episode get _chapter => _chapters[_index];
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the reader, the voice may have stopped without telling us:
+    // the notification's stop button, a media key, or the app being swiped out
+    // of the task switcher. Without this the panel comes back offering to pause
+    // something that has been silent for minutes. See `TtsCubit.syncWithEngine`.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_tts?.syncWithEngine() ?? Future<void>.value());
+    }
+  }
 
   /// Background upgrade for a Continue Reading resume: opened with just the
   /// one already-read chapter, this fetches the show's real chapter list
@@ -562,8 +578,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         total: 1000,
         updatedMs: DateTime.now().millisecondsSinceEpoch,
         type: ProviderType.novel,
-      ),
-      flush: flush,
+      )
     );
     if (sl<ReadStore>().finished(widget.sourceId, widget.showId, ep.id)) {
       _maybeScrobble(ep);

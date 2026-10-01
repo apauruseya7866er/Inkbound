@@ -1,57 +1,20 @@
-/// Public Appwrite configuration. These are NOT secrets — the project id and
-/// endpoint ship in every Appwrite client app. Auth uses email/password
-/// sessions; the server API key is never embedded here.
+/// Zangetsu has no backend of its own: the library, history and settings
+/// all live in local storage, and a backup is a JSON file in a folder you
+/// chose. What is left here is the OAuth configuration for the tracker
+/// integrations and the website's share page - the only other things
+/// that talk to anyone.
 class Environment {
-  static const String appwriteProjectId = '6a1ed44f0029b50bccde';
-  static const String appwriteProjectName = 'Zangetsu';
-  static const String appwritePublicEndpoint = 'https://sgp.cloud.appwrite.io/v1';
-
-  // Supabase project URL + anon (public) key — safe to embed, same as the
-  // Appwrite project id/endpoint above. Override with --dart-define if a
-  // build needs a different project (e.g. staging).
-  static const String supabaseUrl = String.fromEnvironment(
-    'SUPABASE_URL',
-    defaultValue: 'https://eogwzrlfoercfwcfwlmv.supabase.co',
-  );
-  static const String supabaseAnonKey = String.fromEnvironment(
-    'SUPABASE_ANON_KEY',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVvZ3d6cmxmb2VyY2Z3Y2Z3bG12Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzNjgzODIsImV4cCI6MjA5OTk0NDM4Mn0.qr-nHnB9vb7BodP55XJ9-6Rwp__eOGCS6txhLiuWVZw',
-  );
-
-  /// Where Appwrite sends the password-recovery link. Appwrite appends
-  /// Password-reset landing. Supabase now drives reset (via the auth `site_url`,
-  /// which points at this same page); kept for reference. Not used by the
-  /// Supabase AuthCubit, which calls `resetPasswordForEmail`.
-  static const String passwordResetUrl = 'https://zangetsu.online/';
-
-  /// Base of the Zangetsu website (landing + reset + the share "open" page).
+  /// Base of the Zangetsu website (landing + the share "open" page).
   static const String siteBaseUrl = 'https://zangetsu.online';
 
   /// Share links point here. The page opens the app if installed (via the
-  /// [openLinkScheme] scheme below), otherwise offers the download. Its domain
-  /// must be an Appwrite Web platform (already added for the reset page).
-  static const String siteOpenUrl = '$siteBaseUrl/open/';
-
-  /// TV pairing page on the website. Used when someone opens a shared/https
-  /// pair link in a browser; the page can hand off to the app via
-  /// `zangetsu://pair`. App-facing TV QRs encode the deeplink directly.
-  static const String sitePairUrl = '$siteBaseUrl/pair/';
+  /// [openLinkScheme] scheme below), otherwise offers the download.
+static const String siteOpenUrl = '$siteBaseUrl/open/';
 
   /// The "open" page redirects to `zangetsu://open?…`; an installed app catches
   /// it (see [OpenLinkService] + the Android manifest intent-filter).
   static const String openLinkScheme = trackerRedirectScheme; // 'zangetsu'
   static const String openLinkHost = 'open';
-  static const String pairLinkHost = 'pair';
-
-  // Provisioned backend ids (see docs / setup).
-  static const String databaseId = 'main';
-  static const String mylistCollectionId = 'mylist';
-  static const String historyCollectionId = 'history';
-  static const String roomParticipantsCollectionId = 'room_participants';
-  static const String roomMessagesCollectionId = 'room_messages';
-  static const String avatarsBucketId = 'avatars';
-  static const String backupsCollectionId = 'backups';
 
   // ── Tracker OAuth ──────────────────────────────────────────────────────────
   // All redirects share the zangetsu:// scheme; each has its own host with a

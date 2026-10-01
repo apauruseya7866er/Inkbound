@@ -9,7 +9,6 @@ import '../../core/mode/content_mode_cubit.dart';
 import '../../core/models/media_item.dart';
 import '../../core/models/watch_status.dart';
 import '../../core/playback/category_store.dart';
-import '../../core/playback/my_list.dart';
 import '../../core/prefs/list_sort.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -398,12 +397,7 @@ class _SourceChips extends StatelessWidget {
                   variant: TvFocusVariant.float,
                   scale: 1.0,
                   borderRadius: 20,
-                  onTap: () {
-                    cubit.selectMyList();
-                    if (sl.isRegistered<MyListStore>()) {
-                      unawaited(sl<MyListStore>().pullFromCloud());
-                    }
-                  },
+                  onTap: () => cubit.selectMyList(),
                   child: _Chip(
                     label: context.l10n.myList,
                     selected: tlState.isMyList,

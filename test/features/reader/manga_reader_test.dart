@@ -30,7 +30,6 @@ import 'package:watch_app/core/reading/reader_settings.dart';
 import 'package:watch_app/core/reading/tiles/tiled_page_image.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/features/reader/manga_reader_screen.dart';
@@ -366,20 +365,16 @@ class _FlakyReadingProvider implements BaseProvider, ReadingProvider {
   Future<ChapterText> getText(String chapterUrl) => throw UnimplementedError();
 }
 
-/// Records every `flush` value passed to [ReadHistory.save] (synchronously,
-/// before delegating to the real implementation) so the carry-forward
-/// requirement — flush on chapter change + on dispose — is provable without
-/// reaching into private reader state. Same shape as novel_reader_test.dart's
-/// spy.
+/// Counts every [ReadHistory.save] call so a test can prove the reader writes
+/// once per user action (chapter change, dispose, seek commit) rather than
+/// once per frame or per drag tick. Same shape as novel_reader_test.dart's spy.
 class _SpyReadHistory extends ReadHistory {
-  _SpyReadHistory(super.service, super.currentUserId);
-
-  final List<bool> flushCalls = [];
+  int saveCalls = 0;
 
   @override
-  Future<void> save(ReadEntry e, {bool flush = false}) {
-    flushCalls.add(flush);
-    return super.save(e, flush: flush);
+  Future<void> save(ReadEntry e) {
+    saveCalls++;
+    return super.save(e);
   }
 }
 
@@ -720,7 +715,7 @@ void main() {
       await ReaderPrefs.init();
 
       sl.registerSingleton<ReadStore>(ReadStore());
-      spyHistory = _SpyReadHistory(SupabaseService(), () => null);
+      spyHistory = _SpyReadHistory();
       sl.registerSingleton<ReadHistory>(spyHistory);
       sl.registerSingleton<ReaderPrefs>(ReaderPrefs());
 
@@ -873,13 +868,8 @@ void main() {
       expect(saved!.pos, 1);
       expect(saved.total, 3);
 
-      // Pin the other half of the carry-forward contract: a routine page
-      // turn (no chapter change, no dispose) must never flush. A regression
-      // that flips _saveProgress's default to flush: true would still leave
-      // every other assertion in this file green while pushing to Supabase
-      // on every page turn.
-      expect(spyHistory.flushCalls, everyElement(isFalse));
-
+      // The no-per-tick-write half of the carry-forward contract is covered by
+      // the slider-drag tests further down, which count ReadHistory writes.
       await disposeHarness(tester);
     });
 
@@ -936,36 +926,6 @@ void main() {
         await disposeHarness(tester);
       },
     );
-
-    testWidgets('flushes ReadHistory on chapter change and on dispose', (
-      tester,
-    ) async {
-      await tester.runAsync(() => sl<ReaderPrefs>().setDirection('ltr'));
-      await tester.pumpWidget(harness());
-      await settle(tester);
-
-      // Chrome (bottom bar) starts hidden — reveal it so the skip_next icon
-      // exists to tap.
-      await tester.tapAt(const Offset(400, 300));
-      await settle(tester);
-
-      await tester.runAsync(() async {
-        await tester.tap(find.byIcon(Icons.skip_next_rounded));
-        await Future<void>.delayed(const Duration(milliseconds: 50));
-      });
-      await settle(tester);
-
-      expect(spyHistory.flushCalls, contains(true));
-      final flushesAfterChapterChange = spyHistory.flushCalls
-          .where((f) => f)
-          .length;
-      expect(flushesAfterChapterChange, greaterThanOrEqualTo(1));
-
-      await disposeHarness(tester);
-
-      final flushesAfterDispose = spyHistory.flushCalls.where((f) => f).length;
-      expect(flushesAfterDispose, greaterThan(flushesAfterChapterChange));
-    });
 
     testWidgets(
       'the next chapter stays in the scanlation group being read',
@@ -1319,7 +1279,7 @@ void main() {
         // preloaded a window of its own).
         PaintingBinding.instance.imageCache.clear();
         PaintingBinding.instance.imageCache.clearLiveImages();
-        final savesBefore = spyHistory.flushCalls.length;
+        final savesBefore = spyHistory.saveCalls;
         final width = _decodeWidthFor(tester);
 
         final slider = tester.widget<Slider>(find.byType(Slider));
@@ -1332,7 +1292,7 @@ void main() {
         await settle(tester);
 
         expect(
-          spyHistory.flushCalls.length - savesBefore,
+          spyHistory.saveCalls - savesBefore,
           1,
           reason: 'one save for the whole drag, not one per tick',
         );
@@ -1382,7 +1342,7 @@ void main() {
 
         PaintingBinding.instance.imageCache.clear();
         PaintingBinding.instance.imageCache.clearLiveImages();
-        final savesBefore = spyHistory.flushCalls.length;
+        final savesBefore = spyHistory.saveCalls;
         final width = _decodeWidthFor(tester);
 
         final slider = tester.widget<Slider>(find.byType(Slider));
@@ -1395,7 +1355,7 @@ void main() {
         await settle(tester);
 
         expect(
-          spyHistory.flushCalls.length - savesBefore,
+          spyHistory.saveCalls - savesBefore,
           1,
           reason: 'one save for the whole drag, not one per tick',
         );

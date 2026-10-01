@@ -7,7 +7,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/zmode/zmode_prefs.dart';
-import 'package:watch_app/core/appwrite/appwrite_service.dart';
 import 'package:watch_app/core/anilist/anilist_service.dart';
 import 'package:watch_app/core/announce/announcement.dart';
 import 'package:watch_app/core/announce/announcement_service.dart';
@@ -36,23 +35,14 @@ import 'package:watch_app/core/schedule/coming_soon_service.dart';
 import 'package:watch_app/core/schedule/schedule_models.dart';
 import 'package:watch_app/core/search/title_suggestion_service.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
-import 'package:watch_app/core/supabase/supabase_service.dart';
 import 'package:watch_app/core/theme/theme_controller.dart';
 import 'package:watch_app/core/tracker/mal_service.dart';
 import 'package:watch_app/core/tracker/simkl_service.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/tv/tv_focusable.dart';
 import 'package:watch_app/core/tv/tv_viewport.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
-import 'package:watch_app/features/auth/migration_bridge.dart';
 import 'package:watch_app/features/home/cubit/home_cubit.dart';
 import 'package:watch_app/features/shell/root_shell_tv.dart';
-
-MigrationBridge _fakeBridge() => MigrationBridge(
-      invoke: (_, __) async => const {'ok': false},
-      signInPassword: (_, __) async => false,
-      verifyOtp: (_, __) async => false,
-    );
 
 // ── Minimal fakes (no platform channels, no Hive) ──────────────────────────
 
@@ -327,18 +317,16 @@ class _FakeAnnouncementService extends AnnouncementService {
 
 void main() {
   late ActiveSourceCubit activeSource;
-  late AuthCubit authCubit;
 
   setUpAll(() {
     // Ensure the test binding is initialised so we can mock platform channels
-    // before AppwriteService starts its async Appwrite Client init (which
-    // calls getApplicationDocumentsDirectory via path_provider).
+    // before the async work any GetIt singleton kicks off starts.
     TestWidgetsFlutterBinding.ensureInitialized();
   });
 
   setUp(() async {
-    // Mock path_provider so AppwriteService's async ClientIO init does not
-    // throw MissingPluginException across test boundaries.
+    // Mock path_provider so nothing reading it in setUp throws
+    // MissingPluginException across test boundaries.
     TestWidgetsFlutterBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/path_provider'),
@@ -367,7 +355,6 @@ void main() {
     final dio = Dio();
     final fakeRepo = _FakeSourceRepository();
     activeSource = ActiveSourceCubit(); // nullable box → no Hive
-    authCubit = AuthCubit(SupabaseService(), AppwriteService(), _fakeBridge()); // cache box is nullable → no Hive
 
     sl.registerSingleton<AppMode>(const AppMode(isTv: false));
     sl.registerSingleton<HomeCubit>(HomeCubit(fakeRepo));
@@ -418,7 +405,6 @@ void main() {
       null,
     );
     await sl.reset();
-    authCubit.close();
     activeSource.close();
     await Hive.close();
   });
@@ -427,11 +413,8 @@ void main() {
     'RootShellTv shows a focusable nav rail with the destinations',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -448,11 +431,8 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: MaterialApp(
             builder: (_, child) => TvViewport(child: child!),
             home: const RootShellTv(),
@@ -489,11 +469,8 @@ void main() {
       addTearDown(() => tester.binding.setSurfaceSize(null));
 
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: MaterialApp(
             builder: (_, child) => TvViewport(child: child!),
             home: const RootShellTv(),
@@ -530,33 +507,11 @@ void main() {
   );
 
   testWidgets(
-    'RootShellTv shows the profile row at the top of the nav',
-    (tester) async {
-      await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
-          child: const MaterialApp(home: RootShellTv()),
-        ),
-      );
-      await tester.pumpAndSettle();
-      // The account/profile row (avatar + name / "Sign in") is keyed
-      // 'tv-nav-avatar' and sits at the top of the nav.
-      expect(find.byKey(const ValueKey('tv-nav-avatar')), findsOneWidget);
-    },
-  );
-
-  testWidgets(
     'RootShellTv does not show an active-source row in the rail',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -573,11 +528,8 @@ void main() {
     'RootShellTv has exactly two Focus zones (rail scope + content scope)',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -612,11 +564,8 @@ void main() {
     'RootShellTv has a PopScope(canPop: false) wrapping the shell',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -636,11 +585,8 @@ void main() {
     'RootShellTv: first Back on the Home tab shows the exit snackbar',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -664,11 +610,8 @@ void main() {
     (tester) async {
       final handle = tester.ensureSemantics();
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: const MaterialApp(home: RootShellTv()),
         ),
       );
@@ -720,11 +663,8 @@ void main() {
     'a screen reader is OFF (sighted user, original behaviour)',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: MaterialApp(
             home: MediaQuery(
               data: const MediaQueryData(accessibleNavigation: false),
@@ -774,11 +714,8 @@ void main() {
     'a screen reader is ON (accessibleNavigation no longer gates the bridge)',
     (tester) async {
       await tester.pumpWidget(
-        MultiBlocProvider(
-          providers: [
-            BlocProvider<ActiveSourceCubit>.value(value: activeSource),
-            BlocProvider<AuthCubit>.value(value: authCubit),
-          ],
+        BlocProvider<ActiveSourceCubit>.value(
+          value: activeSource,
           child: MaterialApp(
             home: MediaQuery(
               data: const MediaQueryData(accessibleNavigation: true),

@@ -88,7 +88,6 @@ import '../tracker/tracker_binding_store.dart';
 import '../tracker/tracker_hub.dart';
 import '../tracker/relay/tracker_relay.dart';
 import '../app_mode.dart';
-import '../appwrite/appwrite_service.dart';
 import '../backup/backup_service.dart';
 import '../backup/backup_folder.dart';
 import '../backup/sources_backup.dart';
@@ -117,15 +116,10 @@ import '../mihon/mihon_extension_service.dart';
 import '../mihon/mihon_manager.dart';
 import '../mihon/mihon_provider.dart';
 import '../mihon/mihon_repo.dart';
-import '../../features/auth/auth_cubit.dart';
-import '../../features/auth/migration_bridge.dart';
-import '../../features/auth/tv_pairing_service.dart';
 import '../../features/home/cubit/home_cache.dart';
 import '../../features/home/cubit/home_cubit.dart';
 import '../cast/cast_controller.dart';
 import '../cast/cast_proxy.dart';
-import '../supabase/supabase_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' show OtpType;
 
 final GetIt sl = GetIt.instance;
 
@@ -195,7 +189,6 @@ const MethodChannel _novelHttp = MethodChannel('zangetsu/novel_http');
 /// repo-installed providers), and the bundled extractors.
 const _deviceChannel = MethodChannel('com.spyou.watch_app/device');
 
-
 /// Simkl requires these on every request — the API and the static data files
 /// alike. Without them our traffic doesn't appear in their debug log at all,
 /// so when something breaks on their side they have nothing to look at. The
@@ -231,99 +224,27 @@ Future<void> initDependencies() async {
 
   await initHiveForApp();
   if (isAppleTv) await AppImageCache.init();
-  // Cache of the signed-in user so the logged-in UI appears INSTANTLY on boot
-  // (AuthCubit reads it before the network session check). See AuthCubit.restore.
-  await openBoxSafely(AuthCubit.cacheBoxName);
   await ProviderDownloader.init();
-
-  // Appwrite first (no network on construct) — kept for mintJwt (the
-  // legacy-session-migration path in MigrationBridge/AuthCubit).
-  sl.registerSingleton<AppwriteService>(AppwriteService());
-  // Supabase is already Supabase.initialize()d in main.dart; this is just the
-  // thin client wrapper the stores/services depend on.
-  sl.registerSingleton<SupabaseService>(SupabaseService());
-  sl.registerLazySingleton<TvPairingService>(
-    () => TvPairingService(sl<SupabaseService>()),
-  );
-  // Resolved lazily at call time; null when signed out so the stores stay
-  // local-only.
-  String? currentUserId() => sl<SupabaseService>().currentUserId();
-
-  // Client half of the invisible Appwrite→Supabase account migration. Wired
-  // with real closures here (not in migration_bridge.dart) so the bridge
-  // itself stays Supabase-type-free and unit-testable.
-  sl.registerSingleton<MigrationBridge>(
-    MigrationBridge(
-      invoke: (name, body) async {
-        final r = await sl<SupabaseService>()
-            .client
-            .functions
-            .invoke(name, body: body);
-        return (r.data as Map).cast<String, dynamic>();
-      },
-      signInPassword: (email, pw) async {
-        try {
-          await sl<SupabaseService>()
-              .client
-              .auth
-              .signInWithPassword(email: email, password: pw);
-          return sl<SupabaseService>().client.auth.currentUser != null;
-        } catch (_) {
-          return false;
-        }
-      },
-      verifyOtp: (email, token) async {
-        try {
-          await sl<SupabaseService>().client.auth.verifyOTP(
-                email: email,
-                token: token,
-                type: OtpType.email,
-              );
-          return sl<SupabaseService>().client.auth.currentUser != null;
-        } catch (_) {
-          return false;
-        }
-      },
-    ),
-  );
-
   await ResumeStore.init();
   sl.registerSingleton<ResumeStore>(ResumeStore());
   await ReadStore.init();
   sl.registerSingleton<ReadStore>(ReadStore());
   await WatchHistory.init();
-  sl.registerSingleton<WatchHistory>(
-    WatchHistory(sl<SupabaseService>(), currentUserId),
-  );
+  sl.registerSingleton<WatchHistory>(WatchHistory());
   await ReadHistory.init();
-  sl.registerSingleton<ReadHistory>(
-    ReadHistory(sl<SupabaseService>(), currentUserId),
-  );
+  sl.registerSingleton<ReadHistory>(ReadHistory());
   // ListStatusStore is registered BEFORE MyListStore so the latter can wire the
   // status read/hydrate seams straight to it (keeps My List's cloud row + the
   // deliberately-local status store in sync without either importing the other).
   await ListStatusStore.init();
   sl.registerSingleton<ListStatusStore>(ListStatusStore());
-  // User-made categories for My List. Its own box, beside the status store and
-  // for the same reason: a cloud pull clears the list box, and a category must
-  // not go with it.
+  // User-made categories for My List. Its own box, beside the status store:
+  // the list box gets wiped and repopulated, and a category must not go with
+  // it.
   await CategoryStore.init();
-  sl.registerSingleton<CategoryStore>(
-    CategoryStore(
-      remote: CategoryRemote(sl<SupabaseService>()),
-      currentUserId: currentUserId,
-    ),
-  );
+  sl.registerSingleton<CategoryStore>(CategoryStore());
   await MyListStore.init();
-  sl.registerSingleton<MyListStore>(
-    MyListStore(
-      sl<SupabaseService>(),
-      currentUserId,
-      statusOf: (m) => sl<ListStatusStore>().statusOf(m)?.name,
-      onStatusPulled: (key, name) =>
-          sl<ListStatusStore>().setStatusRaw(key, name),
-    ),
-  );
+  sl.registerSingleton<MyListStore>(MyListStore());
   await TitlePrefsStore.init();
   sl.registerSingleton<TitlePrefsStore>(TitlePrefsStore());
   await HomeCache.init();
@@ -518,13 +439,6 @@ Future<void> initDependencies() async {
   // boot; navigation is deferred until the root Navigator exists.
   sl.registerSingleton<OpenLinkService>(OpenLinkService());
 
-  // AuthCubit is global so any widget can gate on login. SupabaseService,
-  // AppwriteService (mintJwt for migration) and MigrationBridge are already
-  // registered above.
-  sl.registerSingleton<AuthCubit>(
-    AuthCubit(sl<SupabaseService>(), sl<AppwriteService>(), sl<MigrationBridge>()),
-  );
-
   final manager = ProviderManager(dio: dio);
   sl.registerSingleton<ProviderManager>(manager);
   final downloader = ProviderDownloader(dio: dio);
@@ -689,7 +603,6 @@ Future<void> initDependencies() async {
   if (!Hive.isBoxOpen('lnreader_repos')) {
     await openBoxSafely<String>('lnreader_repos');
   }
-
 
   // --- Provider registry data layer ---------------------------------
   await ProviderReposRegistry.init();

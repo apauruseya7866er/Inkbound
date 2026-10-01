@@ -11,7 +11,6 @@ import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
 import 'package:watch_app/core/tv/tv_focusable.dart';
 import 'package:watch_app/core/zmode/zmode_prefs.dart';
-import 'package:watch_app/features/auth/auth_cubit.dart';
 import 'package:watch_app/features/home/cubit/home_cubit.dart';
 import 'package:watch_app/features/home/home_screen_tv.dart';
 
@@ -53,23 +52,9 @@ class _StubSourceRepository implements SourceRepository {
   bool hasSource(String id) => false;
 }
 
-/// Fake [AuthCubit] with the default (logged-out) state — Continue Watching is
-/// login-gated, so this keeps the rail hidden and avoids needing WatchHistory.
-class _FakeAuthCubit extends Cubit<AuthState> implements AuthCubit {
-  _FakeAuthCubit() : super(const AuthState());
-  @override
-  noSuchMethod(Invocation i) => super.noSuchMethod(i);
-  // Added with the on-demand resolver: SourceMatcher now asks whether a JS
-  // provider is loaded before searching it. These fakes are already "loaded".
-  @override
-  Future<bool> ensureSourceLoaded(String sourceId) async => true;
-
-}
-
 Widget _homeApp(HomeCubit cubit) => MultiBlocProvider(
   providers: [
     BlocProvider<HomeCubit>.value(value: cubit),
-    BlocProvider<AuthCubit>.value(value: _FakeAuthCubit()),
     BlocProvider<ActiveSourceCubit>.value(value: ActiveSourceCubit()),
   ],
   child: const MaterialApp(home: HomeScreenTv()),

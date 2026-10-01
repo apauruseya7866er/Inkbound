@@ -131,7 +131,7 @@ void main() {
   final sl = GetIt.instance;
   tearDown(sl.reset);
 
-  testWidgets('lists every tracker with a Connect action when signed out',
+  testWidgets('lists every tracker, and points an unconnected one at the phone',
       (tester) async {
     _register(sl, aniConnected: false, malConnected: false, simklConnected: false);
     await tester.pumpWidget(const MaterialApp(home: ConnectionsScreenTv()));
@@ -140,7 +140,11 @@ void main() {
     expect(find.text('MyAnimeList'), findsOneWidget);
     expect(find.text('Simkl'), findsOneWidget);
     expect(find.text('MangaBaka'), findsOneWidget);
-    expect(find.text('Connect'), findsNWidgets(4));
+    // Connecting used to be a relay through the account-backed pairing, which
+    // is gone — so the TV says where to do it instead of offering a dead
+    // action, and there is nothing to tap.
+    expect(find.text('Connect'), findsNothing);
+    expect(find.text('Connect on your phone'), findsNWidgets(4));
   });
 
   testWidgets('shows Connected + viewer name and a Disconnect action',
