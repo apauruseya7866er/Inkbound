@@ -274,7 +274,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _flushProgress(); // reader close: don't lose the last-read position
+    // Saved, but NOT flushed. Android always delivers `paused` before it kills a
+    // process, and that handler is where the disk write is forced — so by the
+    // time this runs the position is already durable if it was going to be.
+    // What is left here is an in-app back navigation, where the process lives on
+    // and Hive's own write will land anyway. Forcing a flush from `dispose`
+    // would mean an async continuation outliving the widget for no gain.
+    _saveProgress(flush: false);
     _undoSnackTimer?.cancel();
     // Narration may still be running in the background service; it just must
     // not try to advance into a chapter list that is going away.
@@ -299,6 +305,16 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // something that has been silent for minutes. See `TtsCubit.syncWithEngine`.
     if (state == AppLifecycleState.resumed) {
       unawaited(_tts?.syncWithEngine() ?? Future<void>.value());
+      return;
+    }
+    // Backgrounding is the last moment before the process can be killed, and it
+    // is the one the reader had no save for. Position was otherwise only written
+    // while scrolling, on a page turn, on a chapter change and on close — so
+    // reading to the end of a chapter, swiping the app away and coming back
+    // tomorrow reopened it at the top, which is the whole complaint.
+    if (state == AppLifecycleState.paused ||
+    state == AppLifecycleState.inactive) {
+      _flushProgress();
     }
   }
 
@@ -555,9 +571,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// return;` internally, so no extra guard belongs here — adding one would
   /// duplicate that check for no behavioral change.
   ///
-  /// Fire-and-forget by design: page turns and dispose must not block on
-  /// disk/network I/O, and both call sites (`dispose`, chapter change) are
-  /// sync anyway.
+  /// Fire-and-forget by design, and [flush] does NOT change that: the record is
+  /// handed to Hive and the call returns, because a scroll must not wait on
+  /// disk. What [flush] adds is asking Hive to get the pending write out to the
+  /// file. Without it the write sits in memory on Hive's own schedule, a process
+  /// that dies first loses it, and the chapter reopens at the top — so the
+  /// paths that mean "this is the last chance" (chapter change, reader close,
+  /// app backgrounded) pass `true`.
   void _saveProgress({required bool flush}) {
     if (widget.peek) return; // just looking — leave saved progress alone
     if (_text == null) return; // nothing loaded for this chapter yet
@@ -587,6 +607,35 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     );
     if (sl<ReadStore>().finished(widget.sourceId, widget.showId, ep.id)) {
       _maybeScrobble(ep);
+    }
+    if (flush) unawaited(_flushStores());
+  }
+
+  /// Asks both boxes to finish writing.
+  ///
+  /// Started, not awaited: every caller is synchronous (a scroll listener, a
+  /// dispose, a lifecycle callback) and none of them can wait. `Box.flush`
+  /// waits for whatever is already pending, so starting it straight after the
+  /// save is what makes the position durable — and it must stay off the scroll
+  /// path, where a write per tick is not worth the I/O.
+  Future<void> _flushStores() async {
+    // Resolved BEFORE the first await, deliberately. This runs unawaited, so its
+    // continuation can land after the widget is gone — and in a test, after the
+    // injector has been reset. Looking the stores up first means the lookup
+    // happens while this screen still owns them, and the only thing left running
+    // late is the disk write.
+    final positions = sl<ReadStore>();
+    final history = sl<ReadHistory>();
+    try {
+      await positions.flush();
+      await history.flush();
+    } catch (e) {
+      // Best-effort by construction: this is a nudge to get an already-queued
+      // write onto the disk, not a write the reader depends on. The record is in
+      // Hive either way, and a closed box or a full disk is not something the
+      // reader can act on — so it must not surface as a crash, here or in a test
+      // that has already torn the box down.
+      debugPrint('[reader] progress flush failed: $e');
     }
   }
 

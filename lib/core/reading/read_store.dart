@@ -59,6 +59,16 @@ class ReadStore {
     );
   }
 
+  /// Pushes pending writes to disk.
+  ///
+  /// [save] hands the record to Hive, which applies it in memory and writes the
+  /// file on its own schedule. That is the right trade while the app is running
+  /// — nobody wants a scroll to wait on I/O — but it means a process that dies
+  /// between the write and the flush loses the position, and the chapter reopens
+  /// at the top. This is what the reader calls on the way out, and it is why
+  /// [save] is not simply awaited everywhere.
+  Future<void> flush() => _box.flush();
+
   /// True when the chapter is effectively done: last page (manga) or ≥95%
   /// scrolled (novel, where total is always 1000).
   /// Mark a chapter read (or not) by hand, from the chapter list's long-press

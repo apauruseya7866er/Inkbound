@@ -119,6 +119,13 @@ class ReadHistory {
     await _box.put(_key(e.sourceId, e.showId), e.toJson());
   }
 
+  /// Pushes pending writes to disk.
+  ///
+  /// See `ReadStore.flush` for why this exists: [save] is deliberately not
+  /// awaited by the reader, so without this a chapter reopened after the process
+  /// died can come back with neither a position nor a Continue Reading entry.
+  Future<void> flush() => _box.flush();
+
   ReadEntry _fromMap(Map raw) =>
       ReadEntry.fromJson(Map<String, dynamic>.from(raw));
 

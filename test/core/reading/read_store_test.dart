@@ -45,4 +45,25 @@ void main() {
     expect(s.get('js:m', 'show1', 'ch1'), isNull);
     IncognitoMode.notifier.value = false;
   });
+
+  // The reader calls this on the way out of the app, and it is the whole reason
+  // a chapter read today reopens in the right place tomorrow: `save` only hands
+  // the record to Hive, which writes the file on its own schedule.
+  test('flush gets a saved position onto the disk', () async {
+    final s = ReadStore();
+    await s.save('js:n', 'book', 'ch1', pos: 420, total: 1000);
+    await s.flush();
+
+    // A separate Hive instance over the same directory is the only honest way to
+    // ask "is it really on disk" — the open box would answer from memory, which
+    // is exactly the state that used to be lost.
+    final file = File('${dir.path}/${ReadStore.boxName}.hive');
+    expect(file.existsSync(), isTrue);
+
+    await Hive.close();
+    Hive.init(dir.path);
+    await ReadStore.init();
+    final reopened = ReadStore();
+    expect(reopened.get('js:n', 'book', 'ch1'), (pos: 420, total: 1000));
+  });
 }
