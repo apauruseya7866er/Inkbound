@@ -57,21 +57,23 @@ void main() {
 
     // Search left the dock for a Home header icon; Schedule left it for the
     // card row on Home. Sources went the other way — it was a header icon and
-    // is now a destination, which is why Downloads is no longer a default.
-    test('the default dock has neither Search nor Schedule', () {
+    // is now a destination, which is why Downloads is not a default. History
+    // used to be Settings-only and now sits on the bar beside it.
+    test('the default dock has neither Search nor Schedule, but does have History', () {
       expect(NavPrefs.defaultTabs, [
         DockTab.home,
         DockTab.myList,
         DockTab.sources,
+        DockTab.history,
         DockTab.profile,
       ]);
     });
 
-    // The bar fits five icons and the mode switcher takes one of them
-    // without being a DockTab, so the tab cap has to be four. Picking five
-    // tabs used to draw a sixth icon and squeeze the row.
+    // The mode switcher is drawn between the tabs and is not a DockTab, so five
+    // tabs is six icons. Six tabs would be seven, and at 10px the labels start
+    // colliding on a narrow phone instead of the icons shrinking.
     test('the cap leaves a slot for the centre button', () {
-      expect(NavPrefs.maxTabs, 4);
+      expect(NavPrefs.maxTabs, 5);
       expect(NavPrefs.defaultTabs.length, NavPrefs.maxTabs);
     });
   });
@@ -129,6 +131,40 @@ void main() {
 
     test('with nothing chosen, the app opens on the leftmost tab', () {
       expect(NavPrefs().startTab, NavPrefs.defaultTabs.first);
+    });
+
+    // The whole point of the legacy check: a dock nobody arranged still gets the
+    // tabs a new build added, instead of being frozen at whatever it shipped
+    // with on the day it was written.
+    test('a dock still at the old shipped default picks up History', () async {
+      await Hive.box(NavPrefs.boxName).put('tabs', [
+        'home',
+        'myList',
+        'sources',
+        'profile',
+      ]);
+
+      expect(NavPrefs().tabs, NavPrefs.defaultTabs);
+      expect(NavPrefs().tabs, contains(DockTab.history));
+    });
+
+    // The other half: the migration must not eat somebody's arrangement. Same
+    // four tabs, deliberately reordered, is a choice and stays a choice.
+    test('a dock the user reordered is left exactly as they put it', () async {
+      await Hive.box(NavPrefs.boxName).put('tabs', [
+        'home',
+        'sources',
+        'myList',
+        'profile',
+      ]);
+
+      expect(NavPrefs().tabs, [
+        DockTab.home,
+        DockTab.sources,
+        DockTab.myList,
+        DockTab.profile,
+      ]);
+      expect(NavPrefs().tabs, isNot(contains(DockTab.history)));
     });
 
     test('a chosen landing tab survives a restart', () async {

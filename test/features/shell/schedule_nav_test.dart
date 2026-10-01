@@ -24,6 +24,8 @@ import 'package:watch_app/core/playback/playback_prefs.dart';
 import 'package:watch_app/core/playback/search_history.dart';
 import 'package:watch_app/core/playback/search_prefs.dart';
 import 'package:watch_app/core/playback/search_source_prefs.dart';
+import 'package:watch_app/core/playback/watch_history.dart';
+import 'package:watch_app/core/reading/read_history.dart';
 import 'package:watch_app/core/provider/cloudstream_provider.dart';
 import 'package:watch_app/core/provider/provider_manager.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
@@ -386,6 +388,16 @@ void main() {
     sl.registerSingleton<SearchPrefs>(_FakeSearchPrefs());
     sl.registerSingleton<SearchSourcePrefs>(_FakeSearchSourcePrefs());
     sl.registerSingleton<ListStatusStore>(ListStatusStore());
+      // History is a dock tab now, and the IndexedStack builds every tab
+      // eagerly — so HistoryScreen's constructor reaches for WatchHistory the
+      // moment the shell is built, registered or not. Production registers it
+      // in the injector; here it has to be put back by hand.
+      await WatchHistory.init();
+      sl.registerSingleton<WatchHistory>(WatchHistory());
+      // History's third tab is the reading history, so the same eager build
+      // reaches for that store too.
+      await ReadHistory.init();
+      sl.registerSingleton<ReadHistory>(ReadHistory());
     sl.registerSingleton<DownloadManager>(DownloadManager(fakeRepo));
     sl.registerSingleton<ProviderRegistry>(_FakeProviderRegistry());
     sl.registerSingleton<CloudStreamManager>(CloudStreamManager());
@@ -474,7 +486,13 @@ void main() {
     // A name a screen reader can read. The visible Text is excluded from
     // semantics and folds to zero height when the dock collapses, so the name
     // has to come from the item itself.
-    for (final name in const ['Home', 'My List', 'Sources', 'Profile']) {
+    for (final name in const [
+      'Home',
+      'My List',
+      'Sources',
+      'History',
+      'Profile',
+    ]) {
       expect(
         find.descendant(of: dock, matching: find.bySemanticsLabel(name)),
         findsWidgets,

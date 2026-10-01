@@ -36,22 +36,34 @@ class NavPrefs extends ChangeNotifier {
   static const String _tabsKey = 'tabs';
   static const String _startKey = 'start';
 
-  /// The dock is a fixed-width capsule that fits five icons; below three it
-  /// looks empty and above five the labels start colliding.
+/// The dock is a fixed-width capsule whose width is DERIVED from what it has
+  /// to hold, so the cap is about what fits legibly rather than a hard layout
+  /// limit: five tabs plus the mode switcher, which is drawn between the tabs as
+  /// the dock's centre button and is not a [DockTab], is six icons.
   ///
-  /// The cap is four, not five, because the mode switcher is drawn between
-  /// the tabs as the dock's centre button and is not a [DockTab] — so the
-  /// bar always renders one more icon than there are tabs.
+  /// Five is where it stops. The labels are the constraint, not the icons — at
+  /// 10px, "My List" and "Sources" need roughly 44dp each, and a sixth tab on a
+  /// narrow phone starts overlapping rather than shrinking.
   static const int minTabs = 3;
-  static const int maxTabs = 4;
+  static const int maxTabs = 5;
 
   /// What the dock shipped with, and what a corrupt or empty value falls back
-  /// to. Search lives in the Home header and Schedule on the Home card row,
-  /// so neither is here. Sources moved down from the Home header, where a
-  /// small icon was doing the work of a destination; the mode switcher sits
-  /// between My List and Sources as the dock's centre button rather than a
-  /// tab, so these four names fill all five icon slots.
+  /// to. Search lives in the Home header and Schedule on the Home card row, so
+  /// neither is here. The mode switcher sits between My List and Sources as the
+  /// dock's centre button rather than a tab.
   static const List<DockTab> defaultTabs = [
+    DockTab.home,
+    DockTab.myList,
+    DockTab.sources,
+    DockTab.history,
+    DockTab.profile,
+  ];
+
+  /// What [defaultTabs] was before History joined it.
+  ///
+  /// Only here to recognise a dock the user never arranged themselves — see
+  /// [tabs].
+  static const List<DockTab> _legacyDefaultTabs = [
     DockTab.home,
     DockTab.myList,
     DockTab.sources,
@@ -73,6 +85,15 @@ class NavPrefs extends ChangeNotifier {
   /// value written by an older build can name a tab that no longer exists, and
   /// a half-written list could otherwise leave the app with a dock it can't
   /// navigate out of.
+  ///
+  /// ### Why an untouched dock still moves
+  /// A stored list always beat [defaultTabs], which meant adding a tab to the
+  /// dock only ever helped somebody who had never opened the dock editor — and
+  /// everybody who had arranged the four tabs they were given kept exactly
+  /// those four forever. That is the wrong way round: the arrangement is worth
+  /// keeping, the accidental absence of a tab is not. So a stored list that is
+  /// still the shipped default is treated as "never arranged" and picks up the
+  /// new default; anything else is the user's and is left alone.
   List<DockTab> get tabs {
     final raw = _box?.get(_tabsKey);
     if (raw is! List || raw.isEmpty) return defaultTabs;
@@ -81,6 +102,7 @@ class NavPrefs extends ChangeNotifier {
       final tab = DockTab.values.where((t) => t.name == name).firstOrNull;
       if (tab != null && !out.contains(tab)) out.add(tab);
     }
+    if (listEquals(out, _legacyDefaultTabs)) return defaultTabs;
     return _sanitize(out);
   }
 
