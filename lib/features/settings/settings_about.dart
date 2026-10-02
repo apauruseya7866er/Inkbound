@@ -102,12 +102,6 @@ class _AboutSettingsScreenState extends State<AboutSettingsScreen> {
                   },
                 ),
               ),
-              SettingsTile(
-                icon: Icons.favorite_border_rounded,
-                title: context.l10n.supportTheApp,
-                subtitle: context.l10n.buyMeACoffee,
-                onTap: () => _push(const DonateScreen()),
-              ),
               if (sl.isRegistered<AppMode>() &&
                   sl<AppMode>().isTv &&
                   kExoSpikeEnabled)

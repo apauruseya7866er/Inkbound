@@ -62,7 +62,6 @@ import '../../core/ui/app_dialog.dart';
 import '../../core/ui/settings_widgets.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../core/ui/dock_visibility.dart';
-import 'donate_screen.dart';
 import '../backup/backup_screen.dart';
 import '../onboarding/how_it_works.dart';
 import '../notify/subscriptions_screen.dart';
