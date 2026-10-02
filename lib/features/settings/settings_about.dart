@@ -50,17 +50,6 @@ class _AboutSettingsScreenState extends State<AboutSettingsScreen> {
         children: [
           const _ProfileCard(),
           const SizedBox(height: 24),
-          // Contributors — above Social, opens the full list.
-          SettingsCard(
-            children: [
-              SettingsTile(
-                autofocus: true,
-                icon: Icons.group_rounded,
-                title: context.l10n.contributors,
-                onTap: () => _push(const ContributorsScreen()),
-              ),
-            ],
-          ),
           SettingsSectionLabel(context.l10n.social, muted: true),
           SettingsCard(
             children: [
@@ -164,76 +153,7 @@ class _ProfileCard extends StatelessWidget {
           'v$kAppVersion',
           style: AppText.caption.copyWith(color: AppColors.textTertiary),
         ),
-        const SizedBox(height: 20),
-        const _DeveloperRow(),
       ],
-    );
-  }
-}
-
-/// The "Developer" row inside the profile card.
-class _DeveloperRow extends StatelessWidget {
-  const _DeveloperRow();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () async {
-            final uri = Uri.parse('https://github.com/spyou');
-            if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-              await launchUrl(uri, mode: LaunchMode.platformDefault);
-            }
-          },
-          child: Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              // One solid dark grey, matching the app's cards.
-              color: AppColors.settingsCard,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Row(
-              children: [
-                const TeamAvatar(
-                  url: 'https://github.com/spyou.png?size=200',
-                  name: 'Krishna',
-                  size: 46,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Krishna Vishwakarma',
-                        style: AppText.headline.copyWith(
-                          color: AppColors.textPrimary,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        context.l10n.leadDeveloper,
-                        style: AppText.caption.copyWith(
-                          color: AppColors.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(Icons.code_rounded, color: AppColors.textTertiary),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
