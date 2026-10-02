@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/ui/app_dialog.dart';
 import '../../core/ui/app_toast.dart';
 import '../../core/di/injector.dart';
+import '../../core/lnreader/novel_cloudflare.dart';
 import '../../core/mihon/mihon_extension_service.dart';
 import '../../core/models/home_section.dart';
 import '../../core/models/media_item.dart';
@@ -191,6 +192,35 @@ class _BrowseSourceViewState extends State<_BrowseSourceView> {
   }
   bool get _canSolveCloudflare => _baseUrl.isNotEmpty;
   bool get _canOpenInBrowser => _baseUrl.isNotEmpty;
+
+  /// Whether Cloudflare is what is stopping THIS source from answering.
+  ///
+  /// The two ecosystems latch a challenge in two different places, and this
+  /// screen used to only consult one of them:
+  ///
+  ///  - A JS / CloudStream provider flags itself in [CfSolveNeeded], keyed by
+  ///    source id, because the Dart side sees the 403 itself.
+  ///  - An LNReader novel source latches into [NovelCloudflare] instead. The
+  ///    plugin is JavaScript and catches its own fetch failures, so the
+  ///    challenge never leaves the runtime — it reaches the UI as an empty
+  ///    result list, which is indistinguishable from a source with nothing to
+  ///    show. Nothing was flagging it here, so a novel source behind
+  ///    Cloudflare could only ever offer "Retry", which cannot possibly help.
+  ///
+  /// [NovelCloudflare] holds a single pending URL rather than a per-source
+  /// flag, so it is matched on host: a challenge pending against one novel site
+  /// must not get blamed on another.
+  bool get _cloudflareBlocked {
+    if (CfSolveNeeded.sourceFlagged(widget.sourceId)) return true;
+    if (_eco != SearchEcosystem.lnreader) return false;
+    final pending = NovelCloudflare.pendingUrl;
+    if (pending == null || pending.isEmpty) return false;
+    final pendingHost = Uri.tryParse(pending)?.host;
+    final baseHost = Uri.tryParse(_baseUrl.trim())?.host;
+    if (pendingHost == null || pendingHost.isEmpty) return false;
+    if (baseHost == null || baseHost.isEmpty) return false;
+    return pendingHost.toLowerCase() == baseHost.toLowerCase();
+  }
   // Not _baseUrl.isNotEmpty: webViewUrlFor trims, so a whitespace-only base
   // url would offer an item that opens nothing.
   bool get _canSignIn => source_actions.webViewUrlFor(widget.sourceId) != null;
@@ -294,6 +324,12 @@ class _BrowseSourceViewState extends State<_BrowseSourceView> {
     );
     if (target == null || target.isEmpty) return;
     await MihonExtensionService.solveCloudflare(target);
+    // The WebView has closed and its `cf_clearance` is now in the jar, but
+    // this list still holds the empty result the challenge produced - the
+    // solver resolving its call is the app's cue to try again. Without this
+    // the user solves the challenge and is still looking at "No titles in this
+    // list" until they leave and come back.
+    if (mounted) await context.read<BrowseSourceCubit>().load();
   }
 
   /// Let the user point this source's site actions at a domain of their own.
@@ -557,7 +593,7 @@ class _BrowseSourceViewState extends State<_BrowseSourceView> {
                 // the reason is usually a Cloudflare challenge or a blip, and
                 // both are fixable from right here rather than from the
                 // overflow menu the user has no reason to open.
-                final blocked = CfSolveNeeded.sourceFlagged(widget.sourceId);
+                final blocked = _cloudflareBlocked;
                 return EmptyState(
                   icon: blocked
                       ? Icons.shield_outlined
