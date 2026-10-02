@@ -51,7 +51,7 @@ fun localPropertiesFlag(key: String): Boolean {
     }
 }
 android {
-    namespace = "com.spyou.watch_app"
+    namespace = "com.apauruseya7866er.inkbound"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -71,7 +71,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.spyou.watch_app"
+        applicationId = "com.apauruseya7866er.inkbound"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

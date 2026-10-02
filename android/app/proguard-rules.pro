@@ -21,7 +21,7 @@
 # CloudStream extension support (feature/extra): plugins link by reflection
 # against these classes, so they must keep their names + members in release.
 -keep class com.lagradost.cloudstream3.** { *; }
--keep class com.spyou.watch_app.cloudstream.** { *; }
+-keep class com.apauruseya7866er.inkbound.cloudstream.** { *; }
 -dontwarn com.lagradost.cloudstream3.**
 
 # Optional/desktop-only deps referenced by the CloudStream library's transitive

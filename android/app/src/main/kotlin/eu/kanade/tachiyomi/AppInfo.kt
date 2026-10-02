@@ -50,7 +50,7 @@ object AppInfo {
      *
      * ADAPTED: upstream reads Mihon's generated `BuildConfig`. Ours isn't
      * generated — AGP 8 turns the `buildConfig` feature off by default and
-     * nothing else in the app wanted it, so `com.spyou.watch_app.BuildConfig`
+     * nothing else in the app wanted it, so `com.apauruseya7866er.inkbound.BuildConfig`
      * doesn't exist and enabling it is a build-file change this fix doesn't
      * need. The same two numbers are on the installed [PackageInfo], and the
      * [Application] is already in the Injekt graph that

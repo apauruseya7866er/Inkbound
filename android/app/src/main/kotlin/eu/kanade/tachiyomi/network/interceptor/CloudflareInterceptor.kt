@@ -223,7 +223,7 @@ class CloudflareBypassException : Exception()
 /**
  * Thrown when the headless solver couldn't clear an interactive Cloudflare
  * challenge. Carries the [url] to solve so the app can open a visible WebView
- * ([com.spyou.watch_app.mihon.SourceWebViewActivity]). Extends [IOException]
+ * ([com.apauruseya7866er.inkbound.mihon.SourceWebViewActivity]). Extends [IOException]
  * so it propagates cleanly through OkHttp and the source call.
  */
 class CloudflareRequiredException(val url: String) :

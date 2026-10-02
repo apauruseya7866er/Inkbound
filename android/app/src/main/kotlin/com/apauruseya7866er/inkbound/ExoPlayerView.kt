@@ -1,0 +1,424 @@
+package com.apauruseya7866er.inkbound
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.media.AudioManager
+import android.media.audiofx.LoudnessEnhancer
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.view.View
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionOverride
+import androidx.media3.common.text.Cue
+import androidx.media3.common.text.CueGroup
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
+import androidx.media3.exoplayer.drm.FrameworkMediaDrm
+import androidx.media3.exoplayer.drm.LocalMediaDrmCallback
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.CaptionStyleCompat
+import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.EventChannel
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.platform.PlatformView
+
+/**
+ * A PlatformView hosting an ExoPlayer + [PlayerView] (SurfaceView → hardware
+ * overlay). Controlled from Dart via `zangetsu/exoplayer_<id>` (setSource /
+ * play / pause / seekTo) and streams playback state on
+ * `zangetsu/exoplayer_events_<id>`.
+ *
+ * Default renderers + default SurfaceView + Hybrid Composition (on the Dart
+ * side) — the exact combination that shipped WORKING in v1.7.0. FFmpeg software
+ * decoding and a TextureView were tried to fix silent Dolby/DTS audio but
+ * regressed VIDEO to black on some TVs, so they're reverted. The silent-audio
+ * fix belongs behind an opt-in setting (as CloudStream does), never in the
+ * default path.
+ */
+@UnstableApi
+class ExoPlayerView(
+    context: Context,
+    id: Int,
+    messenger: BinaryMessenger,
+    // Buffer preset from Settings → Playback, resolved Dart-side. Null keeps
+    // ExoPlayer's own defaults, which is what this view did before.
+    creationParams: Map<*, *>? = null,
+) : PlatformView, MethodChannel.MethodCallHandler {
+
+    // Application context, kept for DefaultDataSource (it needs a ContentResolver
+    // to open content:// downloads). Application-scoped so the view can't leak
+    // the Activity it was created from.
+    private val appContext = context.applicationContext
+
+    private val audioSessionId =
+        (context.getSystemService(Context.AUDIO_SERVICE) as AudioManager).generateAudioSessionId()
+    private val player = ExoPlayer.Builder(context)
+        .setLoadControl(BufferPresets.fromMap(creationParams))
+        .build()
+        .apply { setAudioSessionId(audioSessionId) }
+    private var loudness: LoudnessEnhancer? = null
+    private val playerView = PlayerView(context).apply {
+        player = this@ExoPlayerView.player
+        useController = false // Flutter draws the controls on top
+        // keepScreenOn is managed by syncKeepScreenOn() below — on while
+        // playing/buffering, released on pause — not pinned on for the session.
+    }
+    private val channel = MethodChannel(messenger, "zangetsu/exoplayer_$id")
+    private val events = EventChannel(messenger, "zangetsu/exoplayer_events_$id")
+    private var sink: EventChannel.EventSink? = null
+
+    /** Last player error, cleared on every new setSource. Null = no error. */
+    private var lastError: String? = null
+
+    private val handler = Handler(Looper.getMainLooper())
+    /** PlaybackPrefs subtitlePosition 0=top … 100=bottom; drives cue line remapping. */
+    private var captionPositionPref = 95
+    private val tick = object : Runnable {
+        override fun run() {
+            emitState()
+            handler.postDelayed(this, 500)
+        }
+    }
+
+    init {
+        channel.setMethodCallHandler(this)
+        events.setStreamHandler(object : EventChannel.StreamHandler {
+            override fun onListen(args: Any?, s: EventChannel.EventSink?) {
+                sink = s
+                emitState()
+            }
+            override fun onCancel(args: Any?) { sink = null }
+        })
+        player.addListener(object : Player.Listener {
+            override fun onPlaybackStateChanged(state: Int) { syncKeepScreenOn(); emitState() }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { syncKeepScreenOn(); emitState() }
+            // Surfaced to Dart so the screen shows an error + next-mirror
+            // action instead of spinning forever on a dead mirror.
+            override fun onPlayerError(error: PlaybackException) {
+                lastError = (error.message ?: "playback error").take(160)
+                syncKeepScreenOn()
+                emitState()
+            }
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) = emitState()
+            override fun onCues(cueGroup: CueGroup) {
+                playerView.subtitleView?.setCues(repositionCues(cueGroup.cues))
+            }
+        })
+        syncKeepScreenOn()
+        handler.post(tick)
+    }
+
+    // Keep the screen on only while actively playing or buffering, released on
+    // pause — matching CloudStream — rather than pinning it on for the whole
+    // player session (which drains battery on a paused-and-left player).
+    private fun syncKeepScreenOn() {
+        playerView.keepScreenOn = player.playWhenReady &&
+            (player.playbackState == Player.STATE_READY ||
+                player.playbackState == Player.STATE_BUFFERING)
+    }
+
+    private fun emitState() {
+        val s = sink ?: return
+        val audio = mutableListOf<Map<String, Any?>>()
+        val text = mutableListOf<Map<String, Any?>>()
+        // Video renditions INSIDE the open stream (an HLS/DASH ladder), which is
+        // the only honest meaning of "quality": switching one is a track
+        // override on the same media, not a jump to another server's file.
+        val video = mutableListOf<Map<String, Any?>>()
+        val groups = player.currentTracks.groups
+        groups.forEachIndexed { gi, g ->
+            for (ti in 0 until g.length) {
+                val f = g.getTrackFormat(ti)
+                val entry = mapOf(
+                    "id" to "$gi:$ti",
+                    "language" to (f.language ?: ""),
+                    "label" to (f.label ?: ""),
+                    "selected" to g.isTrackSelected(ti),
+                )
+                when (g.type) {
+                    C.TRACK_TYPE_AUDIO -> audio.add(entry)
+                    C.TRACK_TYPE_TEXT -> {
+                        // Hide in-band CEA-608/708 from the picker — unlabeled
+                        // "Subtitle 1" rows that do nothing useful for softsubs.
+                        val mime = f.sampleMimeType
+                        if (mime != MimeTypes.APPLICATION_CEA608 &&
+                            mime != MimeTypes.APPLICATION_CEA708
+                        ) {
+                            text.add(entry)
+                        }
+                    }
+                    C.TRACK_TYPE_VIDEO -> if (g.isTrackSupported(ti)) {
+                        // Height is what labels the row, so a rendition that
+                        // doesn't report one is no use as a choice.
+                        val h = f.height
+                        if (h != Format.NO_VALUE && h > 0) {
+                            video.add(entry + mapOf("height" to h, "width" to f.width))
+                        }
+                    }
+                }
+            }
+        }
+        s.success(
+            mapOf(
+                "positionMs" to player.currentPosition.toInt(),
+                "durationMs" to (if (player.duration > 0) player.duration.toInt() else 0),
+                "buffering" to (player.playbackState == Player.STATE_BUFFERING),
+                "playing" to player.isPlaying,
+                "ended" to (player.playbackState == Player.STATE_ENDED),
+                "audioTracks" to audio,
+                "textTracks" to text,
+                "videoTracks" to video,
+                // Last player error (null when healthy). Lets Dart show an
+                // error + next-mirror action instead of spinning forever.
+                "error" to lastError,
+                // Null until the first frame is decoded; lets the menu show what
+                // is actually on screen when there is nothing to switch.
+                "videoHeight" to (player.videoFormat?.height ?: 0),
+            ),
+        )
+    }
+
+    /** id = "<groupIndex>:<trackIndex>" into player.currentTracks.groups. */
+    private fun applyTrackOverride(type: Int, id: String) {
+        val parts = id.split(":")
+        if (parts.size != 2) return
+        val gi = parts[0].toIntOrNull() ?: return
+        val ti = parts[1].toIntOrNull() ?: return
+        val group = player.currentTracks.groups.getOrNull(gi) ?: return
+        if (ti < 0 || ti >= group.length) return
+        player.trackSelectionParameters = player.trackSelectionParameters
+            .buildUpon()
+            .setTrackTypeDisabled(type, false)
+            .setOverrideForType(TrackSelectionOverride(group.mediaTrackGroup, ti))
+            .build()
+    }
+
+    private fun applyCaptionStyle(call: MethodCall) {
+        val scale = (call.argument<Number>("scale") ?: 1.0).toDouble()
+        val fontPath = call.argument<String>("fontPath")
+        val fg = (call.argument<Number>("fgColor") ?: -1).toInt()
+        val bg = (call.argument<Number>("bgColor") ?: 0).toInt()
+        val edgeType = call.argument<Number>("edgeType")?.toInt()
+            ?: if (call.argument<Boolean>("edge") == true) {
+                CaptionStyleCompat.EDGE_TYPE_OUTLINE
+            } else {
+                CaptionStyleCompat.EDGE_TYPE_NONE
+            }
+        captionPositionPref = (call.argument<Number>("positionPref") ?: 95)
+            .toInt()
+            .coerceIn(0, 100)
+        val tf = fontPath?.let { runCatching { Typeface.createFromFile(it) }.getOrNull() }
+        val style = CaptionStyleCompat(
+            fg,
+            bg,
+            Color.TRANSPARENT,
+            edgeType,
+            Color.BLACK,
+            tf,
+        )
+        playerView.subtitleView?.apply {
+            setApplyEmbeddedStyles(false)
+            setApplyEmbeddedFontSizes(false)
+            setStyle(style)
+            setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * scale.toFloat())
+            // Cue lines are remapped in [repositionCues]; pad alone is ignored
+            // when the cue already has a line.
+            setBottomPaddingFraction(0.02f)
+        }
+        playerView.subtitleView?.setCues(repositionCues(player.currentCues.cues))
+    }
+
+    private fun repositionCues(cues: List<Cue>): List<Cue> {
+        if (cues.isEmpty()) return cues
+        val line = captionPositionPref.coerceIn(0, 100) / 100f
+        return cues.map { cue ->
+            cue.buildUpon()
+                .setLine(line, Cue.LINE_TYPE_FRACTION)
+                .setLineAnchor(Cue.ANCHOR_TYPE_END)
+                .build()
+        }
+    }
+
+    override fun getView(): View = playerView
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        when (call.method) {
+            "setSource" -> {
+                val url = call.argument<String>("url")
+                @Suppress("UNCHECKED_CAST")
+                val headers = (call.argument<Map<String, String>>("headers")) ?: emptyMap()
+                @Suppress("UNCHECKED_CAST")
+                val subs = (call.argument<List<Map<String, String?>>>("subtitles")) ?: emptyList()
+                // Optional explicit container MIME (e.g. HLS/DASH). When set, ExoPlayer
+                // builds the correct MediaSource instead of guessing from the URL —
+                // needed for tokenized stream URLs with no file extension.
+                val mimeType = call.argument<String>("mimeType")
+                // ClearKey DRM (base64url kid/key) for encrypted CENC/DASH sources
+                // (CNC/PlayzTV live channels). Absent for every ordinary stream.
+                val drmKid = call.argument<String>("drmKid")
+                val drmKey = call.argument<String>("drmKey")
+                if (url != null) {
+                    lastError = null
+                    try {
+                        val httpFactory = DefaultHttpDataSource.Factory()
+                            .setAllowCrossProtocolRedirects(true)
+                        if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
+                        val subConfigs = subs.mapNotNull { m ->
+                            val su = m["url"] ?: return@mapNotNull null
+                            MediaItem.SubtitleConfiguration.Builder(Uri.parse(su))
+                                .setMimeType(m["mime"])
+                                .setLanguage(m["lang"])
+                                .setLabel(m["label"])
+                                .build()
+                        }
+                        val builder = MediaItem.Builder()
+                            .setUri(url)
+                            .setSubtitleConfigurations(subConfigs)
+                        if (!mimeType.isNullOrEmpty()) builder.setMimeType(mimeType)
+                        // Scheme-aware: file paths and content:// (downloads) open
+                        // through the local readers, http(s) still goes to
+                        // httpFactory with its headers and redirect handling.
+                        val sourceFactory = DefaultMediaSourceFactory(
+                            DefaultDataSource.Factory(appContext, httpFactory),
+                        )
+                        if (!drmKid.isNullOrEmpty() && !drmKey.isNullOrEmpty()) {
+                            // Build a LOCAL clearkey session from the kid/key the
+                            // plugin resolved (already W3C clearkey JWK form) — no
+                            // license-server round-trip needed. mpv can't do this,
+                            // which is why DRM sources route to this ExoPlayer view.
+                            val json =
+                                "{\"keys\":[{\"kty\":\"oct\",\"k\":\"$drmKey\"," +
+                                    "\"kid\":\"$drmKid\"}],\"type\":\"temporary\"}"
+                            val drmManager = DefaultDrmSessionManager.Builder()
+                                .setUuidAndExoMediaDrmProvider(
+                                    C.CLEARKEY_UUID, FrameworkMediaDrm.DEFAULT_PROVIDER,
+                                )
+                                .setMultiSession(false)
+                                .build(LocalMediaDrmCallback(json.toByteArray(Charsets.UTF_8)))
+                            sourceFactory.setDrmSessionManagerProvider { drmManager }
+                        }
+                        val mediaSource = sourceFactory
+                            .createMediaSource(builder.build())
+                        player.setMediaSource(mediaSource)
+                        player.prepare()
+                        player.playWhenReady = true
+                        result.success(null)
+                    } catch (e: Exception) {
+                        // Don't let a MediaSource-creation failure crash the channel;
+                        // surface it so Dart shows a clean error instead of a hang.
+                        result.error("setSource_failed", e.message, null)
+                    }
+                } else {
+                    result.success(null)
+                }
+            }
+            "setUrl" -> {
+                val url = call.argument<String>("url")
+                if (url != null) {
+                    val mediaSource = DefaultMediaSourceFactory(
+                        DefaultDataSource.Factory(
+                            appContext,
+                            DefaultHttpDataSource.Factory().setAllowCrossProtocolRedirects(true),
+                        ),
+                    ).createMediaSource(MediaItem.fromUri(url))
+                    player.setMediaSource(mediaSource)
+                    player.prepare()
+                    player.playWhenReady = true
+                }
+                result.success(null)
+            }
+            "play" -> { player.play(); result.success(null) }
+            "pause" -> { player.pause(); result.success(null) }
+            "seekTo" -> {
+                val ms = (call.argument<Number>("positionMs") ?: 0).toLong()
+                player.seekTo(ms)
+                result.success(null)
+            }
+            "setMaxVideoBitrate" -> {
+                val bw = (call.argument<Number>("bandwidth") ?: 0).toInt()
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setMaxVideoBitrate(if (bw > 0) bw else Int.MAX_VALUE)
+                    .build()
+                result.success(null)
+            }
+            "selectVideoTrack" -> {
+                val id = call.argument<String>("id")
+                if (id == null) {
+                    // Auto — hand the ladder back to ExoPlayer's own adaptation.
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                        .build()
+                } else {
+                    applyTrackOverride(C.TRACK_TYPE_VIDEO, id)
+                }
+                result.success(null)
+            }
+            "selectAudioTrack" -> {
+                val id = call.argument<String>("id")
+                if (id != null) applyTrackOverride(C.TRACK_TYPE_AUDIO, id)
+                result.success(null)
+            }
+            "selectTextTrack" -> {
+                val id = call.argument<String>("id")
+                if (id == null) {
+                    player.trackSelectionParameters = player.trackSelectionParameters
+                        .buildUpon()
+                        .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                        .build()
+                } else {
+                    applyTrackOverride(C.TRACK_TYPE_TEXT, id)
+                }
+                result.success(null)
+            }
+            "setCaptionStyle" -> {
+                applyCaptionStyle(call)
+                result.success(null)
+            }
+            "setPlaybackSpeed" -> {
+                val speed = (call.argument<Number>("speed") ?: 1.0).toFloat()
+                player.playbackParameters = PlaybackParameters(speed)
+                result.success(null)
+            }
+            "setVolumeBoost" -> {
+                val pct = (call.argument<Number>("percent") ?: 100).toInt().coerceIn(100, 200)
+                val gainMb = (((pct - 100) / 100f) * 600f).toInt()
+                try {
+                    if (loudness == null) loudness = LoudnessEnhancer(audioSessionId)
+                    loudness?.setTargetGain(gainMb)
+                    loudness?.enabled = gainMb > 0
+                } catch (_: Exception) {
+                    // LoudnessEnhancer unavailable on this device/session — play at 100%.
+                }
+                result.success(null)
+            }
+            else -> result.notImplemented()
+        }
+    }
+
+    override fun dispose() {
+        handler.removeCallbacks(tick)
+        channel.setMethodCallHandler(null)
+        events.setStreamHandler(null)
+        sink = null
+        try { loudness?.release() } catch (_: Exception) {}
+        loudness = null
+        player.release()
+    }
+}
