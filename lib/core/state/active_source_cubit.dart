@@ -55,6 +55,18 @@ class ActiveSourceCubit extends Cubit<String> {
     _box?.put(_key, id);
   }
 
+  /// Drops the active source, leaving no source selected.
+  ///
+  /// Needed because the constructor's [fallback] is a hardcoded anime source
+  /// ('allanime'): on an install with nothing saved, or where the saved pick
+  /// is gone, that source becomes active whether or not this build can use it.
+  /// Callers that know the active source is unusable in the current mode use
+  /// this instead of leaving a source they can't browse with.
+  ///
+  /// A real state, not a sentinel: the source picker, Home's empty state and
+  /// the Providers header all already handle an empty id.
+  void clearSource() => setSource('');
+
   /// Re-applies the persisted pick when it becomes valid *after* boot.
   ///
   /// Aniyomi sources load asynchronously, so a saved `ani:` source isn't in the

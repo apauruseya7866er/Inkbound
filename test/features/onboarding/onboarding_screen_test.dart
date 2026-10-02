@@ -41,8 +41,14 @@ void main() {
     );
     await tester.pump();
 
-    // First page is the brand/positioning page, not the hand-off buttons.
-    expect(find.textContaining('Anime'), findsOneWidget);
+      // First page is the brand/positioning page, not the hand-off buttons.
+      // Novel-only build: the positioning line names novels only — the
+      // original read "Anime, manga and novels - all in one app", which
+      // promised two content types this build cannot load.
+      expect(find.textContaining('Novels from every source'), findsOneWidget);
+      expect(find.textContaining('Anime'), findsNothing);
+      expect(find.textContaining('manga'), findsNothing);
+
 
     // The old "we'll install the official source catalog" pitch is gone.
     expect(find.textContaining('install the official'), findsNothing);

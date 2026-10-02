@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+// hive_flutter, not hive: the `Box.listenable()` extension this list needs
+// lives in the flutter package (same import continue_section.dart uses).
+import 'package:hive_flutter/hive_flutter.dart';
 
 import '../../core/di/injector.dart';
+import '../../core/lnreader/lnreader_extension_service.dart';
 import '../../core/mihon/mihon_manager.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/playback/pinned_sources.dart';
 import '../../core/prefs/source_lang_prefs.dart';
 import '../../core/provider/cloudstream_provider.dart';
@@ -11,6 +16,7 @@ import '../../core/theme/app_text.dart';
 import '../../core/ui/source_icon_tile.dart';
 import '../../core/ui/source_switcher.dart';
 import '../../l10n/l10n.dart';
+import '../sources/lnreader_sources_screen.dart';
 
 /// Restricts [BrowseSourcesList] to one kind-tab's buckets. Streaming = anime
 /// + movies combined (they're one playback pool — see `ContentModeX.
@@ -102,8 +108,8 @@ class BrowseSourcesList extends StatelessWidget {
     // in particular load from disk a few seconds after launch, so the list
     // drew without them and kept that stale answer until something else
     // forced a rebuild — switching tabs and back was the only way to see
-    // them. These three announce when their set changes; the hub screen
-    // already listens to the same three.
+    // them. These announce when their set changes; the hub screen
+    // already listens to the same ones.
     listenable: Listenable.merge([
       // Whichever are actually registered: the app registers all three, but
       // a screen has no business crashing over a manager its host left out.
@@ -116,6 +122,15 @@ class BrowseSourcesList extends StatelessWidget {
       // that fires the notifier below and forces the rebuild.
       if (sl.isRegistered<MangaLangPrefs>()) sl<MangaLangPrefs>(),
       if (sl.isRegistered<AnimeLangPrefs>()) sl<AnimeLangPrefs>(),
+      // Novel-only build: LNReader is not a Listenable (it's a plain manager
+      // over a Hive box), so the box is what announces it. Without this the
+      // novel bucket was the ONLY one this build can show and nothing in the
+      // merge above ever fired for it — a novel source installed from the
+      // picker while this screen was open would not appear until the user
+      // switched tabs and back. `isBoxOpen` because the box is opened at boot
+      // but a minimal test harness may not have opened it.
+      if (Hive.isBoxOpen(LnReaderExtensionService.boxName))
+        Hive.box<Map>(LnReaderExtensionService.boxName).listenable(),
     ]),
     builder: (context, _) => ValueListenableBuilder<List<String>>(
       // Pinning is a long-press away on every row, and the switcher can
@@ -134,8 +149,13 @@ class BrowseSourcesList extends StatelessWidget {
         s.label.toLowerCase().contains(q) ||
         (s.repo?.toLowerCase().contains(q) ?? false);
 
-    final showStreaming = kind == null || kind == SourceListKind.streaming;
-    final showManga = kind == null || kind == SourceListKind.manga;
+    // Novel-only build: the streaming and manga sections are never gathered,
+    // so `kind == null` (the all-sources view) lists novel sources only rather
+    // than every ecosystem this fork no longer loads.
+    final showStreaming =
+        !kNovelOnly && (kind == null || kind == SourceListKind.streaming);
+    final showManga =
+        !kNovelOnly && (kind == null || kind == SourceListKind.manga);
     final showNovel = kind == null || kind == SourceListKind.novel;
 
     // One list per tab, not one per manifest type. Streaming used to split
@@ -165,6 +185,20 @@ class BrowseSourcesList extends StatelessWidget {
           (!showStreaming || (b.anime.isEmpty && b.movies.isEmpty)) &&
           (!showManga || b.manga.isEmpty) &&
           (!showNovel || b.novel.isEmpty);
+
+      // With nothing installed there is no other way to add anything, so a bare
+      // "No sources installed" is a dead end. This is the screen the Sources tab
+      // lands on and, on a fresh install, the first thing a new user sees — so
+      // the way in has to start here.
+      //
+      // It is a signpost rather than a second installer: the count, the size and
+      // the confirmation all live on the LNReader screen, and duplicating them
+      // would mean two places to keep in step and two ways to start a ~150-file
+      // download by accident.
+      if (nothingInstalled && showNovel) {
+        return const _InstallNovelSourcesPrompt();
+      }
+
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
@@ -699,4 +733,60 @@ class _AlphabetRail extends StatelessWidget {
       );
     },
   );
+}
+
+/// The empty state on the Sources tab when nothing is installed yet.
+///
+/// Shown instead of a bare "No sources installed" because this is where a fresh
+/// install lands: without it the app opens with a working-looking Sources tab
+/// that can never be filled in, and the user has to already know that novel
+/// sources are installed somewhere else.
+///
+/// Deliberately only a way in. The offer (how many sources, how much data,
+/// confirmation) belongs on the LNReader screen, so there is a single place
+/// that can start the download and a single place that has to be right about it.
+class _InstallNovelSourcesPrompt extends StatelessWidget {
+  const _InstallNovelSourcesPrompt();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.auto_stories_outlined,
+              size: 40,
+              color: AppColors.textSecondary,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No novel sources installed',
+              style: AppText.body.copyWith(color: AppColors.textPrimary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Add novel sources from the official LNReader repository to start '
+              'reading. Nothing is downloaded until you choose to.',
+              style: AppText.caption.copyWith(color: AppColors.textSecondary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const LnReaderSourcesScreen(),
+                ),
+              ),
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('Add novel sources'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

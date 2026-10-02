@@ -2,6 +2,7 @@ import 'package:hive/hive.dart';
 import 'package:watch_app/core/hive/safe_box.dart';
 
 import '../mode/content_mode.dart';
+import '../mode/novel_only.dart';
 
 /// A subscribed show — we re-check its source for new episodes or chapters
 /// (CloudStream-style). [lastCount] is the count seen at the last check; a
@@ -66,10 +67,19 @@ class Subscription {
         ? (m['coverHeaders'] as Map).map((k, v) => MapEntry('$k', '$v'))
         : null,
     lastCount: (m['lastCount'] as num?)?.toInt() ?? 0,
-    mode: ContentMode.values.firstWhere(
-      (e) => e.name == m['mode'],
-      orElse: () => ContentMode.anime,
-    ),
+    // Novel-only build: a subscription persisted by a pre-fork build stored
+    // Streaming or Manga here (Streaming was even the old default), and this
+    // build has no checker for either. The gate is on the MATCH, not on
+    // `orElse` — `anime`/`manga` are still valid enum names, so an `orElse`
+    // here would never fire for them and every pre-fork row would keep
+    // `isReading == false`, which makes the chapter sweep announce "Episode"
+    // for a novel chapter.
+    mode: kNovelOnly
+        ? kOnlyMode
+        : ContentMode.values.firstWhere(
+            (e) => e.name == m['mode'],
+            orElse: () => ContentMode.anime,
+          ),
   );
 }
 

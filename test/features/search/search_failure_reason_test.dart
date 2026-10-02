@@ -150,7 +150,7 @@ class _FakeRepo implements SourceRepository {
   List<({String id, String name})> get loadedSources => loadedSourcesSeed;
 
   @override
-  String get sourceId => 'ani:1';
+  String get sourceId => 'lnr:1';
 
   @override
   void syncSearchCache() {}
@@ -227,7 +227,7 @@ MediaItem _item(String sourceId) => MediaItem(
   id: 'id-$sourceId',
   title: 'Naruto',
   url: 'https://example.com/$sourceId',
-  type: ProviderType.anime,
+  type: ProviderType.novel,
   sourceId: sourceId,
 );
 
@@ -252,8 +252,8 @@ void main() {
 
     repo = _FakeRepo()
       ..loadedSourcesSeed = const [
-        (id: 'ani:good', name: 'Good'),
-        (id: 'ani:blocked', name: 'Blocked'),
+        (id: 'lnr:good', name: 'Good'),
+        (id: 'lnr:blocked', name: 'Blocked'),
       ];
 
     bloc = SearchBloc(
@@ -277,11 +277,11 @@ void main() {
 
   group('per-source failure reasons', () {
     test('a failing source is named with WHY, not silently dropped', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.blocked,
       );
@@ -291,22 +291,22 @@ void main() {
 
       expect(
         bloc.state.failedSources,
-        {'ani:blocked': SourceOutcome.blocked},
+        {'lnr:blocked': SourceOutcome.blocked},
         reason:
             'the reason has to survive the fan-out — collapsing it to a bool '
             'is what left the UI with nothing to say',
       );
       // The working source is unaffected.
       expect(bloc.state.status, SearchStatus.success);
-      expect(bloc.state.groups.single.sourceId, 'ani:good');
+      expect(bloc.state.groups.single.sourceId, 'lnr:good');
     });
 
     test('empty-without-error is NOT a failure', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.empty,
       );
@@ -319,11 +319,11 @@ void main() {
 
     test('every source failing is the error state, carrying each reason',
         () async {
-      repo.resultFor['ani:good'] = (
+      repo.resultFor['lnr:good'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.timeout,
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.blocked,
       );
@@ -333,13 +333,13 @@ void main() {
 
       expect(bloc.state.status, SearchStatus.error);
       expect(bloc.state.failedSources, {
-        'ani:good': SourceOutcome.timeout,
-        'ani:blocked': SourceOutcome.blocked,
+        'lnr:good': SourceOutcome.timeout,
+        'lnr:blocked': SourceOutcome.blocked,
       });
     });
 
     test('a new run clears the previous run failures', () async {
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.blocked,
       );
@@ -347,8 +347,8 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(bloc.state.failedSources, isNotEmpty);
 
-      repo.resultFor['ani:blocked'] = (
-        items: [_item('ani:blocked')],
+      repo.resultFor['lnr:blocked'] = (
+        items: [_item('lnr:blocked')],
         outcome: SourceOutcome.ok,
       );
       bloc.add(const SearchRunRequested('bleach'));
@@ -360,54 +360,54 @@ void main() {
 
   group('retry', () {
     test('retrying one source unskips it and splices the results in', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.error,
       );
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
-      expect(bloc.state.failedSources.keys, ['ani:blocked']);
+      expect(bloc.state.failedSources.keys, ['lnr:blocked']);
       // The hard error marked it dead — which is what would make a naive
       // retry skip the very source being retried.
-      expect(health.isSkippable('ani:blocked'), isTrue);
+      expect(health.isSkippable('lnr:blocked'), isTrue);
 
-      repo.resultFor['ani:blocked'] = (
-        items: [_item('ani:blocked')],
+      repo.resultFor['lnr:blocked'] = (
+        items: [_item('lnr:blocked')],
         outcome: SourceOutcome.ok,
       );
-      bloc.add(const SearchRetryRequested('ani:blocked'));
+      bloc.add(const SearchRetryRequested('lnr:blocked'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(health.cleared, contains('ani:blocked'));
+      expect(health.cleared, contains('lnr:blocked'));
       expect(bloc.state.failedSources, isEmpty);
       expect(
         bloc.state.groups.map((g) => g.sourceId).toSet(),
-        {'ani:good', 'ani:blocked'},
+        {'lnr:good', 'lnr:blocked'},
         reason: 'the source that already worked must keep its results',
       );
     });
 
     test('a retry that fails again keeps the reason', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.timeout,
       );
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
-      bloc.add(const SearchRetryRequested('ani:blocked'));
+      bloc.add(const SearchRetryRequested('lnr:blocked'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(bloc.state.failedSources, {'ani:blocked': SourceOutcome.timeout});
+      expect(bloc.state.failedSources, {'lnr:blocked': SourceOutcome.timeout});
       expect(bloc.state.status, SearchStatus.success); // good source still shows
     });
 
@@ -420,11 +420,11 @@ void main() {
     // out and retry them all anyway, which is why that shape proves nothing.)
     test('retry-all requeries a dead source the skip would have dropped',
         () async {
-      repo.resultFor['ani:good'] = (
+      repo.resultFor['lnr:good'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.empty, // answered, alive, no results
       );
-      repo.resultFor['ani:blocked'] = (
+      repo.resultFor['lnr:blocked'] = (
         items: const <MediaItem>[],
         outcome: SourceOutcome.error, // marked dead
       );
@@ -432,11 +432,11 @@ void main() {
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(bloc.state.status, SearchStatus.error);
-      expect(health.isSkippable('ani:blocked'), isTrue);
-      expect(health.isSkippable('ani:good'), isFalse);
+      expect(health.isSkippable('lnr:blocked'), isTrue);
+      expect(health.isSkippable('lnr:good'), isFalse);
 
-      repo.resultFor['ani:blocked'] = (
-        items: [_item('ani:blocked')],
+      repo.resultFor['lnr:blocked'] = (
+        items: [_item('lnr:blocked')],
         outcome: SourceOutcome.ok,
       );
       repo.searchedSourceIds.clear();
@@ -446,12 +446,12 @@ void main() {
 
       expect(
         repo.searchedSourceIds,
-        contains('ani:blocked'),
+        contains('lnr:blocked'),
         reason: 'the dead source is the whole point of the retry',
       );
       expect(bloc.state.status, SearchStatus.success);
       expect(bloc.state.failedSources, isEmpty);
-      expect(bloc.state.groups.single.sourceId, 'ani:blocked');
+      expect(bloc.state.groups.single.sourceId, 'lnr:blocked');
     });
   });
 
@@ -462,23 +462,23 @@ void main() {
     // request existed for the per-source timeout to cap. Its shimmer stayed on
     // screen for the life of the search.
     test('a skipped source is never queried and never left pending', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      health.dead.add('ani:blocked');
+      health.dead.add('lnr:blocked');
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
       expect(
         repo.searchedSourceIds,
-        isNot(contains('ani:blocked')),
+        isNot(contains('lnr:blocked')),
         reason: 'the health check drops it before the fan-out',
       );
       expect(
         bloc.state.queriedSources,
-        {'ani:good'},
+        {'lnr:good'},
         reason:
             'pending is queried − responded, so a source that was never '
             'queried can never render a skeleton',
@@ -486,60 +486,60 @@ void main() {
     });
 
     test('a skipped source is reported, not silently dropped', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      health.dead.add('ani:blocked');
+      health.dead.add('lnr:blocked');
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(bloc.state.failedSources, {'ani:blocked': SourceOutcome.error});
+      expect(bloc.state.failedSources, {'lnr:blocked': SourceOutcome.error});
     });
 
     test('retrying a skipped source clears the mark and queries it', () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
-        items: [_item('ani:blocked')],
+      repo.resultFor['lnr:blocked'] = (
+        items: [_item('lnr:blocked')],
         outcome: SourceOutcome.ok,
       );
-      health.dead.add('ani:blocked');
+      health.dead.add('lnr:blocked');
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
       repo.searchedSourceIds.clear();
 
-      bloc.add(const SearchRetryRequested('ani:blocked'));
+      bloc.add(const SearchRetryRequested('lnr:blocked'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(repo.searchedSourceIds, contains('ani:blocked'));
+      expect(repo.searchedSourceIds, contains('lnr:blocked'));
       expect(bloc.state.failedSources, isEmpty);
       expect(
         bloc.state.groups.map((g) => g.sourceId).toSet(),
-        {'ani:good', 'ani:blocked'},
+        {'lnr:good', 'lnr:blocked'},
       );
     });
 
     test('every source dead still queries them all (no empty search)',
         () async {
-      repo.resultFor['ani:good'] = (
-        items: [_item('ani:good')],
+      repo.resultFor['lnr:good'] = (
+        items: [_item('lnr:good')],
         outcome: SourceOutcome.ok,
       );
-      repo.resultFor['ani:blocked'] = (
-        items: [_item('ani:blocked')],
+      repo.resultFor['lnr:blocked'] = (
+        items: [_item('lnr:blocked')],
         outcome: SourceOutcome.ok,
       );
-      health.dead.addAll(['ani:good', 'ani:blocked']);
+      health.dead.addAll(['lnr:good', 'lnr:blocked']);
 
       bloc.add(const SearchRunRequested('naruto'));
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
-      expect(bloc.state.queriedSources, {'ani:good', 'ani:blocked'});
+      expect(bloc.state.queriedSources, {'lnr:good', 'lnr:blocked'});
       expect(
         bloc.state.failedSources,
         isEmpty,

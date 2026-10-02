@@ -22,6 +22,12 @@ import 'package:watch_app/features/home/cubit/home_cubit.dart';
 // tracker row (so today's home survives the feature), an enabled row renders
 // where the user put it, and a tracker that fails or goes away degrades to
 // provider-only rows without breaking the load.
+//
+// Novel-only build: the layout under composition is the Novel one
+// (`anilist::novel`, or `mal::novel` behind the MAL provider pref), so the
+// fixtures carry novel rows and novel-typed items. A reading layout has no
+// new-episodes row to begin with (`trackerRowIdsFor`), which is why the saved
+// arrangements below never name one.
 
 /// Z Mode home sections — `more.sourceId == 'zm'`, so the first section
 /// repeats as a row on the phone exactly like the metadata catalogues.
@@ -42,8 +48,8 @@ MediaItem _item(String t) => MediaItem(
   id: t,
   title: t,
   cover: null,
-  url: 'zm://anime/mal:1',
-  type: ProviderType.anime,
+  url: 'zm://novel/mal:1',
+  type: ProviderType.novel,
   sourceId: 'zm',
 );
 
@@ -138,7 +144,7 @@ void main() {
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('home_cubit_rows_test');
     Hive.init(dir.path);
-    await ZModePrefs.init(); // on + anime by default → layout 'anilist::anime'
+    await ZModePrefs.init(); // on + novel (the only mode) → 'anilist::novel'
     await HomeRowsPrefs.init();
   });
 
@@ -167,7 +173,7 @@ void main() {
 
     // What the editor does: save an arrangement, then let the revision bump
     // land. Hiding a section and surfacing a tracker row must both show up.
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:watching',
       'local:continue',
       '!section:Trending',
@@ -218,14 +224,13 @@ void main() {
     final t = _FakeTracker(
       library: [
         _entry('One Piece', progress: 100, updatedAt: DateTime(2026, 9, 1)),
-        _entry('Bleach', progress: 3, nextAiringEpisode: 5, updatedAt: DateTime(2026, 8, 1)),
+        _entry('Bleach', progress: 3, updatedAt: DateTime(2026, 8, 1)),
         _entry('Naruto', status: WatchStatus.planning),
         _entry('Cowboy Bebop', status: WatchStatus.paused, progress: 5),
       ],
     );
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
-      'tracker:new-episodes',
       'tracker:watching',
       'local:continue',
       'section:Trending',
@@ -238,7 +243,6 @@ void main() {
 
     expect(cubit.state.rows?.map((r) => r.id), [
       'tracker:continue',
-      'tracker:new-episodes',
       'tracker:watching',
       'local:continue',
       'section:Trending',
@@ -246,12 +250,14 @@ void main() {
     ]);
     final continueRow = cubit.state.rows![0] as TrackerContinueHomeRow;
     expect(continueRow.trackerName, 'AniList');
+    // Most recently updated first, and only the entries actually in progress.
     expect(continueRow.items.map((e) => e.item.title), ['One Piece', 'Bleach']);
-    // New episodes: only Bleach has released episodes beyond its progress.
-    final fresh = cubit.state.rows![1] as NewEpisodesHomeRow;
-    expect(fresh.items.single.item.title, 'Bleach');
-    final watching = cubit.state.rows![2] as TrackerListHomeRow;
+    final watching = cubit.state.rows![1] as TrackerListHomeRow;
     expect(watching.items.length, 2);
+    // A reading layout has no new-episodes row at all — `trackerRowIdsFor`
+    // leaves it out of both the available ids and the default arrangement, so
+    // it can never be built, enabled or saved.
+    expect(cubit.state.rows!.any((r) => r.id == 'tracker:new-episodes'), isFalse);
   });
 
   test('a tracker that throws degrades to provider-only rows', () async {
@@ -273,7 +279,7 @@ void main() {
     // provider, or title-language change) has to drop it or the rows keep the
     // old spelling.
     final t = _FakeTracker(library: [_entry('One Piece', progress: 1)]);
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
       'section:Trending',
@@ -331,7 +337,7 @@ void main() {
     final mal = _FakeTracker(name: 'MyAnimeList', library: [
       _entry('Naruto', progress: 1),
     ]);
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
       'section:Trending',
@@ -358,15 +364,16 @@ void main() {
     final mal = _FakeTracker(name: 'MyAnimeList', library: [
       _entry('Naruto', progress: 1),
     ]);
-    // MAL as the anime metadata provider makes the layout 'mal::anime', and a
-    // layout's provider is the tracker behind its list rows — one choice, not
-    // a separate account setting to keep in sync.
+    // The MAL metadata provider makes the novel layout 'mal::novel' (the
+    // provider pref is still the anime/manga/novel one), and a layout's
+    // provider is the tracker behind its list rows — one choice, not a
+    // separate account setting to keep in sync.
     final prefs = await MetadataProviderPrefs.open();
     await prefs.setAnime(AnimeProvider.mal);
     sl.registerSingleton<MetadataProviderPrefs>(prefs);
     addTearDown(() => sl.unregister<MetadataProviderPrefs>());
 
-    await HomeRowsPrefs.save('mal::anime', [
+    await HomeRowsPrefs.save('mal::novel', [
       'tracker:continue',
       'local:continue',
       'section:Trending',
@@ -394,7 +401,7 @@ void main() {
     final mal = _FakeTracker(name: 'MyAnimeList', library: [
       _entry('Naruto', progress: 1),
     ]);
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
       'section:Trending',
@@ -417,7 +424,7 @@ void main() {
 
   test('a tracker disconnecting re-merges without its rows', () async {
     final t = _FakeTracker(library: [_entry('One Piece', progress: 1)]);
-    await HomeRowsPrefs.save('anilist::anime', [
+    await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
       'section:Trending',

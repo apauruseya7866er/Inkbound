@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_app/core/mode/content_mode.dart';
 import 'package:watch_app/core/notify/subscription_store.dart';
 
-Subscription sub({ContentMode mode = ContentMode.anime}) => Subscription(
+Subscription sub({ContentMode mode = ContentMode.novel}) => Subscription(
   sourceId: 'src',
   url: 'https://x/show',
   title: 'Show',
@@ -12,23 +12,41 @@ Subscription sub({ContentMode mode = ContentMode.anime}) => Subscription(
 
 void main() {
   group('Subscription mode', () {
-    test('round-trips so an alert knows what it is announcing', () {
+    test('every stored mode decodes instead of throwing', () {
+      // A box still full of pre-fork `anime`/`manga` rows keeps decoding
+      // rather than blowing up — but it decodes as NOVEL, because that is the
+      // only mode this build has. This matters for the alert wording, not just
+      // for not crashing: a pre-fork row (Streaming was the old default) used
+      // to come back with isReading == false, so the chapter sweep announced
+      // "Episode" for a novel chapter. Collapsing on the MATCH (not on
+      // `orElse`, which only fires for a name no longer in the enum) is what
+      // fixes that.
       for (final m in ContentMode.values) {
-        expect(Subscription.fromMap(sub(mode: m).toMap()).mode, m);
+        final decoded = Subscription.fromMap(sub(mode: m).toMap()).mode;
+        expect(decoded, ContentMode.novel, reason: 'stored mode ${m.name}');
       }
+      // And the novel row itself still round-trips exactly.
+      final novel = sub(mode: ContentMode.novel).toMap();
+      expect(Subscription.fromMap(novel).mode, ContentMode.novel);
+      expect(Subscription.fromMap(novel).isReading, isTrue);
     });
 
-    test('a subscription saved before modes existed reads as anime', () {
-      // Anything already subscribed keeps working and keeps saying "episode",
-      // rather than loading as a null mode and blowing up.
+    test('a subscription saved before modes existed reads as novel', () {
+      // Anything already subscribed keeps working, and now says "chapter"
+      // rather than loading as a null mode and blowing up — or, as before the
+      // fork, announcing "episode" for a row this build can only check as a
+      // novel.
       final old = sub().toMap()..remove('mode');
-      expect(Subscription.fromMap(old).mode, ContentMode.anime);
-      expect(Subscription.fromMap(old).isReading, isFalse);
+      expect(Subscription.fromMap(old).mode, ContentMode.novel);
+      expect(Subscription.fromMap(old).isReading, isTrue);
     });
 
     test('an unknown mode falls back instead of throwing', () {
+      // What a pre-fork row with NO recognisable mode name decodes to: the
+      // one mode this build has, so it is served by the novel chapter
+      // checker rather than dropped.
       final j = sub().toMap()..['mode'] = 'audiobook';
-      expect(Subscription.fromMap(j).mode, ContentMode.anime);
+      expect(Subscription.fromMap(j).mode, ContentMode.novel);
     });
 
     test('reading modes pick the chapter wording', () {

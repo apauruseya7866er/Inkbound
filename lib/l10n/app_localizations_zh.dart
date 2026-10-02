@@ -323,6 +323,18 @@ class AppLocalizationsZh extends AppLocalizations {
   String get settingsSectionAboutSummary => '更新、支持、版本';
 
   @override
+  String get settingsSectionDownloadsSummaryNovels => '下载的章节，存储';
+
+  @override
+  String get settingsSectionHistorySummaryNovels => '你读过的小说';
+
+  @override
+  String get settingsSectionNotificationsSummaryNovels => '新章节提醒';
+
+  @override
+  String get settingsSectionReadingSummaryNovels => '小说阅读器设置';
+
+  @override
   String get couldNotExportLogs => '无法导出日志';
 
   @override
@@ -925,6 +937,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String get onboardingIntro => '动画、漫画和小说 — 都在一个应用里，按你的方式设置。';
 
   @override
+  String get downloadsSubtitleNovel => '管理下载的章节';
+
+  @override
+  String get historySubtitleNovels => '你读过的小说';
+
+  @override
+  String get listsOnly => '列表';
+
+  @override
+  String get notificationsSubtitleNovel => '订阅小说的新章节提醒';
+
+  @override
+  String get onboardingIntroNovels => '来自你安装的每个源的小说，随心设置。';
+
+  @override
+  String get readerSubtitleNovels => '小说阅读器设置';
+
+  @override
   String get youChooseWhatsInside => '内容由你决定';
 
   @override
@@ -935,6 +965,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pickStreamingMangaOrNovels => '选择在线观看、漫画或小说';
+
+  @override
+  String get pickNovels => '选择小说源';
 
   @override
   String get pasteInARepositoryLink => '粘贴仓库链接';
@@ -5440,6 +5473,18 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get settingsSectionAboutSummary => '更新、支援、版本';
 
   @override
+  String get settingsSectionDownloadsSummaryNovels => '下載的章節，儲存';
+
+  @override
+  String get settingsSectionHistorySummaryNovels => '你讀過的小說';
+
+  @override
+  String get settingsSectionNotificationsSummaryNovels => '新章節提醒';
+
+  @override
+  String get settingsSectionReadingSummaryNovels => '小說閱讀器設定';
+
+  @override
   String get couldNotExportLogs => '無法匯出紀錄檔';
 
   @override
@@ -6000,6 +6045,24 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
   String get onboardingIntro => '動畫、漫畫和小說 — 都在一個 App 裡，照你的方式設定。';
 
   @override
+  String get downloadsSubtitleNovel => '管理下載的章節';
+
+  @override
+  String get historySubtitleNovels => '你讀過的小說';
+
+  @override
+  String get listsOnly => '列表';
+
+  @override
+  String get notificationsSubtitleNovel => '訂閱小說的新章節提醒';
+
+  @override
+  String get onboardingIntroNovels => '來自你安裝的每個來源的小說，隨心設定。';
+
+  @override
+  String get readerSubtitleNovels => '小說閱讀器設定';
+
+  @override
   String get youChooseWhatsInside => '內容由你決定';
 
   @override
@@ -6010,6 +6073,9 @@ class AppLocalizationsZhTw extends AppLocalizationsZh {
 
   @override
   String get pickStreamingMangaOrNovels => '選擇串流、漫畫或小說';
+
+  @override
+  String get pickNovels => '選擇小說來源';
 
   @override
   String get pasteInARepositoryLink => '貼上儲庫連結';

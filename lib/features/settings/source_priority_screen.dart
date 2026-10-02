@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
 import '../../core/playback/source_health_store.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tv/tv_focusable.dart';
@@ -48,8 +49,15 @@ class _SourcePriorityScreenState extends State<SourcePriorityScreen> {
   // One list. Anime and Movies/TV share the same installed pool, so two
   // orders of the same sources was twice the list to keep straight for a
   // distinction most people don't draw.
-  late List<({String id, String name})> _sources = _ordered(ZKind.anime);
-  late int _cap = _prefs.cap(ZKind.anime);
+  //
+  // Novel-only build: the one kind this app sweeps is Novel, so every read and
+  // write below goes through [_kind] rather than a hardcoded ZKind.anime. The
+  // streaming pool this screen used to order isn't loaded at all, so ordering
+  // it would be ordering an empty list.
+  ZKind get _kind => kNovelOnly ? ZKind.novel : ZKind.anime;
+
+  late List<({String id, String name})> _sources = _ordered(_kind);
+  late int _cap = _prefs.cap(_kind);
 
 
   /// What Auto Resolve actually sweeps, in the order it walks them.
@@ -68,13 +76,13 @@ class _SourcePriorityScreenState extends State<SourcePriorityScreen> {
   ///
   /// NOT a mode: pinned sources sit on top and everything below them stays
   /// auto-ranked. It only decides whether there is anything to undo.
-  bool get _hasPins => _prefs.get(ZKind.anime).isNotEmpty;
+  bool get _hasPins => _prefs.get(_kind).isNotEmpty;
 
 
 
   void _refresh(ZKind kind) => setState(() {
-    _sources = _ordered(ZKind.anime);
-    _cap = _prefs.cap(ZKind.anime);
+    _sources = _ordered(_kind);
+    _cap = _prefs.cap(_kind);
   });
 
 
@@ -241,8 +249,8 @@ class _SourcePriorityScreenState extends State<SourcePriorityScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(0, 10, 0, 36),
         children: [
-          _capControl(ZKind.anime),
-          _section(ZKind.anime, _sources),
+          _capControl(_kind),
+          _section(_kind, _sources),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
             child: Text(
@@ -257,7 +265,7 @@ class _SourcePriorityScreenState extends State<SourcePriorityScreen> {
               padding: const EdgeInsets.fromLTRB(12, 6, 0, 0),
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: _resetButton(ZKind.anime),
+                child: _resetButton(_kind),
               ),
             ),
         ],

@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/app_mode.dart';
 import 'package:watch_app/core/di/injector.dart' show sl;
-import 'package:watch_app/core/mode/content_mode.dart';
 import 'package:watch_app/core/mode/content_mode_cubit.dart';
 import 'package:watch_app/core/playback/playback_prefs.dart';
 import 'package:watch_app/core/provider/cloudstream_provider.dart';
@@ -147,58 +146,56 @@ void main() {
   }
 
   testWidgets(
-    'anime mode regression: tabs are exactly All/Anime/Movies-Series, both '
-    'rows appear, no reading tabs leak in',
+    'novel mode regression: tabs are exactly All/Novel, the novel row shows '
+    'and no video rows leak in',
     (tester) async {
       // Real Hive I/O — even properly-awaited writes need runAsync under the
       // automated (pump-driven) testWidgets binding, or they never actually
       // land (same class of issue as mode_switcher_test.dart's setMode note).
       await tester.runAsync(() async {
+        await _seedJsSource(id: 'js:n', type: 'novel');
         await _seedJsSource(id: 'js:a', type: 'anime');
         await _seedJsSource(id: 'js:mv', type: 'movie');
       });
 
-      await pumpSwitcher(tester);
+      await pumpSwitcher(tester, currentId: 'js:n');
 
-      // Anime and Movies/Series are one group now: they share the same
-      // installed pool, plenty of sources carry both, and splitting by the
-      // type a source DECLARED sent people hunting under the wrong heading.
+      // A reading mode gets All + its own single bucket. The video tabs
+      // (Zangetsu/CloudStream/Aniyomi, NSFW) and the Manga tab are gone
+      // rather than left empty, and nothing of theirs is listed under All.
       expect(find.text('All'), findsOneWidget);
+      expect(find.text('Novel'), findsOneWidget);
       expect(find.text('Anime'), findsNothing);
       expect(find.text('Movies/Series'), findsNothing);
       expect(find.text('NSFW'), findsNothing);
       expect(find.text('Manga'), findsNothing);
-      expect(find.text('Novel'), findsNothing);
 
-      // "All" tab is the default — both rows visible there. findsWidgets
-      // (not findsOneWidget): the pill itself also shows the current
-      // source's name ('js:a'), so that one legitimately matches twice.
-      expect(find.text('js:a'), findsWidgets);
-      expect(find.text('js:mv'), findsOneWidget);
+      // "All" tab is the default. findsWidgets (not findsOneWidget): the pill
+      // itself also shows the current source's name ('js:n'), so that one
+      // legitimately matches twice.
+      expect(find.text('js:n'), findsWidgets);
+      expect(find.text('js:a'), findsNothing);
+      expect(find.text('js:mv'), findsNothing);
     },
   );
 
   testWidgets(
-    'manga mode, nothing installed: tabs are All/Manga only, empty state '
+    'novel mode, nothing installed: tabs are All/Novel only, empty state '
     'shows an install CTA that opens ZangetsuSourcesScreen on Repositories',
     (tester) async {
-      // setMode's persistence is fire-and-forget real Hive I/O — without
-      // runAsync here those writes dangle under FakeAsync and tearDown's
-      // Hive.close() hangs waiting on them (see mode_switcher_test.dart).
-      await tester.runAsync(() async {
-        await modeCubit.setMode(ContentMode.manga);
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-
+      // No setMode() to await here: the cubit boots into Novel on its own
+      // (ContentModeCubit._restore ignores the persisted mode) and refuses to
+      // leave it, which is exactly the state this case is about.
       await pumpSwitcher(tester);
 
       expect(find.text('All'), findsOneWidget);
-      expect(find.text('Manga'), findsOneWidget);
+      expect(find.text('Novel'), findsOneWidget);
       expect(find.text('Anime'), findsNothing);
       expect(find.text('Movies/Series'), findsNothing);
       expect(find.text('NSFW'), findsNothing);
+      expect(find.text('Manga'), findsNothing);
 
-      expect(find.text('No Manga sources yet'), findsOneWidget);
+      expect(find.text('No Novel sources yet'), findsOneWidget);
       final ctaButton = find.widgetWithText(FilledButton, 'Browse repositories');
       expect(ctaButton, findsOneWidget);
 
@@ -211,20 +208,18 @@ void main() {
   );
 
   testWidgets(
-    'manga mode with a manga source installed: row shows, no install CTA',
+    'novel mode with a novel source installed: row shows, no install CTA',
     (tester) async {
       // Real Hive I/O — see the comment on the first test above.
       await tester.runAsync(() async {
-        await _seedJsSource(id: 'js:m', type: 'manga');
-        await modeCubit.setMode(ContentMode.manga);
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await _seedJsSource(id: 'js:n', type: 'novel');
       });
 
-      await pumpSwitcher(tester, currentId: 'js:m');
+      await pumpSwitcher(tester, currentId: 'js:n');
 
       // findsWidgets: the pill itself also shows the current source's name.
-      expect(find.text('js:m'), findsWidgets);
-      expect(find.text('No Manga sources yet'), findsNothing);
+      expect(find.text('js:n'), findsWidgets);
+      expect(find.text('No Novel sources yet'), findsNothing);
       expect(find.widgetWithText(FilledButton, 'Browse repositories'), findsNothing);
     },
   );

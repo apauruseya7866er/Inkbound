@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/app_mode.dart';
@@ -9,6 +10,8 @@ import 'package:watch_app/core/di/injector.dart';
 import 'package:watch_app/core/models/home_section.dart';
 import 'package:watch_app/core/models/media_item.dart';
 import 'package:watch_app/core/models/provider_info.dart';
+import 'package:watch_app/core/mode/content_mode.dart';
+import 'package:watch_app/core/mode/content_mode_cubit.dart';
 import 'package:watch_app/core/repository/catalogue_repository.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
@@ -23,6 +26,11 @@ import 'package:watch_app/features/settings/home_rows_screen.dart';
 // merges with (pure functions covered by home_rows_composer_test). These pump
 // the screen against a HomeCubit already holding sections and check the three
 // things the screen itself owns: grouping, toggling into storage, and reset.
+//
+// Novel-only build: the current layout is the Novel one, so the editor opens on
+// 'anilist::novel' — a reading layout — and the picker offers the Novel pair.
+// The cases that could only be exercised by arranging the anime, manga, TMDB or
+// Simkl layouts are gone with those layouts.
 
 class _StubRepo implements CatalogueRepository {
   const _StubRepo();
@@ -31,6 +39,16 @@ class _StubRepo implements CatalogueRepository {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   @override
   String get sourceId => 'test';
+}
+
+/// The mode cubit is how the editor asks which kind it is editing. The real one
+/// always reports novel in this build (pinned by content_mode_cubit_test.dart),
+/// so a bare stand-in reporting novel is all this screen needs.
+class _FakeContentModeCubit extends Cubit<ContentMode>
+    implements ContentModeCubit {
+  _FakeContentModeCubit(super.initial);
+  @override
+  noSuchMethod(Invocation i) => super.noSuchMethod(i);
 }
 
 class _FakeTracker implements Tracker {
@@ -60,9 +78,9 @@ HomeSection _section(String title) => HomeSection(
   items: const [
     MediaItem(
       id: 'x',
-      title: 'Show',
+      title: 'Novel',
       url: '',
-      type: ProviderType.anime,
+      type: ProviderType.novel,
       sourceId: '',
     ),
   ],
@@ -70,9 +88,10 @@ HomeSection _section(String title) => HomeSection(
 
 void main() {
   late Directory dir;
-  // Z Mode defaults on + anime, and no provider prefs are registered, so the
-  // layout under edit is 'anilist::anime'.
-  const layoutKey = 'anilist::anime';
+  // Z Mode is on and the app sits in the only content mode it has, and no
+  // provider prefs are registered, so the layout under edit is
+  // 'anilist::novel'.
+  const layoutKey = 'anilist::novel';
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('home_rows_screen_test');
@@ -82,6 +101,9 @@ void main() {
 
     await sl.reset();
     sl.registerSingleton<AppMode>(AppMode(isTv: false));
+    sl.registerSingleton<ContentModeCubit>(
+      _FakeContentModeCubit(ContentMode.novel),
+    );
     final cubit = HomeCubit(const _StubRepo());
     addTearDown(cubit.close);
     // Phone rule: the first section of a non-zm source is dropped from the
@@ -110,9 +132,9 @@ void main() {
     }
   });
 
-  /// The editor lists every row of the layout — 15+ on AniList anime — which
-  /// does not fit the 800x600 default surface, so taps on the lower rows land
-  /// outside the render tree. Give it a phone.
+  /// The editor lists every row of the layout — a dozen on AniList novel —
+  /// which does not fit the 800x600 default surface, so taps on the lower rows
+  /// land outside the render tree. Give it a phone.
   Future<void> pumpEditor(WidgetTester tester) async {
     tester.view.physicalSize = const Size(1080, 2400);
     tester.view.devicePixelRatio = 1.0;
@@ -148,15 +170,15 @@ void main() {
 
     // Yours: the local row plus the tracker rows, labelled with the tracker
     // that would serve (none connected here, so the first in hub order).
-    expect(find.text('Continue Watching'), findsOneWidget);
+    expect(find.text('Continue Reading'), findsOneWidget);
     expect(find.text('Continue on AniList'), findsOneWidget);
-    expect(find.text('New Episodes'), findsOneWidget);
-    for (final t in ['Watching', 'Planning', 'Paused', 'Dropped']) {
+    // A reading layout relabels the status buckets, as Home renders them.
+    for (final t in ['Reading', 'Plan to Read', 'Paused', 'Dropped']) {
       expect(find.text(t), findsOneWidget);
     }
     // Discover: AniList's own rows, read from the catalogue's static list
     // rather than whatever the last fetch happened to return.
-    for (final t in AniListCatalogue.rowTitles(ZKind.anime)) {
+    for (final t in AniListCatalogue.rowTitles(ZKind.novel)) {
       expect(find.text(t), findsOneWidget, reason: t);
     }
     expect(find.text('Trending'), findsOneWidget);
@@ -182,7 +204,7 @@ void main() {
 
     await tester.tap(find.text('Editing'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('MyAnimeList \u00b7 Anime').last);
+    await tester.tap(find.text('MyAnimeList · Novel').last);
     await tester.pumpAndSettle();
 
     // Picking MAL's layout moves the list rows to MAL too.
@@ -209,70 +231,16 @@ void main() {
     expect(switchOf('local:continue'), findsOneWidget);
   });
 
-  testWidgets('a layout no connected tracker can serve offers no list rows', (
-    tester,
-  ) async {
-    // TMDB has no account of its own, and AniList holds no movie library
-    // either. Nothing can fill list rows here.
-    sl.registerSingleton<TrackerHub>(TrackerHub([_FakeTracker('AniList')]));
-
-    await pumpEditor(tester);
-    await tester.tap(find.text('Editing'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('TMDB \u00b7 Movies & TV').last);
-    await tester.pumpAndSettle();
-
-    expect(find.text('DISCOVER'), findsOneWidget);
-    expect(find.text('Now playing'), findsOneWidget);
-    // The local row survives — it is history, not a tracker.
-    expect(switchOf('local:continue'), findsOneWidget);
-    expect(switchOf('tracker:watching'), findsNothing);
-    expect(find.textContaining('Continue on'), findsNothing);
-  });
-
-  testWidgets('TMDB never offers list rows, even with Simkl signed in', (
-    tester,
-  ) async {
-    sl.registerSingleton<TrackerHub>(
-      TrackerHub([_FakeTracker('AniList'), _FakeTracker('Simkl')]),
-    );
-
-    await pumpEditor(tester);
-    await tester.tap(find.text('Editing'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('TMDB \u00b7 Movies & TV').last);
-    await tester.pumpAndSettle();
-
-    // Simkl holds movie lists, but this is the TMDB home — showing Simkl's
-    // library under it read as if it were TMDB's.
-    expect(switchOf('tracker:watching'), findsNothing);
-    expect(find.text('Continue on Simkl'), findsNothing);
-
-    // Simkl's own layout is where those live.
-    await tester.tap(find.text('Editing'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Simkl \u00b7 Movies & TV').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Continue on Simkl'), findsOneWidget);
-  });
-
-  testWidgets('a reading layout drops New Episodes and reads Continue Reading', (
+  testWidgets('the layout on screen is a reading one — no New Episodes row', (
     tester,
   ) async {
     sl.registerSingleton<TrackerHub>(TrackerHub([_FakeTracker('AniList')]));
 
     await pumpEditor(tester);
-    // Anime first: the row exists there.
-    expect(find.text('New Episodes'), findsOneWidget);
-    expect(find.text('Continue Watching'), findsOneWidget);
-
-    await tester.tap(find.text('Editing'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('AniList \u00b7 Manga').last);
-    await tester.pumpAndSettle();
 
     // Chapters have no airing schedule, so there is no new-episode feed to
-    // offer — Home never builds that row for a reading kind.
+    // offer: the editor never lists the row for a reading kind, because Home
+    // could never build it.
     expect(find.text('New Episodes'), findsNothing);
     expect(switchOf('tracker:new-episodes'), findsNothing);
     // And the local row is named for what Home actually renders here.
@@ -298,7 +266,7 @@ void main() {
 
     await pumpEditor(tester);
 
-    expect(find.text('Loading\u2026'), findsOneWidget);
+    expect(find.text('Loading…'), findsOneWidget);
     expect(switchOf('local:continue'), findsNothing);
 
     pending.emit(
@@ -306,38 +274,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Loading\u2026'), findsNothing);
+    expect(find.text('Loading…'), findsNothing);
     expect(switchOf('local:continue'), findsOneWidget);
     // No tracker rows on a source-backed home, and the phone drops the first
     // section of a non-zm source.
     expect(find.text('Popular'), findsOneWidget);
     expect(switchOf('tracker:watching'), findsNothing);
-  });
-
-  testWidgets('every layout is reachable without switching mode', (
-    tester,
-  ) async {
-    await pumpEditor(tester);
-
-    expect(find.text('AniList \u00b7 Anime'), findsOneWidget); // the tile
-
-    await tester.tap(find.text('Editing'));
-    await tester.pumpAndSettle();
-
-    // All eight, both sides of each provider pair — arranging the one you are
-    // about to switch to shouldn't require switching first.
-    for (final label in [
-      'AniList \u00b7 Anime',
-      'AniList \u00b7 Manga',
-      'AniList \u00b7 Novel',
-      'MyAnimeList \u00b7 Anime',
-      'MyAnimeList \u00b7 Manga',
-      'MyAnimeList \u00b7 Novel',
-      'TMDB \u00b7 Movies & TV',
-      'Simkl \u00b7 Movies & TV',
-    ]) {
-      expect(find.text(label), findsWidgets, reason: label);
-    }
   });
 
   testWidgets('switching layout edits that key, leaving the other alone', (
@@ -347,21 +289,22 @@ void main() {
 
     await tester.tap(find.text('Editing'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Simkl \u00b7 Movies & TV').last);
+    await tester.tap(find.text('MyAnimeList · Novel').last);
     await tester.pumpAndSettle();
 
-    // Simkl's own Discover rows now, not AniList's.
-    expect(find.text('Trending movies'), findsOneWidget);
-    expect(find.text('Popular this season'), findsNothing);
+    // MAL's own Discover rows now, not AniList's: the rows only AniList
+    // declares for a reading kind are gone, the ones both declare are here.
+    expect(find.text('Recently released'), findsNothing);
+    expect(find.text('Top rated'), findsOneWidget);
 
-    await tester.tap(switchOf('section:Trending movies'));
+    await tester.tap(switchOf('section:Top rated'));
     await tester.pump();
     await flushWrites(tester);
 
-    expect(HomeRowsPrefs.savedFor('simkl::movie'), isNotNull);
+    expect(HomeRowsPrefs.savedFor('mal::novel'), isNotNull);
     expect(
-      HomeRowsPrefs.savedFor('simkl::movie'),
-      contains('!section:Trending movies'),
+      HomeRowsPrefs.savedFor('mal::novel'),
+      contains('!section:Top rated'),
     );
     // The layout the app is actually in was never touched.
     expect(HomeRowsPrefs.savedFor(layoutKey), isNull);

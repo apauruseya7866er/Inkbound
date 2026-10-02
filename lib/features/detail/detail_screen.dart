@@ -44,6 +44,7 @@ import '../../core/download/chapter_downloader.dart';
 import '../../core/download/download_manager.dart';
 import '../../core/download/download_record.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/episode_title.dart';
 import '../../core/models/media_detail.dart';
@@ -824,7 +825,10 @@ class _DetailViewState extends State<_DetailView>
           cover: item.cover,
           coverHeaders: item.coverHeaders,
           lastCount: detail.episodes.length,
-          mode: detail.type == ProviderType.novel
+          // Novel-only build: a manga detail can still be reached from a
+          // restored backup, and it must not file its chapters under the manga
+          // layout. Everything downloads as a novel.
+          mode: kNovelOnly || detail.type == ProviderType.novel
               ? ContentMode.novel
               : detail.type == ProviderType.manga
               ? ContentMode.manga
@@ -1395,8 +1399,12 @@ class _DetailViewState extends State<_DetailView>
     MediaDetail detail, {
     bool peek = false,
   }) {
-    final readingType =
-        (detail.type == ProviderType.novel || detail.type == ProviderType.manga)
+    // Novel-only build: a manga detail page can still be reached from a
+    // restored backup or a deep link, so normalise the type here rather than
+    // trusting no caller. Everything that opens a reader opens the novel one.
+    final readingType = kNovelOnly
+        ? ProviderType.novel
+        : (detail.type == ProviderType.novel || detail.type == ProviderType.manga)
         ? detail.type
         : widget.item.type;
     switch (readingType) {
@@ -1713,7 +1721,9 @@ class _DetailViewState extends State<_DetailView>
       showId: item.id,
       showTitle: detail.title,
       cover: detail.cover ?? item.cover,
-      mode: detail.type == ProviderType.novel
+      // Novel-only build: see the subscription write above — a manga detail
+      // must not subscribe under the manga mode.
+      mode: kNovelOnly || detail.type == ProviderType.novel
           ? ContentMode.novel
           : ContentMode.manga,
     );

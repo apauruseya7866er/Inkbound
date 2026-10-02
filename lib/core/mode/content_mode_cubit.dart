@@ -9,6 +9,7 @@ import '../di/injector.dart';
 import '../repository/source_repository.dart';
 import '../state/active_source_cubit.dart';
 import 'content_mode.dart';
+import 'novel_only.dart';
 
 /// App-wide content mode (anime | manga | novel), persisted across launches.
 /// Also remembers the active source separately per mode, so flipping to Manga
@@ -25,6 +26,10 @@ class ContentModeCubit extends Cubit<ContentMode> {
   }
 
   static ContentMode _restore(Box box) {
+    // Novel-only build: the persisted mode is ignored and the app always boots
+    // into the single exposed mode, so an install that previously sat on
+    // Streaming/Manga can't come back up showing anime sources.
+    if (kNovelOnly) return kOnlyMode;
     final stored = box.get('mode') as String?;
     if (stored == null) return ContentMode.anime;
     try {
@@ -72,6 +77,17 @@ class ContentModeCubit extends Cubit<ContentMode> {
         return;
       }
     }
+    // Nothing of this mode is installed.
+    //
+    // Novel-only build: [ActiveSourceCubit]'s constructor fallback is a
+    // hardcoded anime source, so a fresh install (or one whose saved pick is
+    // gone) arrives here with an anime source active and no novel source to
+    // replace it. Leaving it means the Providers header reads "Active:
+    // allanime" in a novel-only app. Clear it instead — empty is a state the
+    // picker, Home's empty state and that header all already handle, and it
+    // routes the user to "install a novel source" rather than to a source they
+    // cannot browse with.
+    if (kNovelOnly) _active.clearSource();
   }
 
   /// Boot safety net: make the restored mode's active source belong to that
@@ -81,6 +97,9 @@ class ContentModeCubit extends Cubit<ContentMode> {
   void ensureSourceForMode() => _fallBackToModeSource(state);
 
   Future<void> setMode(ContentMode m) async {
+    // Novel-only build: reject any switch away from the exposed mode. The mode
+    // bar is hidden too, but notifications / deep links can still reach here.
+    if (kNovelOnly && m != kOnlyMode) return;
     if (m == state) return;
     // Capture the outgoing mode/source BEFORE emitting or restoring anything
     // — read after a restore, this would park the newly-restored source

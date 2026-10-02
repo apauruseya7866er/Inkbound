@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/di/injector.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tracker/tracker_hub.dart';
@@ -122,8 +123,14 @@ Future<void> showMetadataSwitchSheet(BuildContext context) async {
                 ),
                 if (animeFirst) ...[
                   ...animeSection(sheet),
-                  const SizedBox(height: 6),
-                  ...videoSection(sheet),
+                  // Novel-only build: TMDB/Simkl carry no novel metadata, so
+                  // the video section is dropped rather than left second with
+                  // nothing behind it. The anime-named section is the one a
+                  // novel app uses — it is the AniList/MAL pair.
+                  if (!kNovelOnly) ...[
+                    const SizedBox(height: 6),
+                    ...videoSection(sheet),
+                  ],
                 ] else ...[
                   ...videoSection(sheet),
                   const SizedBox(height: 6),

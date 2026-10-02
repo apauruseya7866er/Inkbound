@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/hive/safe_box.dart';
@@ -7,6 +9,7 @@ import '../../core/ui/source_icon_tile.dart';
 import '../../core/lnreader/lnreader_extension_service.dart';
 import '../../core/lnreader/lnreader_manager.dart';
 import '../../core/lnreader/novel_lang_prefs.dart';
+import '../../core/lnreader/seed_repo.dart';
 import '../../core/repository/source_actions.dart' as source_actions;
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -58,6 +61,15 @@ class _LnReaderSourcesScreenState extends State<LnReaderSourcesScreen> {
 
   final _searchCtrl = TextEditingController();
   String _query = '';
+
+  /// How many of the default-language sources are offered but not installed.
+  /// 0 hides the offer entirely, so the screen reads normally once the user
+  /// has dealt with it.
+  int _pendingSeeds = 0;
+
+  /// True while the bulk install is walking the index, with how many are done.
+  bool _installing = false;
+  int _installedCount = 0;
 
   final _langPrefs = sl<NovelLangPrefs>();
 
@@ -177,6 +189,79 @@ class _LnReaderSourcesScreenState extends State<LnReaderSourcesScreen> {
         ..addEntries(fetched);
       _state = _LoadState.loaded;
     });
+    // Counted after the catalogue is on screen, and separately from it: the
+    // offer must never delay the list the user came here to read. The seeded
+    // repo's index is usually already in [_catalogs], but a count against the
+    // canonical URL is correct even if that repo was removed.
+    unawaited(_refreshPendingCount(service));
+  }
+
+  /// Recomputes the bulk-install offer.
+  Future<void> _refreshPendingCount(LnReaderExtensionService service) async {
+    final pending = await LnReaderSeedRepo.pendingCount(service);
+    if (!mounted) return;
+    setState(() => _pendingSeeds = pending);
+  }
+
+  /// Installs every offered default-language source, reporting progress.
+  ///
+  /// Confirmed first because it is the one genuinely irreversible-feeling action
+  /// on this screen: it is a burst of downloads, and a mis-tap should not start
+  /// ~150 of them.
+  Future<void> _confirmInstallAll(int pending) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        title: Text('Install all novel sources', style: AppText.headline),
+        content: Text(
+          'This downloads $pending sources from the official LNReader repository '
+          '— roughly 2.3 MB in total. You can remove them again at any time.',
+          style: AppText.body,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(context.l10n.cancel, style: AppText.button),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(context.l10n.install, style: AppText.button),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() {
+      _installing = true;
+      _installedCount = 0;
+    });
+
+    final written = await LnReaderSeedRepo.installLanguage(
+      sl<LnReaderExtensionService>(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _installing = false;
+      _installedCount = written.length;
+    });
+
+    final failed = pending - written.length;
+    final message = failed > 0
+        ? 'Installed ${written.length} of $pending sources. '
+              '$failed could not be downloaded — tap to retry.'
+        : 'Installed ${written.length} sources.';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+
+    // Re-read rather than assuming success: a partial run leaves the offer up
+    // for the sources it missed, which is what makes a retry possible.
+    await _load(refresh: true);
   }
 
   Future<void> _addRepo(String url) async {
@@ -301,7 +386,8 @@ class _LnReaderSourcesScreenState extends State<LnReaderSourcesScreen> {
         .installed()
         .where((m) => sourceSearchMatches(_query, m.name, m.lang))
         .toList();
-    if (installed.isEmpty) {
+    final offer = _installing || _pendingSeeds > 0;
+    if (installed.isEmpty && !offer) {
       return EmptyState(
         icon: Icons.menu_book_outlined,
         message: _query.trim().isEmpty
@@ -312,13 +398,104 @@ class _LnReaderSourcesScreenState extends State<LnReaderSourcesScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
       children: [
-        _LnReaderCatalogCard(
-          entries: installed,
-          installedIds: installed.map((m) => m.id).toSet(),
-          onChanged: () => setState(() {}),
-          iconOnly: true, // Installed tab → compact trash icon
-        ),
+        if (offer) ...[
+          _seedOfferCard(installed.isEmpty),
+          const SizedBox(height: 12),
+        ],
+        if (installed.isNotEmpty)
+          _LnReaderCatalogCard(
+            entries: installed,
+            installedIds: installed.map((m) => m.id).toSet(),
+            onChanged: () => setState(() {}),
+            iconOnly: true, // Installed tab → compact trash icon
+          ),
       ],
+    );
+  }
+
+  /// The "these sources are available, install them" prompt.
+  ///
+  /// Sits above the installed list rather than replacing it, so a user who has
+  /// already installed a few sources of their own still sees both. It is the
+  /// whole reason the app ships with zero sources: nothing is downloaded and no
+  /// data is spent until the user chooses to.
+  Widget _seedOfferCard(bool nothingInstalled) {
+    if (_installing) {
+      return _cardShell(
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                'Installing sources… $_installedCount done',
+                style: AppText.body,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final n = _pendingSeeds;
+    return _cardShell(
+      onTap: () => _confirmInstallAll(n),
+      child: Row(
+        children: [
+          Icon(Icons.download_rounded, size: 20, color: AppColors.accent),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  nothingInstalled
+                      ? '$n novel sources available'
+                      : '$n more novel sources available',
+                  style: AppText.body.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'From the official LNReader repository · about 2.3 MB',
+                  style: AppText.caption.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.chevron_right_rounded,
+            size: 20,
+            color: AppColors.textSecondary,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _cardShell({required Widget child, VoidCallback? onTap}) {
+    final body = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: child,
+    );
+    if (onTap == null) return body;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: body,
+      ),
     );
   }
 

@@ -323,6 +323,18 @@ class AppLocalizationsJa extends AppLocalizations {
   String get settingsSectionAboutSummary => '更新、サポート、バージョン';
 
   @override
+  String get settingsSectionDownloadsSummaryNovels => 'ダウンロードしたチャプター、ストレージ';
+
+  @override
+  String get settingsSectionHistorySummaryNovels => '読んだ小説';
+
+  @override
+  String get settingsSectionNotificationsSummaryNovels => '新着チャプター通知';
+
+  @override
+  String get settingsSectionReadingSummaryNovels => '小説リーダーの設定';
+
+  @override
   String get couldNotExportLogs => 'ログを書き出せませんでした';
 
   @override
@@ -932,6 +944,24 @@ class AppLocalizationsJa extends AppLocalizations {
   String get onboardingIntro => 'アニメ、マンガ、小説をひとつのアプリで。好きなように設定できます。';
 
   @override
+  String get downloadsSubtitleNovel => 'ダウンロードしたチャプターを管理';
+
+  @override
+  String get historySubtitleNovels => '読んだ小説';
+
+  @override
+  String get listsOnly => 'リスト';
+
+  @override
+  String get notificationsSubtitleNovel => '購読中の小説の新着チャプター通知';
+
+  @override
+  String get onboardingIntroNovels => 'インストールしたすべてのソースから小説を。';
+
+  @override
+  String get readerSubtitleNovels => '小説リーダーの設定';
+
+  @override
   String get youChooseWhatsInside => '中身は自分で選べます';
 
   @override
@@ -942,6 +972,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get pickStreamingMangaOrNovels => '配信、マンガ、小説から選ぶ';
+
+  @override
+  String get pickNovels => '小説ソースを選択';
 
   @override
   String get pasteInARepositoryLink => 'リポジトリのリンクを貼り付ける';

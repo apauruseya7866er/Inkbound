@@ -14,7 +14,7 @@ ChapterDownload rec({
   chapterId: 'c1',
   chapterUrl: 'https://x/c1',
   chapterTitle: 'Chapter 1',
-  mode: ContentMode.manga,
+  mode: ContentMode.novel,
   status: status,
   pageCount: pageCount,
   pagesDone: pagesDone,
@@ -77,9 +77,11 @@ void main() {
       expect(ChapterDownload.fromJson({'nope': 1}), isNull);
     });
 
-    test('an unknown mode falls back to manga instead of throwing', () {
+    test('an unknown mode falls back to novel instead of throwing', () {
+      // A pre-fork record (or one out of a backup) can name any mode the app
+      // used to have, and the one this build shows has to pick it up.
       final j = rec().toJson()..['mode'] = 'audiobook';
-      expect(ChapterDownload.fromJson(j)!.mode, ContentMode.manga);
+      expect(ChapterDownload.fromJson(j)!.mode, ContentMode.novel);
     });
 
     test('published page paths survive a round trip', () {

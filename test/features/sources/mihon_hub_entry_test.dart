@@ -1,31 +1,31 @@
-// Task M8b: Mihon (manga extensions) gets a 4th hub row, mirroring how
+// Task M8b: Mihon (manga extensions) got a 4th hub row, mirroring how
 // CloudStream/Aniyomi already work — Android-gated, live-updating counts.
 //
 // Platform.isAndroid can't be faked in `flutter test` (it reports false on
 // the host running these tests — the same observation
 // `lib/core/mihon/mihon_provider.dart`'s doc comment makes about the channel
-// calls), so, like the existing CloudStream/Aniyomi row assertions in
-// `manga_novel_hub_entry_test.dart`, this file can't directly exercise the
-// row's on-Android appearance. What it CAN and does prove:
-//  - the row stays fully absent off-Android, same as CloudStream/Aniyomi;
-//  - a Mihon source's count/updates do NOT leak into the header total when
-//    the row itself is gated off — the exact place a broken
-//    `showMihon ? x : 0` guard would silently show up;
-//  - a `mihon:` active source id is excluded from `activeIsZangetsu`, so it
-//    no longer misbadges the Zangetsu row as ACTIVE (the bug the task
-//    specifically flagged as a risk);
-//  - the existing Zangetsu/CloudStream/Aniyomi rows and their counts are
-//    completely unaffected by the new row.
+// calls), so this file never exercised the row's on-Android appearance. What it
+// did pin was that a Mihon source stays invisible everywhere it shouldn't show
+// up: off-Android, in the TV view, in the Zangetsu row's count, in the header
+// total, and as an ACTIVE badge.
+//
+// Novel-only build: Mihon is never registered (its boot step in injector.dart
+// returns early), so the row isn't merely hidden off-Android — it is gone, and
+// so is the Zangetsu streaming row it used to be counted against. The two cases
+// that asserted "a Mihon source doesn't leak into the Zangetsu row's count" and
+// "…nor into the header total" died with those rows: the `showMihon ? x : 0`
+// guards they pinned no longer have a row to hide a count from. What is still
+// true — and what the remaining cases pin — is that a registered Mihon source
+// surfaces nowhere: no row on the phone, none on TV, and no ACTIVE badge from a
+// `mihon:` active id.
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/app_mode.dart';
-import 'package:watch_app/core/aniyomi/aniyomi_repo.dart';
 import 'package:watch_app/core/mihon/mihon_manager.dart';
 import 'package:watch_app/core/mihon/mihon_provider.dart';
 import 'package:watch_app/core/mihon/mihon_source_info.dart';
-import 'package:watch_app/core/mihon/mihon_update.dart';
 import 'package:watch_app/core/provider/cloudstream_provider.dart';
 import 'package:watch_app/core/provider/provider_manager.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
@@ -152,74 +152,7 @@ void main() {
   );
 
   testWidgets(
-    'the existing Zangetsu row count is unaffected by a registered Mihon '
-    'source',
-    (tester) async {
-      sl<MihonManager>().register(_mihonSrc(1, 'Manga One'));
-      await pump(tester);
-
-      // Only the 2 Zangetsu entries — the Mihon source must not leak into
-      // the Zangetsu row's count.
-      expect(find.text('2 sources'), findsOneWidget);
-    },
-  );
-
-  testWidgets(
-    "a registered Mihon source and its pending update don't leak into the "
-    'header total (the guard this task added: showMihon ? x : 0)',
-    (tester) async {
-      final mihon = sl<MihonManager>()..register(_mihonSrc(1, 'Manga One'));
-      mihon.checkerOverride = (url, codes) async => [
-            MihonUpdate(
-              pkg: 'p.1',
-              name: 'Manga One',
-              installedCode: 1,
-              availableCode: 2,
-              availableVersion: '2.0',
-              entry: AniyomiRepoEntry(
-                name: 'Manga One',
-                pkg: 'p.1',
-                apk: 'p.1.apk',
-                lang: 'en',
-                version: '2.0',
-                code: 2,
-                nsfw: false,
-                sources: const [],
-                repoBaseUrl: 'https://r/x',
-              ),
-            ),
-          ];
-      await mihon.checkRepoUpdates('https://r/x');
-      expect(mihon.updateCount, 1, reason: 'sanity: the update is real');
-
-      await pump(tester);
-
-      // Header total stays at 2 (the Zangetsu entries only) and no updates
-      // pill is shown — both would fail if the count/updates guard were
-      // ever made unconditional.
-      expect(find.text('2 sources ready'), findsOneWidget);
-      expect(find.textContaining('update'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    'a mihon: active id does not badge the Zangetsu row as ACTIVE',
-    (tester) async {
-      sl.unregister<ActiveSourceCubit>();
-      sl.registerSingleton<ActiveSourceCubit>(
-        ActiveSourceCubit(fallback: 'mihon:1'),
-      );
-      await pump(tester);
-
-      // Before this task, activeIsZangetsu didn't exclude mihon: ids, so the
-      // Zangetsu row would have shown ACTIVE here. Off-Android the Mihon row
-      // itself is hidden, so correctly nothing should show ACTIVE at all.
-      expect(find.text('ACTIVE'), findsNothing);
-    },
-  );
-
-  testWidgets(
-    '_activeSourceLabel resolves a registered mihon: id to its display name',
+    'a mihon: active id does not badge any row as ACTIVE',
     (tester) async {
       sl<MihonManager>().register(_mihonSrc(1, 'Manga One'));
       sl.unregister<ActiveSourceCubit>();
@@ -228,7 +161,38 @@ void main() {
       );
       await pump(tester);
 
-      expect(find.textContaining('Active: Manga One'), findsOneWidget);
-    },
-  );
-}
+         // The Mihon row is gone in this build, and the Zangetsu streaming row it
+         // used to be counted against is gone with it, so a `mihon:` id — which
+         // `activeIsZangetsu` excludes — cannot light anything up.
+         expect(find.text('ACTIVE'), findsNothing);
+         // Novel-only build: it is no longer NAMED either. A `mihon:` source can
+         // never be selected (the picker is novel-filtered) and Mihon is never
+         // booted, so "Active: Manga One" would point at a source the user
+         // cannot browse with. The header reports None instead.
+         expect(find.textContaining('Active: Manga One'), findsNothing);
+         expect(find.textContaining('Active: None'), findsOneWidget);
+       },
+     );
+
+    testWidgets(
+      'a non-novel active id is not reported as the active source',
+      (tester) async {
+        // The gate this replaced was prefix-only and so reported the truth for
+        // a novel id while waving through every other one. What matters now is
+        // the answer for a source this build cannot use, which is "none" —
+        // checked against a registered Mihon source, so the "it's registered,
+        // it would resolve" case is the one being excluded and not merely an
+        // id that happens to be unresolvable.
+        sl<MihonManager>().register(_mihonSrc(1, 'Manga One'));
+        sl.unregister<ActiveSourceCubit>();
+        sl.registerSingleton<ActiveSourceCubit>(
+          ActiveSourceCubit(fallback: 'mihon:1'),
+        );
+        await pump(tester);
+
+        expect(find.textContaining('Active: Manga One'), findsNothing);
+        expect(find.textContaining('Active: None'), findsOneWidget);
+      },
+    );
+  }
+

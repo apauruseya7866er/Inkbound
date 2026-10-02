@@ -1,9 +1,14 @@
-// Task 3: LNReader (novel sources) gets a hub row alongside Mihon, mirroring
+// Task 3: LNReader (novel sources) got a hub row, mirroring
 // `mihon_hub_entry_test.dart`. Unlike Mihon (Platform.isAndroid-gated),
 // LNReader is a JS provider available on every platform, so its row is
 // gated on `sl.isRegistered<LnReaderManager>()` instead — a test that never
 // registers LnReaderManager (e.g. manga_novel_hub_entry_test.dart) must keep
 // working unchanged.
+//
+// Novel-only build: this row is the hub's only ecosystem, under a "NOVEL"
+// header instead of "MANGA & NOVEL", and the header total is the novel source
+// count rather than a sum over every ecosystem. Mihon is never registered, so
+// there is no second reading row and no STREAMING section at all.
 //
 // Uses the same in-memory fake LnReaderExtensionService as
 // lnreader_sources_screen_test.dart — a real Hive box does file I/O that
@@ -166,12 +171,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('LNReader row shows up under MANGA & NOVEL with its source count',
+  testWidgets('LNReader row shows up under NOVEL with its source count',
       (tester) async {
     lnrService.seed(_pluginA);
     await pump(tester);
 
-    expect(find.text('MANGA & NOVEL'), findsOneWidget);
+    // Novel-only build: NOVEL is the only section left in the hub (Mihon, the
+    // other ecosystem it used to hold, is never registered), and the header
+    // total is the novel source count.
+    expect(find.text('NOVEL'), findsOneWidget);
+    expect(find.text('STREAMING'), findsNothing);
+    expect(find.text('MANGA & NOVEL'), findsNothing);
     expect(find.text('LNReader'), findsOneWidget);
     expect(find.text('Novel sources'), findsOneWidget);
     expect(find.text('1 sources'), findsOneWidget);
@@ -196,25 +206,27 @@ void main() {
       await sl.unregister<LnReaderExtensionService>();
       await pump(tester);
 
-      expect(find.text('MANGA & NOVEL'), findsNothing);
+      // With no ecosystem left to list, the whole section header goes too —
+      // it would otherwise be a label over nothing.
+      expect(find.text('NOVEL'), findsNothing);
       expect(find.text('LNReader'), findsNothing);
     },
   );
 
-  testWidgets(
-    'an lnr: active id badges the LNReader row ACTIVE and does not badge the '
-    'Zangetsu row',
-    (tester) async {
-      lnrService.seed(_pluginA);
-      await sl.unregister<ActiveSourceCubit>();
-      sl.registerSingleton<ActiveSourceCubit>(
-        ActiveSourceCubit(fallback: 'lnr:plugin-a'),
-      );
-      await pump(tester);
+  testWidgets('an lnr: active id badges the LNReader row ACTIVE', (
+    tester,
+  ) async {
+    lnrService.seed(_pluginA);
+    await sl.unregister<ActiveSourceCubit>();
+    sl.registerSingleton<ActiveSourceCubit>(
+      ActiveSourceCubit(fallback: 'lnr:plugin-a'),
+    );
+    await pump(tester);
 
-      expect(find.text('ACTIVE'), findsOneWidget);
-    },
-  );
+    // Exactly one badge, and it is on the LNReader row: the active source is
+    // a novel extension, so no other row may claim it.
+    expect(find.text('ACTIVE'), findsOneWidget);
+  });
 
   testWidgets(
     'a registered LNReader source is included in the header total',
@@ -222,8 +234,10 @@ void main() {
       lnrService.seed(_pluginA);
       await pump(tester);
 
-      // 2 Zangetsu entries + 1 LNReader source.
-      expect(find.text('3 sources ready'), findsOneWidget);
+      // The Zangetsu JS entries are not ecosystems in this build, so the
+      // total is the 1 novel source and the single ecosystem it lives under.
+      expect(find.text('1 sources ready'), findsOneWidget);
+      expect(find.textContaining('1 ecosystems'), findsOneWidget);
     },
   );
 }

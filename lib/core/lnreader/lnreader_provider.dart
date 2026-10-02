@@ -61,26 +61,64 @@ class LnReaderProvider implements BaseProvider, ReadingProvider {
     version: meta.version.isEmpty ? null : meta.version,
   );
 
-  /// A single "Popular" row, or null when the plugin returned nothing —
-  /// there's no separate "latest" concept surfaced here (unlike Mihon's two
-  /// rows), so this stays a one-call mirror rather than fetching twice.
-  ///
-  /// Delegates to [popular], which is what actually triggers the lazy
-  /// runtime build — no direct plugin call needed here.
+  /// "Popular" and "Latest" rows, skipping whichever came back empty.
   @override
   Future<List<HomeSection>?> getHome({String category = 'sub'}) async {
-    final items = await popular();
-    return items.isEmpty
-        ? null
-        : [
-            HomeSection(
-              title: 'Popular',
-              items: items,
-              // Paginable, so the "See all" grid can infinite-scroll — popular()
-              // already takes a page. (Mirrors Mihon/Aniyomi's `more`.)
-              more: BrowseMore(sourceId: sourceId, kind: 'lnr_popular'),
-            ),
-          ];
+    // Explicit ensureLoaded rather than delegating to popular()/latest(): the
+    // two calls below must not race the lazy runtime build, and Future.wait
+    // starts them together.
+    await manager.ensureLoaded(meta.id);
+    final filters = manager.filtersFor(meta.id);
+
+    // Both come from the same plugin call with a different flag, so a plugin
+    // that errors on one still contributes the other. LNReader has no separate
+    // latest method; `showLatestNovels` is the whole feature, and it was
+    // hardcoded false here, which is why novel sources only ever had one row.
+    final results = await Future.wait([
+      _fetchNovelList('popularNovels', [
+        1,
+        {'showLatestNovels': false, 'filters': filters},
+      ]).catchError((_) => <MediaItem>[]),
+      _fetchNovelList('popularNovels', [
+        1,
+        {'showLatestNovels': true, 'filters': filters},
+      ]).catchError((_) => <MediaItem>[]),
+    ]);
+    final popularItems = results[0];
+    final latestItems = results[1];
+
+    final sections = <HomeSection>[
+      if (popularItems.isNotEmpty)
+        HomeSection(
+          title: 'Popular',
+          items: popularItems,
+          // Paginable, so the "See all" grid can infinite-scroll; popular()
+          // already takes a page. (Mirrors Mihon/Aniyomi's `more`.)
+          more: BrowseMore(sourceId: sourceId, kind: 'lnr_popular'),
+        ),
+      if (latestItems.isNotEmpty)
+        HomeSection(
+          title: 'Latest',
+          items: latestItems,
+          more: BrowseMore(sourceId: sourceId, kind: 'lnr_latest'),
+        ),
+    ];
+    // Null rather than an empty list, so the caller's "this provider has no
+    // home" fallback still runs instead of rendering a source that gave nothing.
+    return sections.isEmpty ? null : sections;
+  }
+
+  /// The "latest additions" feed.
+  ///
+  /// The same plugin call as [popular] with `showLatestNovels` flipped, exposed
+  /// separately so `browseMore` can page it.
+  Future<List<MediaItem>> latest({int page = 1}) async {
+    await manager.ensureLoaded(meta.id);
+    final filters = manager.filtersFor(meta.id);
+    return _fetchNovelList('popularNovels', [
+      page,
+      {'showLatestNovels': true, 'filters': filters},
+    ]);
   }
 
   /// [category]/[dateRange] are unused — LNReader plugins have no sub/dub or

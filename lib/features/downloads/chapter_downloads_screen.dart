@@ -10,6 +10,7 @@ import '../../core/download/chapter_download_store.dart';
 import '../../core/download/chapter_downloader.dart';
 import '../../core/models/episode.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/ui/app_dialog.dart';
@@ -60,7 +61,11 @@ class _ChapterDownloadsScreenState extends State<ChapterDownloadsScreen> {
   @override
   Widget build(BuildContext context) {
     final store = sl<ChapterDownloadStore>();
-    final isNovel = widget.mode == ContentMode.novel;
+    // Novel-only build: this screen is only ever opened for Novel, so every
+    // title/icon/empty-state string below is the novel one. Left reading
+    // `widget.mode` so a stray manga call can't render "Manga downloads"
+    // above a list of novel chapters.
+    final isNovel = kNovelOnly || widget.mode == ContentMode.novel;
     final l10n = context.l10n;
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -524,7 +529,9 @@ void _openReader(
   final head = ordered.first;
   Navigator.of(context).push(
     MaterialPageRoute<void>(
-      builder: (_) => tapped.mode == ContentMode.novel
+      // Novel-only build: a manga chapter saved before the fork (or restored
+      // from a backup) opens in the novel reader rather than the manga one.
+      builder: (_) => kNovelOnly || tapped.mode == ContentMode.novel
           ? NovelReaderScreen(
               sourceId: head.sourceId,
               showId: head.showId,

@@ -7,6 +7,7 @@ import '../../core/models/home_row.dart';
 import '../../core/models/watch_status.dart';
 import '../../core/mode/content_mode.dart';
 import '../../core/mode/content_mode_cubit.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/repository/catalogue_repository.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -237,8 +238,14 @@ class _HomeRowsScreenState extends State<HomeRowsScreen> {
   /// decides whether a source backs the home at all.
   ZKind? _browseKind() {
     if (!ZModePrefs.enabled) return null;
+    // Novel-only build: the fallback must agree with home_cubit.dart's, or the
+    // editor resolves to `anilist::anime` — a layout key `allHomeLayouts()` no
+    // longer contains, so `homeLayoutFor` returns null and the editor quietly
+    // opens the source-backed branch instead of the Novel arrangement.
     final mode = sl.isRegistered<ContentModeCubit>()
         ? sl<ContentModeCubit>().state
+        : kNovelOnly
+        ? kOnlyMode
         : ContentMode.anime;
     return browseKindFor(mode, ZModePrefs.streamKind);
   }

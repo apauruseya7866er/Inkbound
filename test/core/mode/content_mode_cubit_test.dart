@@ -41,97 +41,44 @@ void main() {
     if (sl.isRegistered<SourceRepository>()) sl.unregister<SourceRepository>();
   });
 
-  test('defaults to anime and persists mode', () async {
+  // Novel-only build: there is one mode, so the questions the old suite asked
+  // ("which mode do we boot into?", "does a switch persist?") have one answer
+  // each, and the per-mode source memory is unreachable — setMode() returns
+  // before it for every mode but novel, so nothing is ever parked or restored.
+  // The gate itself and the boot safety net below are what's left to pin.
+  test('always restores novel, over a persisted mode from a pre-fork build',
+      () async {
     await ActiveSourceCubit.init();
     final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
     final cubit = await ContentModeCubit.create(active);
-    expect(cubit.state, ContentMode.anime);
+    expect(cubit.state, ContentMode.novel);
 
-    await cubit.setMode(ContentMode.manga);
-    expect(cubit.state, ContentMode.manga);
+    // An install that last sat on Manga (or Streaming) still has that on disk.
+    await Hive.box('content_mode').put('mode', 'manga');
 
     final reloaded = await ContentModeCubit.create(active);
-    expect(reloaded.state, ContentMode.manga);
+    expect(reloaded.state, ContentMode.novel);
   });
 
-  // Also pins the C.3 ordering trap: the outgoing source must be captured
-  // BEFORE the incoming mode's source is restored, or a switch parks the
-  // newly-restored source under the outgoing mode's key instead of what was
-  // really active there. A plain anime->manga->anime check wouldn't surface
-  // this on its own (the corruption lands in the mode you just left, not the
-  // one you land on) — the giveaway only shows up on the *next* switch back,
-  // which is why this test goes one hop further than a bare round trip.
-  test('remembers a separate active source per mode', () async {
+  test('setMode refuses anime and manga, and parks nothing for them', () async {
     await ActiveSourceCubit.init();
     final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
     final cubit = await ContentModeCubit.create(active);
 
-    active.setSource('js:animesrc');
-    await cubit.setMode(ContentMode.manga); // stores js:animesrc under src.anime
-    active.setSource('js:mangasrc');
-    await cubit.setMode(ContentMode.anime); // stores js:mangasrc under src.manga
-    expect(active.state, 'js:animesrc'); // anime source restored
-
-    await cubit.setMode(ContentMode.manga);
-    expect(active.state, 'js:mangasrc'); // manga source restored
-  });
-
-  // ── B: stale remembered source ─────────────────────────────────────────
-  test('does not restore a remembered source that no longer exists', () async {
-    await ActiveSourceCubit.init();
-    final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
-    final cubit = await ContentModeCubit.create(active);
-
-    active.setSource('js:animesrc');
-    await cubit.setMode(ContentMode.manga);
-    active.setSource('js:stale_manga_src');
-    await cubit.setMode(ContentMode.anime); // parks js:stale_manga_src under src.manga
-
-    // The manga source was uninstalled since it was parked.
-    sl.registerSingleton<SourceRepository>(
-      _FakeSourceRepository(['js:animesrc']),
-    );
-
-    await cubit.setMode(ContentMode.manga);
-    // Left alone rather than pointed at a source that no longer loads.
-    expect(active.state, 'js:animesrc');
-  });
-
-  test('a remembered source that still exists IS restored', () async {
-    await ActiveSourceCubit.init();
-    final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
-    final cubit = await ContentModeCubit.create(active);
-
-    active.setSource('js:animesrc');
-    await cubit.setMode(ContentMode.manga);
-    active.setSource('js:mangasrc');
-    await cubit.setMode(ContentMode.anime); // parks js:mangasrc under src.manga
-
-    sl.registerSingleton<SourceRepository>(
-      _FakeSourceRepository(['js:animesrc', 'js:mangasrc']),
-    );
-
-    await cubit.setMode(ContentMode.manga);
-    expect(active.state, 'js:mangasrc');
+    for (final m in [ContentMode.anime, ContentMode.manga]) {
+      await cubit.setMode(m);
+      expect(cubit.state, ContentMode.novel, reason: 'setMode($m)');
+    }
+    // A refused switch writes nothing: no mode, and no remembered source under
+    // a key no screen can ever ask for again.
+    expect(Hive.box('content_mode').get('mode'), isNull);
+    expect(Hive.box('content_mode').get('src.anime'), isNull);
+    expect(Hive.box('content_mode').get('src.manga'), isNull);
   });
 
   // ── C: mode-appropriate fallback (the "Novel shows an anime source" bug) ──
-  test('entering a reading mode with no remembered source lands on a source of '
-      'that mode, not the active anime source', () async {
-    await ActiveSourceCubit.init();
-    final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
-    final cubit = await ContentModeCubit.create(active);
-    active.setSource('allanime'); // an anime source is active
-    sl.registerSingleton<SourceRepository>(
-      _FakeSourceRepository(['allanime', 'lnr:wbnovel']),
-    );
-
-    await cubit.setMode(ContentMode.novel); // first time in novel — no memory
-    expect(active.state, 'lnr:wbnovel'); // fell back to the novel source
-  });
-
-  test('setMode keeps the current source when it already belongs to the mode',
-      () async {
+  test('ensureSourceForMode() keeps the current source when it already '
+      'belongs to the mode', () async {
     await ActiveSourceCubit.init();
     final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
     final cubit = await ContentModeCubit.create(active);
@@ -140,16 +87,15 @@ void main() {
       _FakeSourceRepository(['lnr:a', 'lnr:b']),
     );
 
-    await cubit.setMode(ContentMode.novel);
+    cubit.ensureSourceForMode();
     expect(active.state, 'lnr:a'); // not swapped to lnr:b — current pick fits
   });
 
-  test('ensureSourceForMode() self-corrects a reading mode stuck on an anime '
+  test('ensureSourceForMode() self-corrects a mode stuck on a non-novel '
       'source (boot safety net)', () async {
     await ActiveSourceCubit.init();
     final active = ActiveSourceCubit(box: Hive.box(ActiveSourceCubit.boxName));
     final cubit = await ContentModeCubit.create(active);
-    await cubit.setMode(ContentMode.novel); // mode is novel (no repo yet → no-op)
     active.setSource('allanime'); // simulate boot restoring an anime source
     sl.registerSingleton<SourceRepository>(
       _FakeSourceRepository(['allanime', 'lnr:wbnovel']),

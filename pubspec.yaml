@@ -266,9 +266,16 @@ flutter:
   generate: true
   uses-material-design: true
   assets:
-    # No built-in providers — sources are installed from the Zangetsu repo.
-    # Extractors stay bundled (shared video-host helpers, not providers).
+    # Novel sources are NOT bundled. They come from the official LNReader plugin
+    # repo, whose index URL is seeded on first launch (see
+    # lib/core/lnreader/seed_repo.dart) — 284 maintained sources, and scraper
+    # fixes arrive upstream instead of being frozen into a release.
+    #
+    # Video extractors are shared host helpers, not sources, so they stay
+    # bundled. The novel-only build skips loading them (see injector.dart);
+    # keeping the asset means flipping kNovelOnly back needs no pubspec change.
     - extractors/example_embed.js
+
     - extractors/okru.js
     - extractors/mp4upload.js
     - extractors/streamlare.js

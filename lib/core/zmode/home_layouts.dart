@@ -1,4 +1,5 @@
 import '../../features/home/cubit/home_rows_composer.dart';
+import '../mode/novel_only.dart';
 import 'anilist_catalogue.dart';
 import 'mal_catalogue.dart';
 import 'simkl_catalogue.dart';
@@ -45,7 +46,11 @@ class HomeLayout {
 /// from TMDB or Simkl. Only one side of each pair is live at a time (the
 /// metadata provider setting decides), but all of them are listed: arranging
 /// the one you are about to switch to shouldn't require switching first.
-List<HomeLayout> allHomeLayouts() => [
+///
+/// Novel-only build: the list is cut down to the Novel layout pair, so the
+/// Settings picker offers two arrangements instead of eight and none of them
+/// edits a row this build never renders.
+List<HomeLayout> _allHomeLayouts() => [
   for (final kind in const [ZKind.anime, ZKind.manga, ZKind.novel]) ...[
     HomeLayout(
       key: layoutKeyFor(sourceId: '', zModeOn: true, browseKind: kind),
@@ -83,6 +88,16 @@ List<HomeLayout> allHomeLayouts() => [
     sectionTitles: SimklCatalogue.rowTitles(),
   ),
 ];
+
+/// The layouts this build offers. Novel-only build: the Novel pair only — the
+/// anime, manga, TMDB and Simkl arrangements belong to catalogues and rows
+/// Home can no longer reach. Falls through to the full list unchanged when the
+/// gate is off.
+List<HomeLayout> allHomeLayouts() {
+  final all = _allHomeLayouts();
+  if (!kNovelOnly) return all;
+  return all.where((l) => l.kind == ZKind.novel).toList(growable: false);
+}
 
 /// The layout stored under [key], or null when it isn't one of the metadata
 /// layouts (a source-backed home, which has no fixed row list).

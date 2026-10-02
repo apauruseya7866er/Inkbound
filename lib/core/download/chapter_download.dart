@@ -1,4 +1,5 @@
 import '../mode/content_mode.dart';
+import '../mode/novel_only.dart';
 
 enum ChapterDownloadStatus { queued, downloading, done, failed }
 
@@ -163,10 +164,18 @@ class ChapterDownload {
       chapterId: '${m['chapterId'] ?? ''}',
       chapterUrl: '${m['chapterUrl'] ?? ''}',
       chapterTitle: '${m['chapterTitle'] ?? ''}',
-      mode: ContentMode.values.firstWhere(
-        (e) => e.name == m['mode'],
-        orElse: () => ContentMode.manga,
-      ),
+      // Novel-only build: a row persisted by a pre-fork build names Manga or
+      // Streaming, and the old default here was Manga too — but both are still
+      // valid enum names, so gating on `orElse` would never fire for them. The
+      // gate is on the MATCH, so a pre-fork row decodes as Novel and is listed
+      // by the one chapter-downloads screen this build shows, instead of being
+      // invisible because its mode has no screen.
+      mode: kNovelOnly
+          ? kOnlyMode
+          : ContentMode.values.firstWhere(
+              (e) => e.name == m['mode'],
+              orElse: () => ContentMode.manga,
+            ),
       // Anything caught mid-flight when the app died is failed, not
       // downloading — otherwise it sits at a progress bar that never moves.
       status: switch (m['status']) {

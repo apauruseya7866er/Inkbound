@@ -94,6 +94,14 @@ List<HomeSection> providerRowSections(
   final firstRepeatsAsRow =
       firstId.startsWith('ani:') ||
       firstId.startsWith('mihon:') ||
+      // A per-source catalogue. Popular and Latest are both additional rows
+      // here, neither is the hero, so both must be kept.
+      //
+      // Without this, an LNReader source returning two sections hit the
+      // `sublist(1)` branch and silently lost its Popular row on phone — the
+      // only symptom being that a row had gone missing, with nothing to point at
+      // why. It was safe only while the provider returned exactly one section.
+      firstId.startsWith('lnr:') ||
       firstId == ZmodeIds.sourceId;
   return firstRepeatsAsRow ? sections : sections.sublist(1);
 }

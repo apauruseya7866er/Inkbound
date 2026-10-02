@@ -7,6 +7,7 @@ import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
 import '../../core/lnreader/lnreader_manager.dart';
 import '../../core/mihon/mihon_manager.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/models/provider_info.dart';
 import '../../core/provider/cloudstream_provider.dart';
 import '../../core/provider/provider_manager.dart';
@@ -18,6 +19,7 @@ import '../../core/theme/app_text.dart';
 import '../../core/tv/tv_back_button.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../core/ui/source_switcher.dart';
+import '../../core/zmode/zmode_ids.dart';
 import 'aniyomi_sources_screen.dart';
 import 'bloc/sources_state.dart';
 import 'cloudstream_sources_screen.dart';
@@ -100,11 +102,21 @@ class _HubPhoneView extends StatelessWidget {
     // same purpose the Mihon platform check serves.
     final showLnReader = sl.isRegistered<LnReaderManager>();
 
+    // Novel-only build: Mihon and Aniyomi are never registered (see
+    // injector.dart), so these three rows are forced off — the STREAMING
+    // section would otherwise show permanently empty ecosystems. Mihon and
+    // CloudStream are additionally gated so a phone build that somehow still
+    // holds the registrations can't reach them.
+    final showStreaming = !kNovelOnly;
+    final csRow = showCs && showStreaming;
+    final aniRow = showAniyomi && showStreaming;
+    final mihonRow = showMihon && showStreaming;
+
     final csGroups = sl<CloudStreamManager>().repoGroups;
     final csInstalled = csGroups.fold<int>(0, (s, g) => s + g.sources.length);
     final csRepos = csGroups.length;
-    final aniCount = sl<AniyomiManager>().all.length;
-    final mihonCount = sl<MihonManager>().all.length;
+    final aniCount = aniRow ? sl<AniyomiManager>().all.length : 0;
+    final mihonCount = mihonRow ? sl<MihonManager>().all.length : 0;
     final lnrCount = showLnReader
         ? sl<LnReaderManager>().installedSources.length
         : 0;
@@ -117,22 +129,34 @@ class _HubPhoneView extends StatelessWidget {
       installed: sl<ProviderRegistry>().getAll(),
       repos: sl<ProviderReposRegistry>().getAll(),
     ).updatableKeys.length;
-    final csUpdates = showCs ? sl<CloudStreamManager>().updateCount : 0;
-    final aniUpdates = showAniyomi ? sl<AniyomiManager>().updateCount : 0;
-    final mihonUpdates = showMihon ? sl<MihonManager>().updateCount : 0;
+    final csUpdates = csRow ? sl<CloudStreamManager>().updateCount : 0;
+    final aniUpdates = aniRow ? sl<AniyomiManager>().updateCount : 0;
+    final mihonUpdates = mihonRow ? sl<MihonManager>().updateCount : 0;
     final totalUpdates = zUpdates + csUpdates + aniUpdates + mihonUpdates;
 
-    final total =
-        zangetsuCount +
-        (showCs ? csInstalled : 0) +
-        (showAniyomi ? aniCount : 0) +
-        (showMihon ? mihonCount : 0) +
-        (showLnReader ? lnrCount : 0);
-    final ecoCount =
-        1 + (showCs ? 1 : 0) + (showAniyomi ? 1 : 0) + (showMihon ? 1 : 0);
+    final total = kNovelOnly
+        ? lnrCount
+        : zangetsuCount +
+              (csRow ? csInstalled : 0) +
+              (aniRow ? aniCount : 0) +
+              (mihonRow ? mihonCount : 0) +
+              (showLnReader ? lnrCount : 0);
+    final ecoCount = kNovelOnly
+        ? 1
+        : 1 +
+              (csRow ? 1 : 0) +
+              (aniRow ? 1 : 0) +
+              (mihonRow ? 1 : 0);
+
 
     final activeId = sl<ActiveSourceCubit>().state;
-    final activeName = activeId.isEmpty
+    // Novel-only build: never name a source this build can't browse with. The
+    // picker is filtered to novel, so an anime id can only get here via a
+    // pre-fork persisted pick or [ActiveSourceCubit]'s hardcoded anime
+    // fallback — and "Active: allanime" in a novel-only app is a lie the user
+    // can do nothing with. Report "none" instead.
+    final activeName =
+        activeId.isEmpty || (kNovelOnly && !_isNovelSourceId(activeId))
         ? context.l10n.subtitleOutlineNone
         : _activeSourceLabel(activeId);
     final activeIsCs = activeId.startsWith('cs:');
@@ -167,51 +191,55 @@ class _HubPhoneView extends StatelessWidget {
             // ecosystem count (ecoCount itself is untouched, still just
             // Zangetsu/CS/Aniyomi/Mihon), just the header copy matching
             // what's on screen.
-            ecoCount: ecoCount + 1,
+            ecoCount: kNovelOnly ? ecoCount : ecoCount + 1,
             activeName: activeName,
             totalUpdates: totalUpdates,
           ),
           const SizedBox(height: 24),
-          const _SectionLabel('STREAMING'),
-          const SizedBox(height: 12),
-          _EcoRow(
-            icon: Icons.dns_rounded,
-            title: context.l10n.zangetsu,
-            desc: 'Built-in JS providers',
-            info: '$zangetsuCount sources',
-            // Reading sources are Zangetsu providers too (activeIsZangetsu
-            // alone doesn't distinguish), so exclude them here — the Manga &
-            // Novel row owns the badge when a reading source is active. When
-            // the active source is anime/movie, activeIsReading is false and
-            // this is byte-identical to plain activeIsZangetsu, as before.
-            active: activeIsZangetsu && !activeIsReading,
-            updateCount: zUpdates,
-            onTap: () => open(const ZangetsuSourcesScreen()),
-          ),
-          if (showCs) ...[
+          // Novel-only build: with no streaming ecosystem left to list, the
+          // STREAMING header would be a label over nothing.
+          if (showStreaming) ...[
+            const _SectionLabel('STREAMING'),
             const SizedBox(height: 12),
             _EcoRow(
-              icon: Icons.extension_outlined,
-              title: context.l10n.cloudStream,
-              desc: 'CloudStream extensions',
-              info:
-                  '$csInstalled sources · $csRepos repo${csRepos == 1 ? '' : 's'}',
-              active: activeIsCs,
-              updateCount: csUpdates,
-              onTap: () => open(const CloudStreamSourcesScreen()),
+              icon: Icons.dns_rounded,
+              title: context.l10n.zangetsu,
+              desc: 'Built-in JS providers',
+              info: '$zangetsuCount sources',
+              // Reading sources are Zangetsu providers too (activeIsZangetsu
+              // alone doesn't distinguish), so exclude them here — the Manga &
+              // Novel row owns the badge when a reading source is active. When
+              // the active source is anime/movie, activeIsReading is false and
+              // this is byte-identical to plain activeIsZangetsu, as before.
+              active: activeIsZangetsu && !activeIsReading,
+              updateCount: zUpdates,
+              onTap: () => open(const ZangetsuSourcesScreen()),
             ),
-          ],
-          if (showAniyomi) ...[
-            const SizedBox(height: 12),
-            _EcoRow(
-              icon: Icons.movie_filter_outlined,
-              title: context.l10n.aniyomi,
-              desc: 'Aniyomi extensions',
-              info: '$aniCount sources',
-              active: activeIsAni,
-              updateCount: aniUpdates,
-              onTap: () => open(const AniyomiSourcesScreen()),
-            ),
+            if (csRow) ...[
+              const SizedBox(height: 12),
+              _EcoRow(
+                icon: Icons.extension_outlined,
+                title: context.l10n.cloudStream,
+                desc: 'CloudStream extensions',
+                info:
+                    '$csInstalled sources · $csRepos repo${csRepos == 1 ? '' : 's'}',
+                active: activeIsCs,
+                updateCount: csUpdates,
+                onTap: () => open(const CloudStreamSourcesScreen()),
+              ),
+            ],
+            if (aniRow) ...[
+              const SizedBox(height: 12),
+              _EcoRow(
+                icon: Icons.movie_filter_outlined,
+                title: context.l10n.aniyomi,
+                desc: 'Aniyomi extensions',
+                info: '$aniCount sources',
+                active: activeIsAni,
+                updateCount: aniUpdates,
+                onTap: () => open(const AniyomiSourcesScreen()),
+              ),
+            ],
           ],
           // Reading ecosystems live under their own header so a manga/novel
           // source never reads as a streaming one. Mihon (manga) and LNReader
@@ -223,11 +251,13 @@ class _HubPhoneView extends StatelessWidget {
           // LNReader is gated on registration (see showLnReader above), so
           // the header only renders when at least one row will follow it —
           // otherwise off-Android it would show as a header with no rows.
-          if (showMihon || showLnReader) ...[
+          if (mihonRow || showLnReader) ...[
             const SizedBox(height: 28),
-            const _SectionLabel('MANGA & NOVEL'),
+            // Novel-only build: Mihon is the other row this header used to
+            // have, so the label names the one ecosystem that is left.
+            _SectionLabel(kNovelOnly ? 'NOVEL' : 'MANGA & NOVEL'),
             const SizedBox(height: 12),
-            if (showMihon)
+            if (mihonRow) ...[
               _EcoRow(
                 icon: Icons.menu_book_outlined,
                 title: context.l10n.mihon,
@@ -237,7 +267,8 @@ class _HubPhoneView extends StatelessWidget {
                 updateCount: mihonUpdates,
                 onTap: () => open(const MihonSourcesScreen()),
               ),
-            if (showMihon && showLnReader) const SizedBox(height: 12),
+              if (showLnReader) const SizedBox(height: 12),
+            ],
             if (showLnReader)
               _EcoRow(
                 icon: Icons.auto_stories_outlined,
@@ -268,6 +299,24 @@ class _SectionLabel extends StatelessWidget {
     padding: const EdgeInsets.only(left: 4),
     child: Text(text, style: AppText.overline),
   );
+}
+
+/// Whether [id] names a source this build can browse with. Novel-only build:
+/// the LNReader prefix, or a Zangetsu JS provider the registry itself types as
+/// novel. Deliberately answers from prefixes and the registry rather than from
+/// the bucket lists, so it works before any source is installed.
+bool _isNovelSourceId(String id) {
+  if (id.isEmpty) return false;
+  if (id.startsWith('lnr:')) return true;
+  // The `zm` pseudo-source is the Z Mode metadata catalogue, which in this
+  // build is always the novel catalogue (see browseKindFor).
+  if (id == ZmodeIds.sourceId) return true;
+  try {
+    return sourceTypeOf(id) == ProviderType.novel;
+  } catch (_) {
+    // The registry may not be up yet. Not knowing is not evidence of novel.
+    return false;
+  }
 }
 
 /// Resolves an active-source id to its display name, mirroring the Settings

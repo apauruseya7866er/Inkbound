@@ -146,19 +146,26 @@ void main() {
     expect(text.html, '<p>chapter body</p>');
   });
 
-  test('getHome() delegates to popular() and also builds the runtime', () async {
+  test('getHome() returns both a Popular and a Latest row', () async {
     expect(manager.runtimeBuilt, isFalse);
 
     final sections = await provider.getHome();
 
     expect(manager.runtimeBuilt, isTrue);
-    expect(sections, hasLength(1));
-    expect(sections!.first.title, 'Popular');
-    expect(sections.first.items, hasLength(1));
-    expect(sections.first.items.first.title, 'N1');
-    // Paginable → carries a BrowseMore so "See all" can infinite-scroll.
-    expect(sections.first.more?.kind, 'lnr_popular');
-    expect(sections.first.more?.sourceId, provider.sourceId);
+    // Two feeds now, from the same plugin call with `showLatestNovels` flipped.
+    expect(sections, hasLength(2));
+
+    final popular = sections!.firstWhere((s) => s.title == 'Popular');
+    final latest = sections.firstWhere((s) => s.title == 'Latest');
+    expect(popular.items, hasLength(1));
+    expect(popular.items.first.title, 'N1');
+    // Paginable - carries a BrowseMore so "See all" can infinite-scroll.
+    expect(popular.more?.kind, 'lnr_popular');
+    expect(popular.more?.sourceId, provider.sourceId);
+    // The Latest row needs its own kind, or "See all" silently returns nothing
+    // (`browseMore` sends an unrecognised kind to `default: const []`).
+    expect(latest.more?.kind, 'lnr_latest');
+    expect(latest.more?.sourceId, provider.sourceId);
   });
 
   test('getVideoSources() is always empty and never touches the runtime', () async {

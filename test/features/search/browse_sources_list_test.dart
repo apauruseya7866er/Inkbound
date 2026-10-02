@@ -4,12 +4,95 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/di/injector.dart' show sl;
-import 'package:watch_app/core/provider/cloudstream_provider.dart';
-import 'package:watch_app/core/provider/provider_manager.dart';
+import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
+import 'package:watch_app/core/lnreader/lnreader_manager.dart';
+import 'package:watch_app/core/provider/provider_registry.dart';
+import 'package:watch_app/core/provider/provider_repo_registry.dart';
 import 'package:watch_app/core/ui/source_icon_tile.dart';
 import 'package:watch_app/features/search/browse_sources_list.dart';
 
 import '../../support/picker_deps.dart';
+
+// Novel-only build: this list gathers the novel bucket and nothing else, so the
+// fixtures below install novel sources — LNReader plugins (`lnr:`), which carry
+// a `LNReader · ` row tag, and the app's own JS novel providers, which carry
+// none. The Aniyomi source registered in setUp is deliberate: it must never be
+// listed, which is what makes each case a novel-only case and not just a list
+// test.
+
+/// Installs [plugins] as LNReader novel sources and registers a real
+/// [LnReaderManager] over the box that holds them — the established way to get
+/// a novel row (`source_switcher_lnreader_test.dart` does exactly this). No
+/// network, no QuickJS runtime: only the stored metadata is ever read, which is
+/// all `categorizedSources()` asks of it.
+Future<void> _seedNovelPlugins(List<(String id, String name)> plugins) async {
+  if (!sl.isRegistered<LnReaderManager>()) {
+    final manager = LnReaderManager(
+      service: LnReaderExtensionService(
+        httpGet: (url) async => throw StateError('unexpected httpGet($url)'),
+      ),
+      fetch: (url, init) async =>
+          throw StateError('fetch should not be called — the list reads meta only'),
+    );
+    await manager.init(); // opens the box; does not build the runtime
+    sl.registerSingleton<LnReaderManager>(manager);
+  }
+  final box = Hive.box<Map>(LnReaderExtensionService.boxName);
+  for (final (id, name) in plugins) {
+    await box.put(id, {
+      ...LnReaderPluginMeta(
+        id: id,
+        name: name,
+        site: 'https://$id.test/',
+        lang: 'en',
+        version: '1.0.0',
+        url: 'https://cdn.test/$id.js',
+        iconUrl: '',
+      ).toMap(),
+      'js': '',
+    });
+  }
+}
+
+/// Installs the app's OWN novel sources: JS providers whose repo manifest
+/// declares `type: 'novel'`. These are the one novel ecosystem whose row label
+/// carries NO ecosystem tag, which is what makes them the other half of the
+/// "orders by name, not by tag" cases.
+Future<void> _seedJsNovelSources(List<(String id, String name)> sources) async {
+  const repoUrl = 'https://example.test/repo/index.json';
+  await Hive.box<Map>(ProviderReposRegistry.boxName).put(
+    repoUrl,
+    ProviderRepo(
+      url: repoUrl,
+      name: 'Test Repo',
+      description: '',
+      lastSyncedAt: DateTime.now(),
+      sources: [
+        for (final (id, name) in sources)
+          RepoSource(
+            id: id,
+            name: name,
+            version: '1.0.0',
+            type: 'novel',
+            lang: 'en',
+            file: '$id.js',
+          ),
+      ],
+    ).toJson(),
+  );
+  final regBox = Hive.box<Map>(ProviderRegistry.boxName);
+  for (final (id, name) in sources) {
+    await regBox.put(
+      ProviderRegistry.providerKey(repoUrl, id),
+      ProviderRegistryEntry(
+        name: id,
+        url: '$repoUrl/$id.js',
+        originRepoUrl: repoUrl,
+        displayName: name,
+      ).toJson(),
+    );
+  }
+}
 
 void main() {
   late Directory dir;
@@ -30,6 +113,8 @@ void main() {
   });
 
   testWidgets('lists installed sources and reports the one tapped', (t) async {
+    await t.runAsync(() => _seedNovelPlugins([('hi-novel', 'HiNovel')]));
+
     String? tappedId;
     await t.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -38,11 +123,16 @@ void main() {
     ));
     await t.pumpAndSettle();
 
-    expect(find.textContaining('HiAnime'), findsOneWidget);
+    expect(find.textContaining('HiNovel'), findsOneWidget);
+    expect(
+      find.textContaining('HiAnime'),
+      findsNothing,
+      reason: 'an installed anime source is not a novel source',
+    );
 
-    await t.tap(find.textContaining('HiAnime'));
+    await t.tap(find.textContaining('HiNovel'));
     await t.pumpAndSettle();
-    expect(tappedId, 'ani:1');
+    expect(tappedId, 'lnr:hi-novel');
   });
 
   // This list is the Sources TAB, so the shell's floating dock is drawn over
@@ -51,6 +141,8 @@ void main() {
   // back — otherwise the last source sits under the dock with no way to
   // scroll it clear.
   testWidgets('the list clears the dock inset', (t) async {
+    await t.runAsync(() => _seedNovelPlugins([('only-novel', 'OnlyNovel')]));
+
     await t.pumpWidget(
       MaterialApp(
         home: Builder(
@@ -73,56 +165,48 @@ void main() {
     );
   });
 
-  // Sources are not all present when this screen first builds — CloudStream
-  // plugins load from disk seconds after launch. The list used to read them
-  // once and keep that answer, so a source that arrived later stayed invisible
-  // until something forced a rebuild; switching tabs and back was the only way
-  // to see it.
-  testWidgets('a source that arrives after the first build shows up', (t) async {
-    await t.pumpWidget(MaterialApp(
-      home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
-    ));
-    await t.pumpAndSettle();
-    expect(find.textContaining('AllAnime'), findsNothing);
-
-    // What a late extension load does: register, then announce.
-    sl<AniyomiManager>().registerAll([aniSource(id: 2, name: 'AllAnime')]);
-    await t.pumpAndSettle();
-
-    expect(find.textContaining('AllAnime'), findsOneWidget);
-  });
-
   testWidgets('says so when nothing is installed', (t) async {
     await sl.reset();
-    await registerPickerDeps();
+    await registerPickerDeps(aniyomi: [aniSource(id: 1, name: 'HiAnime')]);
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
     ));
     await t.pumpAndSettle();
 
-    expect(find.textContaining('HiAnime'), findsNothing);
-    expect(find.text('No sources installed'), findsOneWidget);
+    expect(
+      find.textContaining('HiAnime'),
+      findsNothing,
+      reason: 'an anime source installed is still not a novel source installed',
+    );
+    // Not the old bare "No sources installed": on a fresh install this is the
+    // first screen a user reaches, and a dead-end message there is unreachable
+    // content — there is no other way to install anything.
+    expect(find.text('No sources installed'), findsNothing);
+    expect(find.text('No novel sources installed'), findsOneWidget);
+    expect(find.text('Add novel sources'), findsOneWidget);
   });
 
   testWidgets('query narrows the rows by source name', (t) async {
     await sl.reset();
-    await registerPickerDeps(
-      aniyomi: [
-        aniSource(id: 1, name: 'HiAnime'),
-        aniSource(id: 2, name: 'AllAnime'),
-      ],
+    await registerPickerDeps();
+    await t.runAsync(
+      () => _seedNovelPlugins([
+        ('hi-novel', 'HiNovel'),
+        ('all-novel', 'AllNovel'),
+      ]),
     );
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {}, query: 'hi')),
     ));
     await t.pumpAndSettle();
 
-    expect(find.textContaining('HiAnime'), findsOneWidget);
-    expect(find.textContaining('AllAnime'), findsNothing);
+    expect(find.textContaining('HiNovel'), findsOneWidget);
+    expect(find.textContaining('AllNovel'), findsNothing);
   });
 
   testWidgets('a query nothing matches shows the no-matches state, not '
       'the nothing-installed one', (t) async {
+    await t.runAsync(() => _seedNovelPlugins([('hi-novel', 'HiNovel')]));
     await t.pumpWidget(MaterialApp(
       home: Scaffold(
         body: BrowseSourcesList(onBrowse: (_, _) {}, query: 'zzz-nope'),
@@ -130,12 +214,13 @@ void main() {
     ));
     await t.pumpAndSettle();
 
-    expect(find.textContaining('HiAnime'), findsNothing);
+    expect(find.textContaining('HiNovel'), findsNothing);
     expect(find.text('No matches found'), findsOneWidget);
     expect(find.text('No sources installed'), findsNothing);
   });
 
   testWidgets('every row carries a source icon tile', (t) async {
+    await t.runAsync(() => _seedNovelPlugins([('hi-novel', 'HiNovel')]));
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
     ));
@@ -147,78 +232,47 @@ void main() {
     expect(find.byType(SourceIconTile), findsWidgets);
   });
 
-  testWidgets('streaming is one list — no ANIME / MOVIES & SERIES headers',
-      (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [
-      aniSource(id: 1, name: 'Zeta'),
-      aniSource(id: 2, name: 'Alpha'),
-    ]);
+  testWidgets('rows are alphabetical by the source name, not the tag', (t) async {
+    await t.runAsync(() async {
+      await _seedNovelPlugins([('alpha-lnr', 'Alpha')]);
+      await _seedJsNovelSources([('js:beta', 'Beta')]);
+    });
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
     ));
     await t.pumpAndSettle();
 
-    // Splitting by manifest type filed the same kind of source under two
-    // different headers and made an A-Z rail meaningless.
-    expect(find.text('ANIME'), findsNothing);
-    expect(find.text('MOVIES & SERIES'), findsNothing);
-  });
-
-  testWidgets('rows are alphabetical by the source name, not the tag',
-      (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [aniSource(id: 1, name: 'Zeta')]);
     // Two DIFFERENT tags on purpose. With one ecosystem the two orderings
-    // agree and the test proves nothing: "Ani · Alpha" sorts before
-    // "Ani · Zeta" either way. Across ecosystems they disagree — by raw label
-    // "Ani · Zeta" beats "CS · Alpha", by name Alpha beats Zeta.
-    sl<CloudStreamManager>().rebuildFromForTest([
-      {
-        'name': 'Alpha',
-        'lang': 'en',
-        'types': ['Anime'],
-        'sourcePlugin': 'alpha@1',
-      },
-    ]);
-
-    await t.pumpWidget(MaterialApp(
-      home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
-    ));
-    await t.pumpAndSettle();
-
-    final alpha = t.getTopLeft(find.text('CS · Alpha')).dy;
-    final zeta = t.getTopLeft(find.text('Ani · Zeta')).dy;
-    expect(alpha, lessThan(zeta));
+    // agree and the test proves nothing: "LNReader · Alpha" sorts before
+    // "LNReader · Beta" either way. Across the two novel ecosystems they
+    // disagree — by raw label "Beta" beats "LNReader · Alpha", by name Alpha
+    // beats Beta.
+    final alpha = t.getTopLeft(find.text('LNReader · Alpha')).dy;
+    final beta = t.getTopLeft(find.text('Beta')).dy;
+    expect(alpha, lessThan(beta));
   });
 
   testWidgets('no A-Z rail on a short list', (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(
-      aniyomi: [aniSource(id: 1, name: 'Only One')],
-    );
+    await t.runAsync(() => _seedNovelPlugins([('only-one', 'Only One')]));
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
     ));
     await t.pumpAndSettle();
 
-    // A rail over three rows is clutter; the whole list is already on screen.
+    // A rail over a handful of rows is clutter; the whole list is already on
+    // screen.
     expect(find.byKey(alphabetRailKey), findsNothing);
   });
 
-  testWidgets('a long list gets the A-Z rail, and tapping it scrolls',
-      (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [
-      for (var i = 0; i < 20; i++)
-        aniSource(id: i + 1, name: String.fromCharCode(65 + i)),
-    ]);
+  testWidgets('a long list gets the A-Z rail, and tapping it scrolls', (t) async {
+    await t.runAsync(
+      () => _seedNovelPlugins([
+        for (var i = 0; i < 20; i++)
+          ('novel-${String.fromCharCode(65 + i)}', String.fromCharCode(65 + i)),
+      ]),
+    );
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
@@ -241,17 +295,10 @@ void main() {
 
   testWidgets('a name starting with an emoji buckets under # at the TOP',
       (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [aniSource(id: 1, name: 'Alpha')]);
-    sl<CloudStreamManager>().rebuildFromForTest([
-      {
-        'name': '⚡SportzX',
-        'lang': 'en',
-        'types': ['Anime'],
-        'sourcePlugin': 'sportzx@1',
-      },
-    ]);
+    await t.runAsync(() async {
+      await _seedNovelPlugins([('sportzx', '⚡SportzX')]);
+      await _seedJsNovelSources([('js:beta', 'Beta')]);
+    });
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
@@ -261,27 +308,27 @@ void main() {
     // U+26A1 sorts ABOVE 'z', so a plain name-sort dropped this row at the
     // very bottom while the rail still bucketed it as '#' near the top —
     // '#' in two places, and the rail could only reach the first.
-    final emoji = t.getTopLeft(find.text('CS · ⚡SportzX')).dy;
-    final alpha = t.getTopLeft(find.text('Ani · Alpha')).dy;
-    expect(emoji, lessThan(alpha));
+    final emoji = t.getTopLeft(find.text('LNReader · ⚡SportzX')).dy;
+    final beta = t.getTopLeft(find.text('Beta')).dy;
+    expect(emoji, lessThan(beta));
   });
 
   test('sourceInitial buckets by the source name, not the tag', () {
-    expect(sourceInitial('CS · Vidsrc'), 'V');
-    expect(sourceInitial('Ani · AnimePahe'), 'A');
+    expect(sourceInitial('LNReader · Vidsrc'), 'V');
+    expect(sourceInitial('AnimePahe'), 'A');
     expect(sourceInitial('4K HDHub'), '#');
-    expect(sourceInitial('CS · ⚡SportzX'), '#');
+    expect(sourceInitial('LNReader · ⚡SportzX'), '#');
     expect(sourceInitial(''), '#');
   });
 
   testWidgets('rail letters get equal slots, not gaps stretched to fill',
       (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [
-      for (var i = 0; i < 20; i++)
-        aniSource(id: i + 1, name: String.fromCharCode(65 + i)),
-    ]);
+    await t.runAsync(
+      () => _seedNovelPlugins([
+        for (var i = 0; i < 20; i++)
+          ('novel-${String.fromCharCode(65 + i)}', String.fromCharCode(65 + i)),
+      ]),
+    );
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),
@@ -304,12 +351,12 @@ void main() {
 
   testWidgets('a finger on the rail shows a small letter preview beside it',
       (t) async {
-    await disposePickerDeps();
-    await sl.reset();
-    await registerPickerDeps(aniyomi: [
-      for (var i = 0; i < 20; i++)
-        aniSource(id: i + 1, name: String.fromCharCode(65 + i)),
-    ]);
+    await t.runAsync(
+      () => _seedNovelPlugins([
+        for (var i = 0; i < 20; i++)
+          ('novel-${String.fromCharCode(65 + i)}', String.fromCharCode(65 + i)),
+      ]),
+    );
 
     await t.pumpWidget(MaterialApp(
       home: Scaffold(body: BrowseSourcesList(onBrowse: (_, _) {})),

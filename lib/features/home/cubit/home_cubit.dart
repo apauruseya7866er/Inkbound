@@ -10,14 +10,18 @@ import '../../../core/app_mode.dart';
 import '../../../core/di/injector.dart';
 import '../../../core/error/exceptions.dart';
 import '../../../core/error/network_failure.dart';
+import '../../../core/lnreader/lnreader_manager.dart';
 import '../../../core/lnreader/novel_cloudflare.dart';
 import '../../../core/models/home_row.dart';
 import '../../../core/models/home_section.dart';
 import '../../../core/models/media_item.dart';
 import '../../../core/mode/content_mode.dart';
 import '../../../core/mode/content_mode_cubit.dart';
+import '../../../core/mode/novel_only.dart';
 import '../../../core/platform/apple_tv.dart';
+import '../../../core/playback/pinned_sources.dart';
 import '../../../core/repository/catalogue_repository.dart';
+import '../../../core/repository/source_repository.dart';
 import '../../../core/tracker/tracker.dart';
 import '../../../core/tracker/tracker_hub.dart';
 import '../../../core/ui/home_rows_prefs.dart';
@@ -181,10 +185,91 @@ class HomeCubit extends Cubit<HomeState> {
   /// The Z Mode browse kind for this load, or null when the home is
   /// source-backed. Read per load (not cached) because mode and stream kind
   /// change under the cubit without a new registration.
+  /// Home rows built from the user's pinned novel sources.
+  ///
+  /// Returns null when this build or this state has nothing pinned, which is the
+  /// signal to fall back to the ordinary catalogue rather than show an empty
+  /// home — a fresh install has no pins and must not come up blank.
+  ///
+  /// Each pinned source contributes one row, titled with the source's own name
+  /// rather than the provider's section title. Two sources both calling their
+  /// feed "Popular" would otherwise render as two identically-titled rows with
+  /// no way to tell whose content is whose.
+  Future<List<HomeSection>?> _pinnedNovelSections() async {
+    if (!kNovelOnly) return null;
+
+    // No `isRegistered` guard: PinnedSources is a static utility initialised at
+    // boot, not a get_it registration, so a registration check here is always
+    // false and silently disables the whole feature.
+    final pinnedIds = PinnedSources.notifier.value
+        .where((id) => id.startsWith('lnr:'))
+        .toList(growable: false);
+    if (pinnedIds.isEmpty) return null;
+    if (!_sl.isRegistered<SourceRepository>()) return null;
+
+    final repo = _sl.isRegistered<SourceRepository>() ? _sl<SourceRepository>() : null;
+    if (repo == null) return null;
+    final manager = _sl.isRegistered<LnReaderManager>() ? _sl<LnReaderManager>() : null;
+
+    final out = <HomeSection>[];
+    // Sequential rather than parallel: each source spins up a JS plugin runtime
+    // on first use, and a dozen of those at once is a stall, not a speed-up.
+    for (final id in pinnedIds) {
+      final pluginId = id.substring(4);
+      final name = manager?.metaFor(pluginId)?.name ?? id;
+      try {
+        final sections = await repo
+            .home(sourceId: id)
+            .timeout(const Duration(seconds: 25));
+        final first = sections.where((s) => s.items.isNotEmpty).firstOrNull;
+        if (first == null) {
+          // Said out loud rather than dropped in silence. A pinned source that
+          // quietly stops appearing on Home is indistinguishable from one that
+          // was never pinned, which is the version of this that cost an
+          // afternoon: eight pinned, two rows, no clue why.
+          debugPrint('[home] pinned source $id has no home content');
+          continue;
+        }
+        out.add(
+          HomeSection(
+            title: name,
+            items: first.items,
+            // Keep the provider's own paging kind so "See all" still pages the
+            // feed this row came from, not a generic one.
+            more: first.more,
+          ),
+        );
+      } catch (e) {
+        // One dead source must not empty the whole home page.
+        debugPrint('[home] pinned source $id failed: $e');
+      }
+    }
+    debugPrint(
+      '[home] pinned rows: ${out.length} from $pinnedIds sources '
+      '(${pinnedIds.length - out.length} produced nothing)',
+    );
+    return out.isEmpty ? null : out;
+  }
+
+  /// Recomputes rows when a source is pinned or unpinned.
+  ///
+  /// The pinned set is user input like any other: a long-press in the source
+  // picker changes what home should be showing, and nothing else would refresh it.
+  void bindPinnedSources() {
+    PinnedSources.notifier.addListener(_onPinnedChanged);
+  }
+
+  void _onPinnedChanged() {
+    if (isClosed) return;
+    unawaited(load());
+  }
+
   ZKind? get _browseKind {
     if (!ZModePrefs.enabled) return null;
     final mode = _sl.isRegistered<ContentModeCubit>()
         ? _sl<ContentModeCubit>().state
+        : kNovelOnly
+        ? kOnlyMode
         : ContentMode.anime;
     return browseKindFor(mode, ZModePrefs.streamKind);
   }
@@ -276,24 +361,35 @@ class HomeCubit extends Cubit<HomeState> {
     String? cloudflareUrl;
     var offline = false;
     int? limitedSeconds;
-    try {
-      final homeFuture = _repo.home();
-      sections = isAppleTv
-          ? await homeFuture.timeout(const Duration(seconds: 20))
-          : await homeFuture;
-    } on TimeoutException catch (_) {
-      debugPrint('[home] load timed out · source=$sourceId');
-      sections = const <HomeSection>[];
-      offline = true; // nothing came back at all — same story as no route
-    } on CloudflareRequiredException catch (e) {
-      debugPrint('[home] load needs Cloudflare · source=$sourceId');
-      sections = const <HomeSection>[];
-      cloudflareUrl = e.url;
-    } catch (e, st) {
-      debugPrint('[home] load failed · source=$sourceId · $e\n$st');
-      sections = const <HomeSection>[];
-      limitedSeconds = aniListRateLimitOf(e)?.seconds;
-      offline = limitedSeconds == null && await isOfflineErrorConfirmed(e);
+
+    // Novel-only: the catalogue's own source rows are metadata titles from
+    // whatever [CatalogueRouter] resolves (Z Mode, which defaults on, hands them
+    // to AniList). Those are anime/manga catalogue art the user cannot read
+    // from, in an app that can only read novels. Pinned sources are the ones they
+    // chose, so their catalogues are what home shows.
+    final pinned = await _pinnedNovelSections();
+    if (pinned != null) {
+      sections = pinned;
+    } else {
+      try {
+        final homeFuture = _repo.home();
+        sections = isAppleTv
+            ? await homeFuture.timeout(const Duration(seconds: 20))
+            : await homeFuture;
+      } on TimeoutException catch (_) {
+        debugPrint('[home] load timed out · source=$sourceId');
+        sections = const <HomeSection>[];
+        offline = true; // nothing came back at all — same story as no route
+      } on CloudflareRequiredException catch (e) {
+        debugPrint('[home] load needs Cloudflare · source=$sourceId');
+        sections = const <HomeSection>[];
+        cloudflareUrl = e.url;
+      } catch (e, st) {
+        debugPrint('[home] load failed · source=$sourceId · $e\n$st');
+        sections = const <HomeSection>[];
+        limitedSeconds = aniListRateLimitOf(e)?.seconds;
+        offline = limitedSeconds == null && await isOfflineErrorConfirmed(e);
+      }
     }
 
     // The tracker read finishes on its own; a miss just means no tracker rows
@@ -465,16 +561,32 @@ class HomeCubit extends Cubit<HomeState> {
     }
   }
 
+  /// True when the per-[StreamKind] row cache is the one Home is reading.
+  ///
+  /// The cache exists so the Anime ↔ Movie/TV flip doesn't refetch, and it is
+  /// keyed by stream kind — so it only describes the right rows in the mode
+  /// that HAS a stream-kind toggle. Every gate below used to be
+  /// `state == ContentMode.anime`, which is the same question asked the long
+  /// way.
+  ///
+  /// Novel-only build: true regardless of the mode. There is no stream-kind
+  /// toggle left, so there is no competing kind to be wrong about, and the
+  /// metadata prefetch (which lands novel rows in this cache) becomes the ONLY
+  /// path that can rescue a first fetch that failed — leaving the old
+  /// anime-only test here would strand Home on "Couldn't load AniList" with
+  /// perfectly good rows sitting in the cache.
+  bool get _readsStreamKindCache {
+    if (!_sl.isRegistered<ContentModeCubit>()) return false;
+    return kNovelOnly || _sl<ContentModeCubit>().state == ContentMode.anime;
+  }
+
   /// When metadata home prefetch succeeds after an empty/failed first fetch,
   /// paint the cached rows so Home doesn't stay on "Couldn't load AniList".
   void applyMetadataCacheIfEmpty() {
     if (!ZModePrefs.enabled || isClosed) return;
     if (state.loading) return;
     if (state.sections != null && state.sections!.isNotEmpty) return;
-    if (!sl.isRegistered<ContentModeCubit>() ||
-        sl<ContentModeCubit>().state != ContentMode.anime) {
-      return;
-    }
+    if (!_readsStreamKindCache) return;
     final rows = _cachedRowsForStreamKind(ZModePrefs.streamKind);
     if (rows == null || rows.isEmpty) return;
     // copyWith, not a fresh HomeState: this class carries `rows` and
@@ -493,9 +605,7 @@ class HomeCubit extends Cubit<HomeState> {
   bool get showsEmptyHome {
     if (state.loading) return false;
     if (state.sections != null && state.sections!.isNotEmpty) return false;
-    if (ZModePrefs.enabled &&
-        sl.isRegistered<ContentModeCubit>() &&
-        sl<ContentModeCubit>().state == ContentMode.anime) {
+    if (ZModePrefs.enabled && _readsStreamKindCache) {
       final cached = sectionsFor(ZModePrefs.streamKind);
       if (cached != null && cached.isNotEmpty) return false;
     }
@@ -509,10 +619,7 @@ class HomeCubit extends Cubit<HomeState> {
   /// `_fetchHome` this one doesn't have, so the miss path goes through
   /// [load] — the same fetch, just the entry point this class actually has.
   Future<void> loadForStreamKindChange() async {
-    if (!sl.isRegistered<ContentModeCubit>() ||
-        sl<ContentModeCubit>().state != ContentMode.anime) {
-      return load(reset: true);
-    }
+    if (!_readsStreamKindCache) return load(reset: true);
     final kind = ZModePrefs.streamKind;
     final cached = _cachedRowsForStreamKind(kind);
     if (cached != null) {

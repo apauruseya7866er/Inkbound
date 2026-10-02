@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../aniyomi/aniyomi_filters.dart';
 import '../aniyomi/aniyomi_provider.dart';
 import '../lnreader/lnreader_manager.dart';
+import '../lnreader/lnreader_provider.dart';
 import '../di/injector.dart';
 import '../download/chapter_download.dart';
 import '../download/chapter_download_store.dart';
@@ -616,9 +617,19 @@ class SourceRepository implements CatalogueRepository {
 
   /// CloudStream-style Home: the active provider's own named rows. When the
   /// provider defines `getHome` we render exactly what it returns (empty rows
-  /// dropped). When it doesn't, we synthesize the legacy three rows from
-  /// [popular] so older providers keep working. Each underlying fetch is
-  /// fail-safe — one broken row never kills the others.
+  /// dropped). When it doesn't — **or when everything it returned is empty** —
+  /// we synthesize the legacy three rows from [popular] so older providers keep
+  /// working. Each underlying fetch is fail-safe — one broken row never kills the
+  /// others.
+  ///
+  /// ### Why "all empty" counts as "doesn't"
+  /// An implemented `getHome` that returns rows with nothing in them is not the
+  /// same as a provider with no home feed: it is a provider whose home feed this
+  /// particular request came back empty for. Returning `[]` there left the
+  /// caller with nothing at all, and on Home it silently deleted the source's
+  /// row — a pinned source would just vanish with no explanation and no error
+  /// anywhere. Empty falls through to the same [popular] synthesis a missing
+  /// `getHome` gets, which is the behaviour the branch was written to provide.
   @override
   Future<List<HomeSection>> home({
     String category = 'sub',
@@ -626,12 +637,14 @@ class SourceRepository implements CatalogueRepository {
   }) async {
     final provider = await _providerReady(sourceId);
 
-    final sections = await provider.getHome(category: category);
-    if (sections != null) {
-      return sections.where((s) => s.items.isNotEmpty).toList();
-    }
+    final declared = await provider.getHome(category: category);
+    final usable = (declared ?? const <HomeSection>[])
+        .where((s) => s.items.isNotEmpty)
+        .toList(growable: false);
+    if (usable.isNotEmpty) return usable;
 
-    // Fallback for providers without getHome.
+    // Fallback for providers without getHome, and for a getHome that came back
+    // with nothing in it.
     final results = await Future.wait([
       provider
           .popular(category: category, dateRange: 1)
@@ -665,20 +678,29 @@ class SourceRepository implements CatalogueRepository {
   Future<List<MediaItem>> browseMore(BrowseMore more, int page) async {
     try {
       final p = await _providerReady(more.sourceId);
+      // Every case awaits rather than returning the Future. Returning it would
+      // let an async failure escape this try/catch entirely, so the documented
+      // "never throws" contract held only for synchronous throws — and a paging
+      // grid that dies mid-scroll is exactly what that promise rules out.
       switch (more.kind) {
         case 'ani_popular':
-          return p.popular(page: page);
+          return await p.popular(page: page);
         case 'ani_latest':
-          return p is AniyomiProvider ? p.latest(page: page) : const [];
+          return p is AniyomiProvider ? await p.latest(page: page) : const [];
         case 'mihon_popular':
-          return p.popular(page: page);
+          return await p.popular(page: page);
         case 'mihon_latest':
-          return p is MihonProvider ? p.latest(page: page) : const [];
+          return p is MihonProvider ? await p.latest(page: page) : const [];
         case 'lnr_popular':
-          return p.popular(page: page);
+          return await p.popular(page: page);
+        case 'lnr_latest':
+          // Without this the "Latest" row's "See all" grid silently returned
+          // nothing: an unknown kind falls through to `default: const []`, which
+          // looks exactly like a source that has no latest feed.
+          return p is LnReaderProvider ? await p.latest(page: page) : const [];
         case 'cs_mainpage':
           return (p is CloudStreamProvider && more.categoryId != null)
-              ? p.browseMainPage(more.categoryId!, page)
+              ? await p.browseMainPage(more.categoryId!, page)
               : const [];
         default:
           return const [];

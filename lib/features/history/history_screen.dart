@@ -8,6 +8,7 @@ import '../../core/models/episode.dart';
 import '../../core/models/media_detail.dart';
 import '../../core/models/media_item.dart';
 import '../../core/models/provider_info.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/playback/my_list.dart';
 import '../../core/playback/resume_store.dart';
 import '../../core/playback/watch_history.dart';
@@ -29,6 +30,12 @@ import '../player/player_screen.dart';
 /// row to resume, ✕ to remove one, and the toolbar to clear the active tab.
 /// Every store is a per-title last-position pointer, so there's one row per
 /// show/title.
+///
+/// Novel-only build: the tab bar is not drawn at all, because there is only the
+/// one tab and a bar that offers a single choice is noise — a label saying
+/// "Novel" over a screen that is nothing but novels. The [TabController] stays,
+/// so the index-based branches below are untouched and the bar comes straight
+/// back if the anime/manga tabs ever return.
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({
     super.key,
@@ -42,6 +49,9 @@ class HistoryScreen extends StatefulWidget {
   /// Which tab to open on: 0 Anime, 1 Manga, 2 Novel. Callers pass the current
   /// content mode's index (the [ContentMode] enum is ordered anime/manga/novel)
   /// so opening History from a reading mode lands on the matching tab.
+  ///
+  /// Novel-only build: the bar has a single Novel tab, so every caller's index
+  /// is clamped to 0 by [_HistoryScreenState] below.
   final int initialIndex;
 
   @override
@@ -55,9 +65,17 @@ class _HistoryScreenState extends State<HistoryScreen>
   final _repo = sl<CatalogueRepository>();
   final _myList = sl<MyListStore>();
 
-  late int _shownIndex = widget.initialIndex.clamp(0, 2);
+  // Novel-only build: one tab (Novel) instead of three. The tab COUNT is the
+  // gate — everything downstream that asks "which tab am I on" is expressed
+  // against indices, so a single tab at index 0 makes the anime and manga
+  // branches below unreachable rather than needing their own edits.
+  static const int _tabCount = kNovelOnly ? 1 : 3;
+
+  late int _shownIndex = kNovelOnly
+      ? 0
+      : widget.initialIndex.clamp(0, _tabCount - 1);
   late final TabController _tab = TabController(
-    length: 3,
+    length: _tabCount,
     vsync: this,
     initialIndex: _shownIndex,
   )..addListener(_onTabChanged);
@@ -70,8 +88,12 @@ class _HistoryScreenState extends State<HistoryScreen>
     }
   }
 
-  late List<HistoryEntry> _anime = _watch.all();
-  late List<ReadEntry> _manga = _readOf(ProviderType.manga);
+  // Novel-only build: the anime and manga stores are never read, so a watch
+  // history left over from before the fork doesn't leak into this screen.
+  late List<HistoryEntry> _anime = kNovelOnly ? const [] : _watch.all();
+  late List<ReadEntry> _manga = kNovelOnly
+      ? const []
+      : _readOf(ProviderType.manga);
   late List<ReadEntry> _novel = _readOf(ProviderType.novel);
 
   List<ReadEntry> _readOf(ProviderType t) =>
@@ -80,7 +102,9 @@ class _HistoryScreenState extends State<HistoryScreen>
   void _reloadAnime() => setState(() => _anime = _watch.all());
   void _reloadReading() => setState(() {
     final all = _read.all();
-    _manga = all.where((e) => e.type == ProviderType.manga).toList();
+    _manga = kNovelOnly
+        ? const []
+        : all.where((e) => e.type == ProviderType.manga).toList();
     _novel = all.where((e) => e.type == ProviderType.novel).toList();
   });
 
@@ -271,17 +295,37 @@ class _HistoryScreenState extends State<HistoryScreen>
 
   // ── Clear-all (acts on the active tab only) ───────────────────────────────
 
-  bool get _activeNotEmpty => switch (_tab.index) {
-    0 => _anime.isNotEmpty,
-    1 => _manga.isNotEmpty,
-    _ => _novel.isNotEmpty,
-  };
+  bool get _activeNotEmpty {
+    // Novel-only build: the one live tab is Novel, whatever index it sits at.
+    if (kNovelOnly) return _novel.isNotEmpty;
+    return switch (_tab.index) {
+      0 => _anime.isNotEmpty,
+      1 => _manga.isNotEmpty,
+      _ => _novel.isNotEmpty,
+    };
+  }
 
   Future<void> _clearActiveTab() async {
     final idx = _tab.index;
     // Scoped to the active tab only — clearing one mode never touches the
     // other two. The wording names the exact mode so that's unmistakable.
     final l10n = context.l10n;
+    if (kNovelOnly) {
+      final ok = await AppDialog.confirm(
+        context,
+        title: l10n.clearKindHistoryTitle(l10n.historyKindNovel),
+        message: l10n.clearKindHistoryBody(
+          l10n.historyNounNovelItem,
+          l10n.historyKindNovel,
+        ),
+        confirmLabel: l10n.clearAll,
+        destructive: true,
+      );
+      if (ok != true) return;
+      await _read.clearType(ProviderType.novel);
+      _reloadReading();
+      return;
+    }
     final (noun, kind) = switch (idx) {
       0 => (l10n.historyNounShow, l10n.historyKindWatch),
       1 => (l10n.historyNounMangaItem, l10n.historyKindManga),
@@ -321,76 +365,82 @@ class _HistoryScreenState extends State<HistoryScreen>
               onPressed: _clearActiveTab,
             ),
         ],
-        bottom: TabBar(
-          controller: _tab,
-          // Drop the default full-width hairline under the bar — that's the
-          // "divider" that read badly; the sliding underline is the indicator.
-          dividerColor: Colors.transparent,
-          dividerHeight: 0,
-          // Rounded accent underline hugging the label. The TabController
-          // animates it between tabs and crossfades the label colour, so a tap
-          // or a swipe glides the underline across.
-          indicatorSize: TabBarIndicatorSize.label,
-          indicator: UnderlineTabIndicator(
-            borderRadius: const BorderRadius.all(Radius.circular(2)),
-            borderSide: BorderSide(width: 3, color: AppColors.accent),
-            insets: const EdgeInsets.symmetric(horizontal: -6),
-          ),
-          labelColor: AppColors.accent,
-          unselectedLabelColor: AppColors.textSecondary,
-          labelStyle: TextStyle(
-            fontFamily: AppText.fontFamily,
-          fontFamilyFallback: AppText.fontFamilyFallback,
-            fontSize: 14.5,
-            fontWeight: FontWeight.w700,
-          ),
-          unselectedLabelStyle: TextStyle(
-            fontFamily: AppText.fontFamily,
-          fontFamilyFallback: AppText.fontFamilyFallback,
-            fontSize: 14.5,
-            fontWeight: FontWeight.w600,
-          ),
-          overlayColor: WidgetStateProperty.all(Colors.transparent),
-          tabs: [
-            Tab(text: context.l10n.modeStreaming),
-            Tab(text: context.l10n.modeManga),
-            Tab(text: context.l10n.modeNovel),
-          ],
-        ),
+        bottom: _tabCount > 1
+            ? TabBar(
+                controller: _tab,
+                // Drop the default full-width hairline under the bar — that's
+                // the "divider" that read badly; the sliding underline is the
+                // indicator.
+                dividerColor: Colors.transparent,
+                dividerHeight: 0,
+                // Rounded accent underline hugging the label. The TabController
+                // animates it between tabs and crossfades the label colour, so a
+                // tap or a swipe glides the underline across.
+                indicatorSize: TabBarIndicatorSize.label,
+                indicator: UnderlineTabIndicator(
+                  borderRadius: const BorderRadius.all(Radius.circular(2)),
+                  borderSide: BorderSide(width: 3, color: AppColors.accent),
+                  insets: const EdgeInsets.symmetric(horizontal: -6),
+                ),
+                labelColor: AppColors.accent,
+                unselectedLabelColor: AppColors.textSecondary,
+                labelStyle: TextStyle(
+                  fontFamily: AppText.fontFamily,
+                  fontFamilyFallback: AppText.fontFamilyFallback,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w700,
+                ),
+                unselectedLabelStyle: TextStyle(
+                  fontFamily: AppText.fontFamily,
+                  fontFamilyFallback: AppText.fontFamilyFallback,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w600,
+                ),
+                overlayColor: WidgetStateProperty.all(Colors.transparent),
+                tabs: [
+                  // Novel-only build: the only tab. See [_tabCount].
+                  if (!kNovelOnly) Tab(text: context.l10n.modeStreaming),
+                  if (!kNovelOnly) Tab(text: context.l10n.modeManga),
+                  Tab(text: context.l10n.modeNovel),
+                ],
+              )
+            : null,
       ),
       body: TabBarView(
         controller: _tab,
         children: [
-          _list<HistoryEntry>(
-            entries: _anime,
-            tsMs: (e) => e.updatedAt,
-            row: (e) => _HistoryRow(
-              entry: e,
-              onTap: () => _resume(e),
-              onLongPress: () => _showInfo(e),
-              onRemove: () => _remove(e),
+          if (!kNovelOnly)
+            _list<HistoryEntry>(
+              entries: _anime,
+              tsMs: (e) => e.updatedAt,
+              row: (e) => _HistoryRow(
+                entry: e,
+                onTap: () => _resume(e),
+                onLongPress: () => _showInfo(e),
+                onRemove: () => _remove(e),
+              ),
+              empty: _EmptyState(
+                icon: Icons.history_rounded,
+                title: context.l10n.nothingWatchedYet,
+                subtitle: context.l10n.showsYouWatchWillAppearHere,
+              ),
             ),
-            empty: _EmptyState(
-              icon: Icons.history_rounded,
-              title: context.l10n.nothingWatchedYet,
-              subtitle: context.l10n.showsYouWatchWillAppearHere,
+          if (!kNovelOnly)
+            _list<ReadEntry>(
+              entries: _manga,
+              tsMs: (e) => e.updatedMs,
+              row: (e) => _ReadRow(
+                entry: e,
+                onTap: () => _resumeRead(e),
+                onLongPress: () => _showReadInfo(e),
+                onRemove: () => _removeRead(e),
+              ),
+              empty: _EmptyState(
+                icon: Icons.auto_stories_outlined,
+                title: context.l10n.nothingReadYet,
+                subtitle: context.l10n.mangaYouReadWillAppearHere,
+              ),
             ),
-          ),
-          _list<ReadEntry>(
-            entries: _manga,
-            tsMs: (e) => e.updatedMs,
-            row: (e) => _ReadRow(
-              entry: e,
-              onTap: () => _resumeRead(e),
-              onLongPress: () => _showReadInfo(e),
-              onRemove: () => _removeRead(e),
-            ),
-            empty: _EmptyState(
-              icon: Icons.auto_stories_outlined,
-              title: context.l10n.nothingReadYet,
-              subtitle: context.l10n.mangaYouReadWillAppearHere,
-            ),
-          ),
           _list<ReadEntry>(
             entries: _novel,
             tsMs: (e) => e.updatedMs,

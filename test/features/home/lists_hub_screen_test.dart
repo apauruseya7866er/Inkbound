@@ -1,6 +1,13 @@
 // The hub behind Home's single card. It replaced a card per tracker plus a
 // Schedule card, so the thing worth pinning is that it stops depending on the
 // mode: every connected tracker is listed no matter which mode you arrived in.
+//
+// Novel-only build: two of the three cases this file used to hold are gone with
+// the rows they described. The Schedule row is the anime airing calendar
+// (AniList NEXT_EPISODES) and is no longer offered at all, so "the hub lists
+// every connected tracker plus Schedule" and "Schedule stands alone when
+// nothing is connected" had nothing left to assert. What survives is the
+// connection filter below, which is mode-independent and still live.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,29 +56,6 @@ void main() {
     await sl.reset();
   });
 
-  testWidgets('lists every connected tracker plus Schedule', (t) async {
-    sl.registerSingleton<TrackerHub>(TrackerHub([
-      _FakeTracker('AniList', supportsReading: true),
-      _FakeTracker('MyAnimeList', supportsReading: true),
-      _FakeTracker('Simkl', supportsReading: false),
-    ]));
-
-    await t.pumpWidget(harness());
-    await t.pumpAndSettle();
-
-    expect(find.text('Schedule'), findsOneWidget);
-    // A section per tracker, and inside it a row per kind of list it holds.
-    expect(find.text('ANILIST'), findsOneWidget);
-    expect(find.text('MYANIMELIST'), findsOneWidget);
-    expect(find.text('SIMKL'), findsOneWidget);
-    // Anime, Manga and Novel for each of the two reading trackers.
-    expect(find.text('Anime'), findsNWidgets(2));
-    expect(find.text('Manga'), findsNWidgets(2));
-    expect(find.text('Novel'), findsNWidgets(2));
-    // Simkl has no reading side, so it gets one row saying what it does cover.
-    expect(find.text('Movies and series'), findsOneWidget);
-  });
-
   testWidgets('a disconnected tracker is not offered', (t) async {
     sl.registerSingleton<TrackerHub>(TrackerHub([
       _FakeTracker('AniList', supportsReading: true),
@@ -83,17 +67,5 @@ void main() {
 
     expect(find.text('ANILIST'), findsOneWidget);
     expect(find.text('SIMKL'), findsNothing);
-  });
-
-  testWidgets('Schedule stands alone when nothing is connected', (t) async {
-    // The row on Home is unconditional now, so this screen must not be empty
-    // for someone with no trackers — Schedule is still worth the trip.
-    sl.registerSingleton<TrackerHub>(TrackerHub([]));
-
-    await t.pumpWidget(harness());
-    await t.pumpAndSettle();
-
-    expect(find.text('Schedule'), findsOneWidget);
-    expect(find.text('YOUR LISTS'), findsNothing);
   });
 }

@@ -13,6 +13,7 @@ import '../../core/download/download_manager.dart';
 import '../../core/download/download_prefs.dart';
 import '../../core/download/download_record.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/video_source.dart';
 import '../../core/playback/resume_store.dart';
@@ -301,15 +302,21 @@ class _DownloadsScreenState extends State<DownloadsScreen>
   /// a chapter downloads, and the video list below has no reason to rebuild
   /// for that.
   Widget _chapterLinks(ChapterDownloadStore store) {
+    // Novel-only build: the manga card is dropped, so the lone Novel card
+    // takes the full row width instead of sitting in a half-width slot beside
+    // an empty space.
+    final modes = kNovelOnly
+        ? const [kOnlyMode]
+        : const [ContentMode.manga, ContentMode.novel];
     return ValueListenableBuilder<Box<Map>>(
       valueListenable: store.listenable(),
       builder: (context, box, _) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
         child: Row(
           children: [
-            for (final m in const [ContentMode.manga, ContentMode.novel]) ...[
+            for (final m in modes) ...[
               Expanded(child: _chapterCard(m, store.countDone(m))),
-              if (m == ContentMode.manga) const SizedBox(width: 10),
+              if (m != modes.last) const SizedBox(width: 10),
             ],
           ],
         ),

@@ -24,12 +24,19 @@ import 'package:watch_app/features/search/bloc/search_bloc.dart';
 import 'package:watch_app/features/search/bloc/search_event.dart';
 
 // ---------------------------------------------------------------------------
-// This pins the fix in SearchBloc._modeSources(): the all-sources fan-out in
-// _runSearch used to search `_repo.loadedSources` unfiltered, so a manga-mode
-// "all sources" search also queried anime/novel sources and the picker and
-// the results disagreed. The fix narrows the fan-out to the active
-// ContentMode, short-circuiting to the unfiltered list in anime mode (so
-// anime/movie search — and TV, which has no mode switcher — is untouched).
+// This pins SearchBloc._modeSources(): the all-sources fan-out in _runSearch
+// used to search `_repo.loadedSources` unfiltered, so a manga-mode "all
+// sources" search also queried anime/novel sources and the picker and the
+// results disagreed. The fix narrows the fan-out to the active ContentMode —
+// EVERY mode narrows, anime included.
+//
+// The manga/anime halves of that story are gone in this fork: `ContentModeCubit`
+// refuses every switch away from `ContentMode.novel`, so there is no reachable
+// state in which the fan-out should exclude an anime or manga source. What is
+// still reachable, and what the cases below pin, is:
+//   * novel mode fans out over the `lnr:` sources and nothing else;
+//   * forceMode still overrides the global mode (it is pure fan-out selection,
+//     independent of whether the global mode can change).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -120,7 +127,7 @@ class _FakeRepo implements SourceRepository {
   List<({String id, String name})> get pickableSources => loadedSources;
 
   /// What `loadedSources` reports as installed — set per test to a mixed
-  /// anime+manga list.
+  /// novel/non-novel list.
   List<({String id, String name})> loadedSourcesSeed = const [];
 
   /// Items handed back for a given sourceId; missing entries return empty
@@ -154,7 +161,7 @@ class _FakeRepo implements SourceRepository {
   List<({String id, String name})> get loadedSources => loadedSourcesSeed;
 
   @override
-  String get sourceId => 'ani:1';
+  String get sourceId => 'lnr:1';
 
   @override
   void syncSearchCache() {}
@@ -239,7 +246,7 @@ MediaItem _fakeItem(String sourceId) => MediaItem(
   id: 'id-$sourceId',
   title: 'Naruto',
   url: 'https://example.com/$sourceId',
-  type: ProviderType.anime,
+  type: ProviderType.novel,
   sourceId: sourceId,
 );
 
@@ -266,11 +273,16 @@ void main() {
     sl.registerSingleton<SearchSourcePrefs>(_FakeSearchSourcePrefs());
     sl.registerSingleton<SourceHealthStore>(_FakeSourceHealthStore());
 
+    // A deliberately mixed list: the anime/manga ids can only ever be present
+    // if something bypassed the mode filter, which is what these cases are
+    // about — the `lnr:` one is the only source a novel-mode fan-out takes.
     repo = _FakeRepo()
       ..loadedSourcesSeed = const [
+        (id: 'lnr:1', name: 'NovelSource'),
         (id: 'ani:1', name: 'AniSource'),
         (id: 'mihon:1', name: 'MangaSource'),
       ]
+      ..itemsFor['lnr:1'] = [_fakeItem('lnr:1')]
       ..itemsFor['ani:1'] = [_fakeItem('ani:1')]
       ..itemsFor['mihon:1'] = [_fakeItem('mihon:1')];
 
@@ -295,10 +307,18 @@ void main() {
   });
 
   group('SearchBloc mode-scoped all-sources search', () {
+    // Novel-only build: the mode this app is always in. The narrowing _modeSources
+    // exists for is still the whole point of the case — an all-sources search in
+    // novel mode must fan out over the `lnr:` sources alone, so a source of any
+    // other ecosystem that somehow reached `_repo.loadedSources` (a stale
+    // `ani:` id from before the fork, say) can never leak into novel results.
     test(
-      'manga mode: all-sources search does not query anime sources',
+      'novel mode: all-sources search does not query non-novel sources',
       () async {
-        await modeCubit.setMode(ContentMode.manga);
+        // ContentModeCubit.restore() always reports novel in this fork, so
+        // there is nothing to set — asserted here so the case can't silently
+        // start depending on a mode the build can no longer be in.
+        expect(modeCubit.state, ContentMode.novel);
 
         bloc.add(const SearchRunRequested('naruto'));
         await Future<void>.delayed(const Duration(milliseconds: 20));
@@ -307,55 +327,38 @@ void main() {
           repo.searchedSourceIds,
           isNot(contains('ani:1')),
           reason:
-              'a manga-mode all-sources search must not fan out to anime '
+              'a novel-mode all-sources search must not fan out to anime '
               'sources — that was the bug (bloc ignored the mode and searched '
               'everything in _repo.loadedSources)',
         );
         expect(
-          repo.searchedSourceIds,
-          contains('mihon:1'),
-          reason: 'the manga source itself must still be searched',
-        );
-      },
-    );
-
-    test(
-      'anime mode: manga and novel sources are not searched',
-      () async {
-        // Anime is already the restored default, but set it explicitly so
-        // this test never depends on run order or a leftover Hive value.
-        await modeCubit.setMode(ContentMode.anime);
-
-        bloc.add(const SearchRunRequested('naruto'));
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-
-        // This assertion used to be inverted — it required anime mode to
-        // search EVERY source, manga ones included, on the theory that any
-        // narrowing would drop streaming sources. It doesn't: anime accepts
-        // both anime and movie providers, and cs:/ani:/untyped ids all type as
-        // anime, so the only thing filtering removes is exactly the manga and
-        // novel sources that were leaking into anime results.
-        expect(
           repo.searchedSourceIds.toSet(),
-          {'ani:1'},
-          reason:
-              'anime mode must search video sources only — a mihon: source '
-              'here is the manga/novel leak this test now guards against',
+          {'lnr:1'},
+          reason: 'the novel source itself must still be searched',
         );
       },
     );
   });
 
   group('SearchBloc.forceMode (search opened from a specific tab)', () {
-    // Pins the fix for BrowseSourcesScreen's search action: opening search
-    // from the Manga tab must search manga sources regardless of whatever
-    // the app's global ContentModeCubit is currently set to — before the
-    // fix, `_modeSources()` always read the global mode, so a manga-tab
-    // search while the app was in Streaming mode searched anime sources.
+    // Pins the fix for BrowseSourcesScreen's search action: the search opened
+    // from a tab must search that tab's sources regardless of whatever the
+    // app's global ContentModeCubit is currently set to — before the fix,
+    // `_modeSources()` always read the global mode, so a Manga-tab search
+    // while the app was in Streaming mode searched anime sources.
+    //
+    // Novel-only build: the global mode can't leave novel any more, so the
+    // override is proven by the two fan-outs DIFFERING rather than by a mode
+    // switch — forceMode: manga takes the manga source, no forceMode takes the
+    // novel one, and neither is the other's answer.
     test(
       'forceMode overrides the global content mode for the fan-out',
       () async {
-        await modeCubit.setMode(ContentMode.anime);
+        expect(
+          modeCubit.state,
+          ContentMode.novel,
+          reason: 'the override below is only meaningful against a known global',
+        );
         final forced = SearchBloc(
           repo: repo,
           history: _FakeSearchHistory(),
@@ -373,7 +376,8 @@ void main() {
           {'mihon:1'},
           reason:
               'forceMode: manga must search manga sources even though the '
-              "app's global content mode is anime here",
+              "app's global content mode is novel here — i.e. _modeSources() "
+              'really reads forceMode first, not the global mode',
         );
       },
     );
@@ -381,7 +385,10 @@ void main() {
     test(
       'forceMode null falls back to the global content mode, unchanged',
       () async {
-        await modeCubit.setMode(ContentMode.manga);
+        // Novel-only build: the global mode is always novel, so the fan-out
+        // with no forceMode is the novel set — asserted against the mode the
+        // cubit actually reports, not against one it can no longer be put in.
+        expect(modeCubit.state, ContentMode.novel);
         final unforced = SearchBloc(
           repo: repo,
           history: _FakeSearchHistory(),
@@ -395,9 +402,9 @@ void main() {
 
         expect(
           repo.searchedSourceIds.toSet(),
-          {'mihon:1'},
+          {'lnr:1'},
           reason:
-              'with no forceMode, the global content mode (manga here) still '
+              'with no forceMode, the global content mode (novel here) still '
               'decides the fan-out exactly as before this fix',
         );
       },
@@ -414,12 +421,11 @@ void main() {
     test(
       'a source that answers with zero results is still marked responded',
       () async {
-        await modeCubit.setMode(ContentMode.manga);
-        // A second manga source with no seeded items — searchStatus returns an
+        // A second novel source with no seeded items — searchStatus returns an
         // empty list for it, exactly like a real "no results" source.
         repo.loadedSourcesSeed = const [
-          (id: 'mihon:1', name: 'MangaSource'),
-          (id: 'mihon:2', name: 'EmptyMangaSource'),
+          (id: 'lnr:1', name: 'NovelSource'),
+          (id: 'lnr:2', name: 'EmptyNovelSource'),
         ];
 
         bloc.add(const SearchRunRequested('naruto'));
@@ -427,16 +433,16 @@ void main() {
 
         expect(
           bloc.state.respondedSources,
-          containsAll(['mihon:1', 'mihon:2']),
+          containsAll(['lnr:1', 'lnr:2']),
           reason:
-              'both sources answered — mihon:2 with zero results — so '
+              'both sources answered — lnr:2 with zero results — so '
               'neither should still read as pending once the run settles',
         );
         expect(
           bloc.state.groups.map((g) => g.sourceId),
-          ['mihon:1'],
+          ['lnr:1'],
           reason:
-              'mihon:2 produced no group (no results), unlike '
+              'lnr:2 produced no group (no results), unlike '
               'respondedSources, which tracks completion regardless of '
               'outcome',
         );

@@ -8,7 +8,9 @@ import 'package:flutter_test/flutter_test.dart';
 import '../../support/picker_deps.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/di/injector.dart';
-import 'package:watch_app/core/mode/content_mode.dart';
+import 'package:watch_app/core/hive/safe_box.dart';
+import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
+import 'package:watch_app/core/lnreader/lnreader_manager.dart';
 import 'package:watch_app/core/models/media_item.dart';
 import 'package:watch_app/core/models/media_detail.dart';
 import 'package:watch_app/core/models/provider_info.dart';
@@ -43,12 +45,8 @@ class _Src implements SourceRepository {
   @override
   List<({String id, String name})> get loadedSources =>
       [for (final id in bySource.keys) (id: id, name: _name(id))];
-  // .contains rather than == so a kind-prefixed id (e.g. 'mihon:1',
-  // for the manga-candidates test) still resolves to a readable name.
-  // Source ids are the real `ani:<n>` / `mihon:<n>` shape now, because the
-  // picker builds its rows from the app's registries rather than this fake.
   static String _name(String id) =>
-      (id == 'ani:1' || id == 'mihon:1') ? 'AllAnime' : 'HiAnime';
+      id == _novelA.id ? _novelA.name : _novelB.name;
   @override
   bool hasSource(String sourceId) => bySource.containsKey(sourceId);
   @override
@@ -56,6 +54,50 @@ class _Src implements SourceRepository {
   @override
   Future<List<MediaItem>> search(String q, {String category = 'sub', String? sourceId}) async =>
       bySource[sourceId] ?? const [];
+}
+
+/// The novel sources every fixture in this file is built from. `lnr:`-prefixed
+/// because that is the one ecosystem this build can still have: the picker's
+/// rows are built from the app's own registries, not from [_Src], so the same
+/// pair of ids has to be seeded into the LNReader box by
+/// [_registerNovelSources] for a row to appear in the sheet.
+const _novelA = (id: 'lnr:novelhub', name: 'NovelHub');
+const _novelB = (id: 'lnr:novelverse', name: 'NovelVerse');
+
+/// Registers the novel sources the picker will offer.
+///
+/// [registerPickerDeps] covers the app-wide registries and the Aniyomi rows;
+/// LNReader is registered separately because the picker reads it through
+/// `sl.isRegistered<LnReaderManager>()` rather than a locator it always has.
+/// Nothing here builds the QuickJS runtime — [LnReaderManager.installedSources]
+/// is a plain read of the stored plugin meta, which is what the picker needs.
+///
+/// Must run inside `runAsync` (or a plain `test`), like every other Hive write
+/// in a pump-driven test.
+Future<void> _registerNovelSources(
+  List<({String id, String name})> sources,
+) async {
+  final box = await openBoxSafely<Map>(LnReaderExtensionService.boxName);
+  await box.clear();
+  for (final s in sources) {
+    // The box is keyed by the BARE plugin id; the manager adds the `lnr:`
+    // prefix itself when it builds the source id.
+    final pluginId = s.id.substring(4);
+    await box.put(pluginId, LnReaderPluginMeta(
+      id: pluginId,
+      name: s.name,
+      site: 'https://example.test',
+      lang: 'en',
+      version: '1.0.0',
+      url: 'https://example.test/$pluginId.js',
+      iconUrl: '',
+    ).toMap());
+  }
+  sl.registerSingleton<LnReaderManager>(LnReaderManager(
+    service: LnReaderExtensionService(httpGet: (_) async => ''),
+    // No plugin is ever called, so the runtime is never asked for one.
+    fetch: (_, _) => throw UnsupportedError('these tests never load a plugin'),
+  ));
 }
 
 class _None implements SourceRepository {
@@ -96,7 +138,7 @@ class _Repo implements CatalogueRepository {
   }) async {
     detailCalls++;
     return const MediaDetail(
-        id: 'x', title: 'x', url: 'zm://manga/mal:777', type: ProviderType.manga, sourceId: 'zm');
+        id: 'x', title: 'x', url: 'zm://novel/mal:777', type: ProviderType.novel, sourceId: 'zm');
   }
 }
 
@@ -113,14 +155,14 @@ class _FakeTitlePrefs extends TitlePrefsStore {
 void main() {
   late ZSourcePrefs prefs;
   late Directory dir;
-  const fma = ZCanonical(ZKind.anime, 'mal:5114');
+  const fma = ZCanonical(ZKind.novel, 'mal:5114');
 
   Widget harness(Widget child, {CatalogueRepository? repo, String? url}) => MaterialApp(
     home: Scaffold(
       body: BlocProvider(
         create: (_) => DetailCubit(
           repo: repo ?? _Repo(),
-          url: url ?? 'zm://anime/mal:5114',
+          url: url ?? 'zm://novel/mal:5114',
           prefs: _FakeTitlePrefs(),
         ),
         child: child,
@@ -131,10 +173,11 @@ void main() {
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('wrongshow');
     Hive.init(dir.path);
-    await registerPickerDeps(aniyomi: [
-      aniSource(id: 1, name: 'AllAnime'),
-      aniSource(id: 2, name: 'HiAnime'),
-    ]);
+    await registerPickerDeps();
+    // The picker's rows come from the registries registerPickerDeps sets up,
+    // so the two novel sources have to exist there too — a fake
+    // SourceRepository alone puts nothing in the sheet.
+    await _registerNovelSources([_novelA, _novelB]);
     // Picker rows probe the native side for per-source settings. These tests
     // are about matching, not settings, so answer "none" rather than let an
     // unimplemented channel throw mid-build.
@@ -146,13 +189,13 @@ void main() {
       );
     }
     final src = _Src({
-      'ani:1': [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
-          url: 'https://a/2003', type: ProviderType.anime, sourceId: 'ani:1')],
-      'ani:2': [
+      _novelA.id: [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
+          url: 'https://a/2003', type: ProviderType.novel, sourceId: _novelA.id)],
+      _novelB.id: [
         MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
-            url: 'https://h/2003', type: ProviderType.anime, sourceId: 'ani:2'),
+            url: 'https://h/2003', type: ProviderType.novel, sourceId: _novelB.id),
         MediaItem(id: 'fmab', title: 'Fullmetal Alchemist: Brotherhood',
-            url: 'https://h/fmab', type: ProviderType.anime, sourceId: 'ani:2'),
+            url: 'https://h/fmab', type: ProviderType.novel, sourceId: _novelB.id),
       ],
     });
     final store = await MatchStore.open();
@@ -170,7 +213,8 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  testWidgets('shows the auto-picked source and Wrong title?', (t) async {
+  testWidgets('shows the source Auto Resolve settled on, and Wrong title?',
+      (t) async {
     // MatchLine resolves on first build via a real Hive write, which never
     // drains under the pump-driven testWidgets binding without runAsync —
     // same class of issue as mode_switcher_test.dart's setMode. Pre-resolving
@@ -182,7 +226,7 @@ void main() {
     await t.pumpWidget(harness(const MatchLine(
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
-    expect(find.textContaining('AllAnime'), findsOneWidget);
+    expect(find.textContaining(_novelA.name), findsOneWidget);
     expect(find.text('Wrong title?'), findsOneWidget);
   });
 
@@ -201,7 +245,7 @@ void main() {
 
     // The grey pill itself, not its label.
     final row = find.ancestor(
-      of: find.textContaining('AllAnime'),
+      of: find.textContaining(_novelA.name),
       matching: find.byType(InkWell),
     );
     final box = t.getRect(row.first);
@@ -220,30 +264,29 @@ void main() {
     await t.pumpWidget(harness(const MatchLine(
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
-    expect(find.textContaining('AllAnime'), findsOneWidget);
+    expect(find.textContaining(_novelA.name), findsOneWidget);
 
-    await t.tap(find.textContaining('AllAnime'));
+    await t.tap(find.textContaining(_novelA.name));
     await t.pumpAndSettle();
-    // The shared picker has no title row — its tabs identify it.
-    // One merged group, so the picker is identified by its All tab rather
-    // than by an Anime/Movies split that no longer exists.
+    // The shared picker has no title row — its tabs identify it, and in this
+    // build that is the All tab plus the mode's own single bucket.
     expect(find.text('All'), findsOneWidget);
-    expect(find.textContaining('HiAnime'), findsOneWidget);
+    expect(find.textContaining(_novelB.name), findsOneWidget);
 
     await t.runAsync(() async {
-      await t.tap(find.textContaining('HiAnime'));
+      await t.tap(find.textContaining(_novelB.name));
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await t.pumpAndSettle();
 
-    expect(find.textContaining('HiAnime'), findsOneWidget);
-    // Picking pins THIS title to ani:2. The kind default is deliberately left
-    // alone now — one title's correction no longer reassigns every other
-    // title of that kind.
-    expect(sl<MatchStore>().get(fma, 'ani:2')?.pinned, isTrue);
+    expect(find.textContaining(_novelB.name), findsOneWidget);
+    // Picking pins THIS title to the second novel source. The kind default is
+    // deliberately left alone now — one title's correction no longer reassigns
+    // every other title of that kind.
+    expect(sl<MatchStore>().get(fma, _novelB.id)?.pinned, isTrue);
     expect(prefs.get(fma.kind), isNull);
-    // AllAnime's own match is untouched by switching to HiAnime.
-    expect(sl<MatchStore>().get(fma, 'ani:1')?.sourceId, 'ani:1');
+    // The first source's own match is untouched by the switch.
+    expect(sl<MatchStore>().get(fma, _novelA.id)?.sourceId, _novelA.id);
   });
 
   testWidgets('Wrong title? corrects the match for the selected source only', (t) async {
@@ -253,11 +296,12 @@ void main() {
     await t.pumpWidget(harness(const MatchLine(
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
-    // Selected source is allanime (the first candidate to genuinely match).
+    // Selected source is the first novel source (the first candidate to
+    // genuinely match).
     await t.tap(find.text('Wrong title?'));
     await t.pumpAndSettle();
-    // The sheet only ever searches the selected source (allanime) — its
-    // one result is the (2003) title already resolved above.
+    // The sheet only ever searches the selected source — its one result is
+    // the (2003) title already resolved above.
     expect(find.text('Fullmetal Alchemist (2003)'), findsWidgets);
     expect(find.text('Fullmetal Alchemist: Brotherhood'), findsNothing);
 
@@ -267,9 +311,9 @@ void main() {
     });
     await t.pumpAndSettle();
 
-    expect(sl<MatchStore>().get(fma, 'ani:1')?.pinned, isTrue);
-    // HiAnime was never touched by this correction.
-    expect(sl<MatchStore>().get(fma, 'ani:2'), isNull);
+    expect(sl<MatchStore>().get(fma, _novelA.id)?.pinned, isTrue);
+    // The other source was never touched by this correction.
+    expect(sl<MatchStore>().get(fma, _novelB.id), isNull);
 
     // Confirming a match toasts, and a toast is a two-second timer. Left
     // running, it outlives the widget tree and the binding fails the test on
@@ -277,11 +321,10 @@ void main() {
     await t.pump(const Duration(seconds: 3));
   });
 
-  testWidgets('Wrong title? correction on a video (anime) kind refreshes the Detail screen', (t) async {
-    // Anime is a VIDEO kind — the store write is correct either way, but this
-    // proves the Detail screen actually re-fetches for it too, not only for
-    // manga/novel (see MetadataRepository.detail: video kinds now take their
-    // episode list from the matched source as well).
+  testWidgets('Wrong title? correction on a novel title refreshes the Detail screen', (t) async {
+    // A correction always re-fetches Detail, whichever kind it was on: the
+    // matched source owns the chapter list, so the old one is stale the moment
+    // the pin moves (see MatchLine._refreshAfterMatchChange).
     await t.runAsync(
       () => sl<SourceMatcher>().resolve(fma, title: 'Fullmetal Alchemist (2003)'),
     );
@@ -295,8 +338,8 @@ void main() {
 
     await t.tap(find.text('Wrong title?'));
     await t.pumpAndSettle();
-    // The sheet only ever searches the selected source (allanime) — its one
-    // result is the (2003) title already resolved above.
+    // The sheet only ever searches the selected source — its one result is
+    // the (2003) title already resolved above.
     expect(find.text('Fullmetal Alchemist (2003)'), findsWidgets);
 
     await t.runAsync(() async {
@@ -305,7 +348,7 @@ void main() {
     });
     await t.pumpAndSettle();
 
-    expect(sl<MatchStore>().get(fma, 'ani:1')?.pinned, isTrue);
+    expect(sl<MatchStore>().get(fma, _novelA.id)?.pinned, isTrue);
     expect(repo.detailCalls, greaterThan(0));
 
     // Drain the confirmation toast's timer — see the note in the test above.
@@ -315,17 +358,20 @@ void main() {
   testWidgets('the row names the title it matched, so a wrong one is visible',
       (t) async {
     // The case this control exists for: the source matched confidently, but to
-    // the wrong show. Same source name, a full episode list — indistinguishable
+    // the wrong title. Same source name, a full chapter list — indistinguishable
     // from a correct match unless the matched TITLE is on screen.
     await sl.reset();
     Hive.init(dir.path);
     final store = await MatchStore.open();
     prefs = await ZSourcePrefs.open();
     final src = _Src({
-      'ani:1': [MediaItem(id: 'brother', title: 'Fullmetal Alchemist Brotherhood',
-          url: 'https://a/bro', type: ProviderType.anime, sourceId: 'ani:1')],
+      _novelA.id: [MediaItem(id: 'brother', title: 'Fullmetal Alchemist Brotherhood',
+          url: 'https://a/bro', type: ProviderType.novel, sourceId: _novelA.id)],
     });
-    await registerPickerDeps(aniyomi: [aniSource(id: 1, name: 'AllAnime')]);
+    await t.runAsync(() async {
+      await registerPickerDeps();
+      await _registerNovelSources([_novelA]);
+    });
     sl.registerSingleton<SourceRepository>(src);
     sl.registerSingleton<MatchStore>(store);
     sl.registerSingleton<ZSourcePrefs>(prefs);
@@ -340,31 +386,32 @@ void main() {
     await t.pumpAndSettle();
 
     // The source, and what it landed on, both on screen without opening a thing.
-    expect(find.textContaining('AllAnime'), findsOneWidget);
+    expect(find.textContaining(_novelA.name), findsOneWidget);
     expect(find.text('Fullmetal Alchemist Brotherhood'), findsOneWidget);
     expect(find.text('Wrong title?'), findsOneWidget);
   });
 
   testWidgets('a source with no match still appears in the picker; choosing it shows the honest empty state',
       (t) async {
-    // hianime is installed but genuinely has nothing matching this title —
-    // its own bucket is a different show entirely.
+    // The second source is installed but genuinely has nothing matching this
+    // title — its own catalogue is a different book entirely.
     await sl.reset();
     Hive.init(dir.path);
     final store = await MatchStore.open();
     prefs = await ZSourcePrefs.open();
     final src = _Src({
-      'ani:1': [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
-          url: 'https://a/2003', type: ProviderType.anime, sourceId: 'ani:1')],
-      'ani:2': [MediaItem(id: 'op', title: 'One Piece',
-          url: 'https://h/op', type: ProviderType.anime, sourceId: 'ani:2')],
+      _novelA.id: [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
+          url: 'https://a/2003', type: ProviderType.novel, sourceId: _novelA.id)],
+      _novelB.id: [MediaItem(id: 'op', title: 'One Piece',
+          url: 'https://h/op', type: ProviderType.novel, sourceId: _novelB.id)],
     });
     // sl.reset() above dropped the picker's own singletons; the sheet needs
-    // them back before it can be opened.
-    await registerPickerDeps(aniyomi: [
-      aniSource(id: 1, name: 'AllAnime'),
-      aniSource(id: 2, name: 'HiAnime'),
-    ]);
+    // them back before it can be opened. runAsync: seeding the LNReader box is
+    // real Hive I/O, which never drains under the pump-driven binding.
+    await t.runAsync(() async {
+      await registerPickerDeps();
+      await _registerNovelSources([_novelA, _novelB]);
+    });
     sl.registerSingleton<SourceRepository>(src);
     sl.registerSingleton<MatchStore>(store);
     sl.registerSingleton<ZSourcePrefs>(prefs);
@@ -377,60 +424,56 @@ void main() {
     await t.pumpWidget(harness(const MatchLine(
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
-    expect(find.textContaining('AllAnime'), findsOneWidget); // auto-picked
+    expect(find.textContaining(_novelA.name), findsOneWidget); // auto-picked
 
-    await t.tap(find.textContaining('AllAnime'));
+    await t.tap(find.textContaining(_novelA.name));
     await t.pumpAndSettle();
-    // hianime is offered even though it can't possibly match — not filtered
-    // out of the picker for lacking one.
-    expect(find.textContaining('HiAnime'), findsOneWidget);
+    // The other source is offered even though it can't possibly match — not
+    // filtered out of the picker for lacking one.
+    expect(find.textContaining(_novelB.name), findsOneWidget);
 
     await t.runAsync(() async {
-      await t.tap(find.textContaining('HiAnime'));
+      await t.tap(find.textContaining(_novelB.name));
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await t.pumpAndSettle();
 
-    // hianime is now selected, honestly with no match — not silently left on
-    // allanime, and not crashed/hidden.
-    expect(find.textContaining('HiAnime'), findsOneWidget);
+    // It is now selected, honestly with no match — not silently left on the
+    // first source, and not crashed/hidden.
+    expect(find.textContaining(_novelB.name), findsOneWidget);
     // "Selected but nothing behind it" is said in words, not just signalled by
     // dimming the name: a picked source keeps its normal label (you need to
     // read WHICH source is selected in order to change it) and the pill
     // carries an explicit line underneath saying it has nothing.
-    final name = t.widget<Text>(find.textContaining('HiAnime'));
+    final name = t.widget<Text>(find.textContaining(_novelB.name));
     expect(name.style?.color, AppColors.textPrimary);
     expect(find.text('No episodes available from this source'), findsOneWidget);
     // The choice is recorded even though there's nothing behind it. It used
     // to write nothing at all, which left the PREVIOUS source pinned — so the
-    // picker named HiAnime while AllAnime went on serving the episode list,
-    // the reader and the downloads.
-    final picked = sl<MatchStore>().get(fma, 'ani:2');
+    // picker named the new source while the old one went on serving the
+    // chapter list, the reader and the downloads.
+    final picked = sl<MatchStore>().get(fma, _novelB.id);
     expect(picked?.pinned, isTrue);
     expect(picked?.showUrl, isEmpty, reason: 'a choice, not a match');
-    expect(sl<MatchStore>().get(fma, 'ani:1')?.pinned, isNot(true));
+    expect(sl<MatchStore>().get(fma, _novelA.id)?.pinned, isNot(true));
   });
 
-  testWidgets('switching source on a manga title refreshes the Detail screen chapters', (t) async {
-    const manga = ZCanonical(ZKind.manga, 'mal:777');
+  testWidgets('switching source on a novel title refreshes the Detail screen chapters', (t) async {
     await sl.reset();
     Hive.init(dir.path);
-    // runAsync: seeding the mode writes to Hive, and a real write never drains
-    // under the pump-driven binding.
-    await t.runAsync(() => registerPickerDeps(
-          mode: ContentMode.manga,
-          mihon: [
-            mihonSource(id: 1, name: 'AllAnime'),
-            mihonSource(id: 2, name: 'HiAnime'),
-          ],
-        ));
+    // runAsync: seeding the registries writes to Hive, and a real write never
+    // drains under the pump-driven binding.
+    await t.runAsync(() async {
+      await registerPickerDeps();
+      await _registerNovelSources([_novelA, _novelB]);
+    });
     final store = await MatchStore.open();
     prefs = await ZSourcePrefs.open();
     final src = _Src({
-      'mihon:1': [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
-          url: 'https://a/2003', type: ProviderType.manga, sourceId: 'mihon:1')],
-      'mihon:2': [MediaItem(id: 'fmab', title: 'Fullmetal Alchemist: Brotherhood',
-          url: 'https://h/fmab', type: ProviderType.manga, sourceId: 'mihon:2')],
+      _novelA.id: [MediaItem(id: 'fma03', title: 'Fullmetal Alchemist (2003)',
+          url: 'https://a/2003', type: ProviderType.novel, sourceId: _novelA.id)],
+      _novelB.id: [MediaItem(id: 'fmab', title: 'Fullmetal Alchemist: Brotherhood',
+          url: 'https://h/fmab', type: ProviderType.novel, sourceId: _novelB.id)],
     });
     sl.registerSingleton<SourceRepository>(src);
     sl.registerSingleton<MatchStore>(store);
@@ -439,20 +482,19 @@ void main() {
         sources: src, store: store, prefs: prefs, candidates: (_) => src.loadedSources));
 
     await t.runAsync(
-      () => sl<SourceMatcher>().resolve(manga, title: 'Fullmetal Alchemist (2003)'),
+      () => sl<SourceMatcher>().resolve(fma, title: 'Fullmetal Alchemist (2003)'),
     );
     final repo = _Repo();
     await t.pumpWidget(harness(
-      const MatchLine(canonical: manga, title: 'Fullmetal Alchemist (2003)'),
+      const MatchLine(canonical: fma, title: 'Fullmetal Alchemist (2003)'),
       repo: repo,
-      url: 'zm://manga/mal:777',
     ));
     await t.pumpAndSettle();
     expect(repo.detailCalls, 0); // nothing switched yet — no reload
-    await t.tap(find.textContaining('AllAnime'));
+    await t.tap(find.textContaining(_novelA.name));
     await t.pumpAndSettle();
     await t.runAsync(() async {
-      await t.tap(find.textContaining('HiAnime'));
+      await t.tap(find.textContaining(_novelB.name));
       await Future<void>.delayed(const Duration(milliseconds: 50));
     });
     await t.pumpAndSettle();
@@ -468,13 +510,13 @@ void main() {
     Hive.init(dir.path);
     final store = await MatchStore.open();
     prefs = await ZSourcePrefs.open();
-    final src = _Src({'ani:1': [], 'ani:2': []});
+    final src = _Src({_novelA.id: [], _novelB.id: []});
     // sl.reset() above dropped the picker's own singletons; the sheet needs
     // them back before it can be opened.
-    await registerPickerDeps(aniyomi: [
-      aniSource(id: 1, name: 'AllAnime'),
-      aniSource(id: 2, name: 'HiAnime'),
-    ]);
+    await t.runAsync(() async {
+      await registerPickerDeps();
+      await _registerNovelSources([_novelA, _novelB]);
+    });
     sl.registerSingleton<SourceRepository>(src);
     sl.registerSingleton<MatchStore>(store);
     sl.registerSingleton<ZSourcePrefs>(prefs);
@@ -503,11 +545,9 @@ void main() {
     await t.pumpAndSettle();
     // The shared picker has no title row — its tabs identify it. Both sources
     // are offered, so a correction is still two taps away.
-    // One merged group, so the picker is identified by its All tab rather
-    // than by an Anime/Movies split that no longer exists.
     expect(find.text('All'), findsOneWidget);
-    expect(find.textContaining('AllAnime'), findsOneWidget);
-    expect(find.textContaining('HiAnime'), findsOneWidget);
+    expect(find.textContaining(_novelA.name), findsOneWidget);
+    expect(find.textContaining(_novelB.name), findsOneWidget);
   });
 
   testWidgets('no installed source at all says so, with nothing to switch or fix', (t) async {

@@ -1,11 +1,19 @@
-// Task 18 Part C: the picker's per-row settings gear and Cloudflare action.
+// The picker's per-row settings gear and Cloudflare action.
 // Harness mirrors wrong_title_sheet_test.dart's fakes; this file only adds
-// the per-source-settings channel mock.
+// the second novel source — a plain Zangetsu JS provider that declares
+// `type: 'novel'` and has no site behind it, so the row has nothing to offer
+// and the site-backed row's controls can be told apart from an empty menu.
+//
+// Novel-only build: the "Source settings" half of this file is gone.
+// source_actions.hasSourceSettings answers for `ani:`/`mihon:`/`cs:` ids only,
+// and none of those ecosystems can be installed in this build, so a novel
+// source can never offer a per-source settings screen — there is nothing left
+// for those two cases to assert. What is still live, and what these cases now
+// pin, is the Cloudflare solve: which row gets a control, and where it sits.
 
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -13,10 +21,15 @@ import '../../support/picker_deps.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/di/injector.dart';
 import 'package:watch_app/core/provider/cf_solve_needed.dart';
+import 'package:watch_app/core/hive/safe_box.dart';
+import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
+import 'package:watch_app/core/lnreader/lnreader_manager.dart';
 import 'package:watch_app/core/models/media_item.dart';
 import 'package:watch_app/core/models/media_detail.dart';
 import 'package:watch_app/core/models/provider_info.dart';
 import 'package:watch_app/core/playback/title_prefs.dart';
+import 'package:watch_app/core/provider/provider_registry.dart';
+import 'package:watch_app/core/provider/provider_repo_registry.dart';
 import 'package:watch_app/core/repository/catalogue_repository.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/zmode/match_store.dart';
@@ -38,6 +51,8 @@ class _Src implements SourceRepository {
 
   @override
   List<({String id, String name})> get pickableSources => loadedSources;
+  // Only the `lnr:` extension is site-backed here; the plain JS provider has
+  // no base url, which is what hides the controls on its row.
   @override
   String baseUrlFor(String id) =>
       id.startsWith('ani:') || id.startsWith('mihon:') || id.startsWith('lnr:')
@@ -46,7 +61,8 @@ class _Src implements SourceRepository {
   @override
   List<({String id, String name})> get loadedSources =>
       [for (final id in bySource.keys) (id: id, name: _name(id))];
-  static String _name(String id) => id == 'ani:1' ? 'HiAnime' : 'AllAnime';
+  static String _name(String id) =>
+      id == _siteBacked.id ? _siteBacked.name : _plainJs.name;
   @override
   bool hasSource(String sourceId) => bySource.containsKey(sourceId);
   @override
@@ -55,6 +71,13 @@ class _Src implements SourceRepository {
   Future<List<MediaItem>> search(String q, {String category = 'sub', String? sourceId}) async =>
       bySource[sourceId] ?? const [];
 }
+
+/// The LNReader extension row: a site, so the Cloudflare solve has a target.
+const _siteBacked = (id: 'lnr:novelhub', name: 'NovelHub');
+
+/// The app's own novel source: a repo-installed JS provider declaring
+/// `type: 'novel'`, with no site of its own.
+const _plainJs = (id: 'novelquill', name: 'NovelQuill');
 
 class _FakeTitlePrefs extends TitlePrefsStore {
   @override
@@ -69,19 +92,80 @@ class _FakeTitlePrefs extends TitlePrefsStore {
 Finder inSheet(Finder f) =>
     find.descendant(of: find.byType(BottomSheet), matching: f);
 
+/// Registers [_siteBacked] as an installed LNReader plugin. The picker reads
+/// its rows from the app's own registries rather than from the fake
+/// repository, so the row only exists if the box behind LnReaderManager says so
+/// (its [LnReaderManager.installedSources] is a plain read of stored plugin
+/// meta — no runtime is built). [registerPickerDeps] does the same job for
+/// Aniyomi.
+Future<void> _registerLnReaderSource(({String id, String name}) s) async {
+  final box = await openBoxSafely<Map>(LnReaderExtensionService.boxName);
+  final pluginId = s.id.substring(4); // the box is keyed by the bare plugin id
+  await box.put(pluginId, LnReaderPluginMeta(
+    id: pluginId,
+    name: s.name,
+    site: 'https://example.test',
+    lang: 'en',
+    version: '1.0.0',
+    url: 'https://example.test/$pluginId.js',
+    iconUrl: '',
+  ).toMap());
+  sl.registerSingleton<LnReaderManager>(LnReaderManager(
+    service: LnReaderExtensionService(httpGet: (_) async => ''),
+    // No plugin is ever called, so the runtime is never asked for one.
+    fetch: (_, _) => throw UnsupportedError('these tests never load a plugin'),
+  ));
+}
+
+/// Installs [_plainJs] as a repo provider. Unlike an `lnr:` row this one gets
+/// into the novel bucket through its repo manifest's `type`, so the manifest
+/// AND the provider-registry entry both have to be written — the picker reads
+/// the registry for the row and the manifest for its type.
+Future<void> _registerJsNovelSource(({String id, String name}) s) async {
+  const repoUrl = 'https://example.test/repo/index.json';
+  final reposBox = Hive.box<Map>(ProviderReposRegistry.boxName);
+  await reposBox.put(
+    repoUrl,
+    ProviderRepo(
+      url: repoUrl,
+      name: 'Test Repo',
+      description: '',
+      lastSyncedAt: DateTime.now(),
+      sources: [
+        RepoSource(
+          id: s.id,
+          name: s.name,
+          version: '1.0.0',
+          type: 'novel',
+          lang: 'en',
+          file: '${s.id}.js',
+        ),
+      ],
+    ).toJson(),
+  );
+  final regBox = Hive.box<Map>(ProviderRegistry.boxName);
+  await regBox.put(
+    ProviderRegistry.providerKey(repoUrl, s.id),
+    ProviderRegistryEntry(
+      name: s.id,
+      url: '$repoUrl/${s.id}.js',
+      originRepoUrl: repoUrl,
+      displayName: s.name,
+    ).toJson(),
+  );
+}
+
 void main() {
   late ZSourcePrefs prefs;
   late Directory dir;
-  const fma = ZCanonical(ZKind.anime, 'mal:5114');
-  const aniChannel = MethodChannel('zangetsu/aniyomi');
-  final aniCalls = <MethodCall>[];
+  const fma = ZCanonical(ZKind.novel, 'mal:5114');
 
   Widget harness(Widget child) => MaterialApp(
     home: Scaffold(
       body: BlocProvider(
         create: (_) => DetailCubit(
           repo: _NoopRepo(),
-          url: 'zm://anime/mal:5114',
+          url: 'zm://novel/mal:5114',
           prefs: _FakeTitlePrefs(),
         ),
         child: child,
@@ -91,25 +175,18 @@ void main() {
 
   setUp(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    aniCalls.clear();
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(aniChannel, (call) async {
-      aniCalls.add(call);
-      if (call.method == 'hasSourceSettings') {
-        // Only the ani:1 row (sourceId 1) actually has settings.
-        return (call.arguments as Map)['sourceId'] == 1;
-      }
-      return null;
-    });
-
     dir = await Directory.systemTemp.createTemp('wrongshow_picker');
     Hive.init(dir.path);
-    await registerPickerDeps(aniyomi: [aniSource(id: 1, name: 'HiAnime')]);
+    await registerPickerDeps();
+    // Both novel sources are installed, so the sheet has a site-backed row and
+    // a row with nothing to offer.
+    await _registerLnReaderSource(_siteBacked);
+    await _registerJsNovelSource(_plainJs);
     final src = _Src({
-      'ani:1': [MediaItem(id: 'a', title: 'Fullmetal Alchemist (2003)',
-          url: 'https://a/1', type: ProviderType.anime, sourceId: 'ani:1')],
-      'allanime': [MediaItem(id: 'b', title: 'Fullmetal Alchemist (2003)',
-          url: 'https://a/2', type: ProviderType.anime, sourceId: 'allanime')],
+      _siteBacked.id: [MediaItem(id: 'a', title: 'Fullmetal Alchemist (2003)',
+          url: 'https://a/1', type: ProviderType.novel, sourceId: _siteBacked.id)],
+      _plainJs.id: [MediaItem(id: 'b', title: 'Fullmetal Alchemist (2003)',
+          url: 'https://a/2', type: ProviderType.novel, sourceId: _plainJs.id)],
     });
     final store = await MatchStore.open();
     prefs = await ZSourcePrefs.open();
@@ -121,72 +198,16 @@ void main() {
   });
 
   tearDown(() async {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(aniChannel, null);
     await disposePickerDeps();
     await sl.reset();
     await Hive.close();
     await dir.delete(recursive: true);
   });
 
-  // The per-source controls live behind one overflow now (three icons on a
-  // row that also has to show a name was too many for actions used about
-  // twice per source), so every assertion here opens the menu first.
-  testWidgets('a source with settings offers it in the overflow, one without does not',
-      (t) async {
-    await t.runAsync(
-      () => sl<SourceMatcher>().resolve(fma, title: 'Fullmetal Alchemist (2003)'),
-    );
-    await t.pumpWidget(harness(const MatchLine(
-        canonical: fma, title: 'Fullmetal Alchemist (2003)')));
-    await t.pumpAndSettle();
-
-    await t.tap(find.textContaining('HiAnime'));
-    await t.pumpAndSettle();
-    // The shared picker has no title row — its tabs identify it.
-    // One merged group, so the picker is identified by its All tab rather
-    // than by an Anime/Movies split that no longer exists.
-    expect(find.text('All'), findsOneWidget);
-
-    // allanime is a JS provider with no site and no settings, so it gets no
-    // overflow at all rather than an empty menu — ani:1's is the only one.
-    expect(inSheet(find.byIcon(Icons.more_vert_rounded)), findsOneWidget);
-
-    await t.tap(inSheet(find.byIcon(Icons.more_vert_rounded)));
-    await t.pumpAndSettle();
-    expect(find.text('Source settings'), findsOneWidget);
-  });
-
-  testWidgets('choosing Source settings opens them but does not change the selection',
-      (t) async {
-    await t.runAsync(
-      () => sl<SourceMatcher>().resolve(fma, title: 'Fullmetal Alchemist (2003)'),
-    );
-    await t.pumpWidget(harness(const MatchLine(
-        canonical: fma, title: 'Fullmetal Alchemist (2003)')));
-    await t.pumpAndSettle();
-
-    await t.tap(find.textContaining('HiAnime'));
-    await t.pumpAndSettle();
-    await t.pumpAndSettle();
-
-    final before = prefs.get(fma.kind);
-
-    await t.tap(inSheet(find.byIcon(Icons.more_vert_rounded)));
-    await t.pumpAndSettle();
-    await t.tap(find.text('Source settings'));
-    await t.pumpAndSettle();
-
-    // The sheet is still open (only a row's own body pops it) and the
-    // selection is untouched.
-    // The shared picker has no title row — its tabs identify it.
-    // One merged group, so the picker is identified by its All tab rather
-    // than by an Anime/Movies split that no longer exists.
-    expect(find.text('All'), findsOneWidget);
-    expect(prefs.get(fma.kind), before);
-    expect(aniCalls.any((c) => c.method == 'openSourceSettings'), isTrue);
-  });
-
+  // The per-source controls live behind one overflow (three icons on a row that
+  // also has to show a name was too many for actions used about twice per
+  // source), so every assertion here opens the menu first.
+  //
   // Home already routes Mihon, Aniyomi and LNReader challenges through the one
   // solver, so scoping the picker's solve to `mihon:` hid a control that
   // works. The gate is the source's base url: site-backed ecosystems have one,
@@ -200,12 +221,15 @@ void main() {
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
 
-    await t.tap(find.textContaining('HiAnime'));
+    await t.tap(find.textContaining(_siteBacked.name));
     await t.pumpAndSettle();
+    // The shared picker has no title row — its tabs identify it, and in this
+    // build that is the All tab plus the mode's own single bucket.
+    expect(find.text('All'), findsOneWidget);
 
-    // ani:1 is site-backed and gets the overflow; allanime is a JS provider
-    // with no base url and must not — "nothing to solve against" is the only
-    // thing that hides it, not "not currently blocked".
+    // The lnr: row is site-backed and gets the overflow; the JS provider has
+    // no base url and must not — "nothing to solve against" is the only thing
+    // that hides it, not "not currently blocked".
     expect(inSheet(find.byIcon(Icons.more_vert_rounded)), findsOneWidget);
     // The shared picker builds its own row widget, not a ListTile.
     final actionRow = find.ancestor(
@@ -213,7 +237,8 @@ void main() {
       matching: find.byType(InkWell),
     );
     expect(
-      find.descendant(of: actionRow, matching: find.textContaining('HiAnime')),
+      find.descendant(
+          of: actionRow, matching: find.textContaining(_siteBacked.name)),
       findsOneWidget,
       reason: 'the actions must sit on the site-backed row, not the JS one',
     );
@@ -237,7 +262,7 @@ void main() {
     CfSolveNeeded.needsSolve(
       'example.test',
       'https://example.test/s?q=x',
-      sourceId: 'ani:1',
+      sourceId: _siteBacked.id,
     );
     addTearDown(() => CfSolveNeeded.clear('example.test'));
 
@@ -248,19 +273,19 @@ void main() {
         canonical: fma, title: 'Fullmetal Alchemist (2003)')));
     await t.pumpAndSettle();
 
-    await t.tap(find.textContaining('HiAnime'));
+    await t.tap(find.textContaining(_siteBacked.name));
     await t.pumpAndSettle();
 
     // The shield is back on the row, badged, one tap from a solve.
     expect(inSheet(find.byIcon(Icons.shield_rounded)), findsOneWidget);
     expect(inSheet(find.byType(Badge)), findsOneWidget);
-    // The overflow stays (this source has settings) but is plain, and must
-    // not offer the same solve a second time.
+    // The overflow stays (this source still has its site to sign in to) but is
+    // plain, and must not offer the same solve a second time.
     expect(inSheet(find.byIcon(Icons.more_vert_rounded)), findsOneWidget);
     await t.tap(inSheet(find.byIcon(Icons.more_vert_rounded)));
     await t.pumpAndSettle();
     expect(find.text('Solve Cloudflare'), findsNothing);
-    expect(find.text('Source settings'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
   });
 }
 
@@ -283,5 +308,5 @@ class _NoopRepo implements CatalogueRepository {
     bool Function()? abandoned,
   }) async =>
       const MediaDetail(
-          id: 'x', title: 'x', url: 'zm://anime/mal:5114', type: ProviderType.anime, sourceId: 'zm');
+          id: 'x', title: 'x', url: 'zm://novel/mal:5114', type: ProviderType.novel, sourceId: 'zm');
 }

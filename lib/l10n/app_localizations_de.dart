@@ -326,6 +326,21 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsSectionAboutSummary => 'Updates, Support, Version';
 
   @override
+  String get settingsSectionDownloadsSummaryNovels =>
+      'Heruntergeladene Kapitel, Speicher';
+
+  @override
+  String get settingsSectionHistorySummaryNovels => 'Gelesene Romane';
+
+  @override
+  String get settingsSectionNotificationsSummaryNovels =>
+      'Neue-Kapitel-Benachrichtigungen';
+
+  @override
+  String get settingsSectionReadingSummaryNovels =>
+      'Roman-Reader-Einstellungen';
+
+  @override
   String get couldNotExportLogs => 'Logs konnten nicht exportiert werden';
 
   @override
@@ -953,6 +968,27 @@ class AppLocalizationsDe extends AppLocalizations {
       'Anime, Manga und Romane — alles in einer App, so wie du willst.';
 
   @override
+  String get downloadsSubtitleNovel =>
+      'Verwalte deine heruntergeladenen Kapitel';
+
+  @override
+  String get historySubtitleNovels => 'Gelesene Romane';
+
+  @override
+  String get listsOnly => 'Listen';
+
+  @override
+  String get notificationsSubtitleNovel =>
+      'Neue-Kapitel-Benachrichtigungen für abonnierte Romane';
+
+  @override
+  String get onboardingIntroNovels =>
+      'Romane aus allen installierten Quellen, richte es dir ein.';
+
+  @override
+  String get readerSubtitleNovels => 'Roman-Reader-Standardwerte';
+
+  @override
   String get youChooseWhatsInside => 'Du entscheidest, was drin ist';
 
   @override
@@ -965,6 +1001,9 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get pickStreamingMangaOrNovels =>
       'Streaming, Manga oder Romane wählen';
+
+  @override
+  String get pickNovels => 'Novel-Quellen wählen';
 
   @override
   String get pasteInARepositoryLink => 'Repo-Link einfügen';

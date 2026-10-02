@@ -2,6 +2,7 @@ import '../../features/detail/detail_screen.dart';
 import '../di/injector.dart';
 import '../models/media_item.dart';
 import '../mode/content_mode.dart';
+import '../mode/novel_only.dart';
 import '../models/provider_info.dart';
 import '../ui/global_messenger.dart';
 import 'subscription_store.dart';
@@ -38,11 +39,16 @@ Future<void> openShowFromNotification(String? payload) async {
         url: url,
         // Was hardcoded to anime, which opened a subscribed manga as a video
         // show. The subscription knows what it is.
-        type: switch (sub?.mode) {
-          ContentMode.manga => ProviderType.manga,
-          ContentMode.novel => ProviderType.novel,
-          _ => ProviderType.anime,
-        },
+        //
+        // Novel-only build: a notification stored by a pre-fork build carries
+        // Streaming/Manga here, and the old fallback was anime. Both now open
+        // as a novel — the Detail screen normalises the same way, so a stale
+        // notification can't reach a video or page-image surface.
+        type: kNovelOnly || sub?.mode == ContentMode.novel
+            ? ProviderType.novel
+            : sub?.mode == ContentMode.manga
+            ? ProviderType.manga
+            : ProviderType.anime,
         sourceId: sourceId,
         cover: sub?.cover,
         coverHeaders: sub?.coverHeaders,

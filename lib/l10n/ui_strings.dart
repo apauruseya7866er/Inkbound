@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/mode/content_mode.dart';
+import '../core/mode/novel_only.dart';
 import '../core/models/watch_status.dart';
 import '../core/playback/search_prefs.dart';
 import '../core/playback/source_health_store.dart' show SourceOutcome;
@@ -98,16 +99,30 @@ String settingsSectionTitle(AppLocalizations l10n, String section) =>
       _ => section,
     };
 
+/// The one-line blurb under each Settings hub row.
+///
+/// Novel-only build: Reading / History / Downloads / Notifications get
+/// novel-only wording. This is the key set the hub actually renders — the
+/// per-entry `*Subtitle` keys are what the flat search list shows, and they
+/// need the same treatment separately.
 String settingsSectionSummary(AppLocalizations l10n, String section) =>
     switch (section) {
       SettingsSection.account => l10n.settingsSectionAccountSummary,
       SettingsSection.sources => l10n.settingsSectionSourcesSummary,
       SettingsSection.playback => l10n.settingsSectionPlaybackSummary,
-      SettingsSection.reading => l10n.settingsSectionReadingSummary,
-      SettingsSection.history => l10n.settingsSectionHistorySummary,
-      SettingsSection.downloads => l10n.settingsSectionDownloadsSummary,
+      SettingsSection.reading => kNovelOnly
+          ? l10n.settingsSectionReadingSummaryNovels
+          : l10n.settingsSectionReadingSummary,
+      SettingsSection.history => kNovelOnly
+          ? l10n.settingsSectionHistorySummaryNovels
+          : l10n.settingsSectionHistorySummary,
+      SettingsSection.downloads => kNovelOnly
+          ? l10n.settingsSectionDownloadsSummaryNovels
+          : l10n.settingsSectionDownloadsSummary,
       SettingsSection.interface => l10n.settingsSectionInterfaceSummary,
-      SettingsSection.notifications => l10n.settingsSectionNotificationsSummary,
+      SettingsSection.notifications => kNovelOnly
+          ? l10n.settingsSectionNotificationsSummaryNovels
+          : l10n.settingsSectionNotificationsSummary,
       SettingsSection.advanced => l10n.settingsSectionAdvancedSummary,
       SettingsSection.about => l10n.settingsSectionAboutSummary,
       _ => '',

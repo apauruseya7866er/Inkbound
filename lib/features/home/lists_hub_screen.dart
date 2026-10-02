@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/di/injector.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tracker/tracker.dart';
@@ -30,22 +31,33 @@ class ListsHubScreen extends StatelessWidget {
       backgroundColor: AppColors.bg,
       appBar: AppBar(
         backgroundColor: AppColors.bg,
-        title: Text(context.l10n.scheduleAndLists, style: AppText.barTitle),
+        title: Text(
+          // Novel-only build: no Schedule row renders below any more, so the
+          // bar title drops the half of the name that promised it.
+          kNovelOnly ? context.l10n.listsOnly : context.l10n.scheduleAndLists,
+          style: AppText.barTitle,
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
         children: [
-          const _SectionLabel('BROWSE'),
-          const SizedBox(height: 12),
-          _HubRow(
-            icon: Icons.calendar_month_rounded,
-            tint: AppColors.accent,
-            title: context.l10n.schedule,
-            desc: context.l10n.scheduleHubDesc,
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(builder: (_) => const ScheduleScreen()),
+          // Novel-only build: Schedule is the anime airing calendar — it reads
+          // AniList's `NEXT_EPISODES` schedule, which has no novel equivalent.
+          // Hidden here so it isn't a door onto an always-empty screen; the
+          // "Schedule and Lists" title keeps its wording for the list rows.
+          if (!kNovelOnly) ...[
+            const _SectionLabel('BROWSE'),
+            const SizedBox(height: 12),
+            _HubRow(
+              icon: Icons.calendar_month_rounded,
+              tint: AppColors.accent,
+              title: context.l10n.schedule,
+              desc: context.l10n.scheduleHubDesc,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const ScheduleScreen()),
+              ),
             ),
-          ),
+          ],
           for (final t in trackers) ...[
             const SizedBox(height: 28),
             _SectionLabel(t.displayName.toUpperCase()),
@@ -77,10 +89,18 @@ class ListsHubScreen extends StatelessWidget {
   /// reading side at all and gets the one video row; MangaBaka is the mirror
   /// of that and gets no video row, which is why this reads both flags rather
   /// than treating an anime list as a given.
-  static List<ContentMode> _kindsFor(Tracker t) => [
-    if (trackerSupportsVideo(t)) ContentMode.anime,
-    if (t.supportsReading) ...[ContentMode.manga, ContentMode.novel],
-  ];
+  static List<ContentMode> _kindsFor(Tracker t) {
+    final all = <ContentMode>[
+      if (trackerSupportsVideo(t)) ContentMode.anime,
+      if (t.supportsReading) ...[ContentMode.manga, ContentMode.novel],
+    ];
+    // Novel-only build: a video-only tracker (Simkl) has nothing to show, and
+    // a reading tracker shows its single Novel row. Filtering here rather than
+    // at the render site means the section header, the row count and the rows
+    // all agree on the same answer.
+    if (!kNovelOnly) return all;
+    return all.where((k) => modeAvailable(k)).toList();
+  }
 
   static IconData _iconFor(ContentMode k) => switch (k) {
     ContentMode.anime => Icons.play_circle_outline_rounded,

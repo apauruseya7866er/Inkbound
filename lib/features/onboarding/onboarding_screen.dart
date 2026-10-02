@@ -8,6 +8,7 @@ import 'package:hive/hive.dart';
 
 import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
+import '../../core/mode/novel_only.dart';
 import '../../core/state/active_source_cubit.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -396,10 +397,14 @@ class _BrandPage extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  context.l10n.onboardingIntro,
-                  style: AppText.body.copyWith(color: AppColors.textSecondary),
-                  textAlign: TextAlign.center,
+          Text(
+            // Novel-only build: the original names all three content types.
+            kNovelOnly
+                ? context.l10n.onboardingIntroNovels
+                : context.l10n.onboardingIntro,
+            style: AppText.body.copyWith(color: AppColors.textSecondary),
+            textAlign: TextAlign.center,
+
                 ),
               ],
             ),
@@ -449,14 +454,19 @@ class _HowItWorksPage extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
-                _EcosystemTile(
-                  icon: Icons.movie_filter_outlined,
-                  label: context.l10n.modeStreaming,
-                ),
-                _EcosystemTile(
-                  icon: Icons.menu_book_outlined,
-                  label: context.l10n.modeManga,
-                ),
+                // Novel-only build: the manga tile is gone. `spaceEvenly`
+                // handles the shorter row on its own, so the two remaining
+                // tiles re-centre without any other change here.
+                if (!kNovelOnly)
+                  _EcosystemTile(
+                    icon: Icons.movie_filter_outlined,
+                    label: context.l10n.modeStreaming,
+                  ),
+                if (!kNovelOnly)
+                  _EcosystemTile(
+                    icon: Icons.menu_book_outlined,
+                    label: context.l10n.modeManga,
+                  ),
                 _EcosystemTile(
                   icon: Icons.auto_stories_outlined,
                   label: context.l10n.modeNovel,
@@ -473,7 +483,11 @@ class _HowItWorksPage extends StatelessWidget {
                 _Step(number: 1, label: context.l10n.openProviders),
                 _Step(
                   number: 2,
-                  label: context.l10n.pickStreamingMangaOrNovels,
+                  // Novel-only build: "pick streaming, manga or novels" would
+                  // name two ecosystems this app can't load.
+                  label: kNovelOnly
+                      ? context.l10n.pickNovels
+                      : context.l10n.pickStreamingMangaOrNovels,
                 ),
                 _Step(number: 3, label: context.l10n.pasteInARepositoryLink),
                 _Step(number: 4, label: context.l10n.browseAndGrab),
