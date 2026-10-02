@@ -169,7 +169,7 @@ const String kAllSources = '__all__';
 /// default "no filter" tab, not a real ecosystem.
 enum SearchEcosystem {
   all('All'),
-  zangetsu('Zangetsu'),
+  zangetsu('Inkbound'),
   cloudstream('CloudStream'),
   aniyomi('Aniyomi'),
   mihon('Mihon'),
@@ -187,7 +187,8 @@ SearchEcosystem ecosystemOf(String sourceId) {
   if (sourceId.startsWith('cs:')) return SearchEcosystem.cloudstream;
   // Manga and novel extensions carry their own prefixes and belong to their own
   // ecosystems. Without these they fell through to Zangetsu, so a MangaDex
-  // result sat under a tab labelled "Zangetsu" and no Mihon tab ever appeared.
+  // result sat under a tab labelled with this app's own name and no Mihon tab
+  // ever appeared.
   // A future ecosystem (Mangayomi, say) is one prefix and one enum value.
   if (sourceId.startsWith('mihon:')) return SearchEcosystem.mihon;
   if (sourceId.startsWith('lnr:')) return SearchEcosystem.lnreader;

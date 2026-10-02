@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../onboarding/bankai_splash.dart';
 import '../../core/app_icon/app_icon_service.dart';
 import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
@@ -311,20 +310,18 @@ class _SplashCardState extends State<_SplashCard>
               clipBehavior: Clip.antiAlias,
               child: AnimatedBuilder(
                 animation: _c,
-                builder: (context, _) => widget.option.id == 'bankai'
-                    ? Center(child: BankaiSplash(progress: _t, size: 72))
-                    : Center(
-                        child: Opacity(
-                          opacity: _t.clamp(0.0, 1.0),
-                          child: FractionallySizedBox(
-                            widthFactor: 0.82,
-                            child: Image.asset(
-                              'assets/icon/wordmark.png',
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                        ),
+                builder: (context, _) => Center(
+                  child: Opacity(
+                    opacity: _t.clamp(0.0, 1.0),
+                    child: FractionallySizedBox(
+                      widthFactor: 0.82,
+                      child: Image.asset(
+                        'assets/icon/wordmark.png',
+                        fit: BoxFit.contain,
                       ),
+                    ),
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: 8),

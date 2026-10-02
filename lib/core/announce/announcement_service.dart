@@ -21,6 +21,10 @@ class AnnouncementService {
   /// first) so the caller can pop the launch sheet; the history list reads from
   /// the store. Returns `[]` on any error.
   Future<List<Announcement>> check() async {
+    // No feed configured → nothing to fetch. Checked before the request rather
+    // than relying on the catch below, so an unset URL never becomes a
+    // pointless network call on every launch.
+    if (kAnnouncementsUrl.isEmpty) return const [];
     try {
       final res = await _dio.get<String>(
         kAnnouncementsUrl,

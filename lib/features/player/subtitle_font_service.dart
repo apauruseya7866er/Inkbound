@@ -27,8 +27,11 @@ class SubtitleFontService {
   /// Families bundled in the APK (registered in pubspec) — always available.
   static const Set<String> bundled = {'Inter', 'Noto Sans'};
 
+  /// Served from THIS fork's repo, which carries the same `assets/fonts/`
+  /// tree. Left on the upstream URL it kept working only for as long as that
+  /// branch stayed put — and any font added here would never be found.
   static const String _base =
-      'https://raw.githubusercontent.com/Spyou/Zangetsu/main/assets/fonts/';
+      'https://raw.githubusercontent.com/apauruseya7866er/Inkbound/main/assets/fonts/';
 
   final Dio _dio = Dio(
     BaseOptions(

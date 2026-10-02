@@ -10,6 +10,7 @@ import 'package:flutter/services.dart'
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../../core/app_config.dart';
 import '../../core/platform/app_paths.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -3039,7 +3040,7 @@ class PlayerCubit extends Cubit<PlayerState> {
         _toast("Couldn't capture the frame");
         return false;
       }
-      final name = 'Zangetsu_${DateTime.now().millisecondsSinceEpoch}';
+      final name = '${kAppName}_${DateTime.now().millisecondsSinceEpoch}';
       // Saving needs no runtime permission on Android 10+; on older Android /
       // iOS the first attempt throws accessDenied — request, then retry once.
       try {

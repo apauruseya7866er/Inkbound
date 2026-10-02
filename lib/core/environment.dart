@@ -1,10 +1,17 @@
-/// Zangetsu has no backend of its own: the library, history and settings
+/// Inkbound has no backend of its own: the library, history and settings
 /// all live in local storage, and a backup is a JSON file in a folder you
 /// chose. What is left here is the OAuth configuration for the tracker
 /// integrations and the website's share page - the only other things
 /// that talk to anyone.
 class Environment {
-  /// Base of the Zangetsu website (landing + the share "open" page).
+  /// Host of the share "open" page, which is what turns a shared link back
+  /// into an in-app title (it redirects to [openLinkScheme] `://open?…`).
+  ///
+  /// Still upstream's host, on purpose and for one reason only: it is the
+  /// deployed page that does that redirect. There is no Inkbound equivalent,
+  /// so pointing elsewhere breaks share-to-app. It is not this app's site,
+  /// it is never shown in the UI, and nothing else here talks to it. Host
+  /// your own copy of that page and repoint this to retire the dependency.
   static const String siteBaseUrl = 'https://zangetsu.online';
 
   /// Share links point here. The page opens the app if installed (via the

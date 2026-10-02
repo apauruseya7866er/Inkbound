@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../platform/app_paths.dart';
+import '../app_config.dart';
 
 /// Lightweight in-app logger: a capped ring buffer that users can export + share
 /// so the developer can debug reported issues. Captures Dart logs/errors only —
@@ -89,7 +90,7 @@ class AppLogger {
     try {
       final dir = await getTemporaryDirectory();
       final f = File('${dir.path}/zangetsu-logs.txt');
-      await f.writeAsString('Zangetsu logs\n\n$contents\n');
+      await f.writeAsString('$kAppName logs\n\n$contents\n');
       return f;
     } catch (_) {
       return null;

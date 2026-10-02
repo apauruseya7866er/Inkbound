@@ -48,6 +48,7 @@ import 'reader_auto_scroll_ui.dart';
 import 'reader_comfort.dart';
 import '../../l10n/l10n.dart';
 import 'reader_pull_chapter.dart';
+import '../../core/app_config.dart';
 
 /// Image reader for manga chapters — the paged/webtoon counterpart of
 /// [package:watch_app/features/reader/novel_reader_screen.dart]'s text
@@ -3431,7 +3432,7 @@ class _MangaReaderScreenState extends State<MangaReaderScreen>
         headers: page.headers ?? const {},
       );
       final bytes = await file.readAsBytes();
-      final name = 'Zangetsu_${DateTime.now().millisecondsSinceEpoch}';
+      final name = '${kAppName}_${DateTime.now().millisecondsSinceEpoch}';
       try {
         await Gal.putImageBytes(bytes, name: name);
       } on GalException {

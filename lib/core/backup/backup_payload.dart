@@ -1,3 +1,5 @@
+import '../app_config.dart';
+
 enum BackupBundle { sources, library, settings }
 
 class BackupFormatException implements Exception {
@@ -22,10 +24,10 @@ Map<String, dynamic> wrapPayload(
 
 Map<BackupBundle, Map<String, dynamic>> unwrapPayload(Map<String, dynamic> raw) {
   if (raw['app'] != _kApp) {
-    throw const BackupFormatException("This isn't a Zangetsu backup.");
+    throw BackupFormatException("This isn't a $kAppName backup.");
   }
   if ((raw['version'] as num? ?? 0) > _kVersion) {
-    throw const BackupFormatException('Made by a newer version of Zangetsu.');
+    throw BackupFormatException('Made by a newer version of $kAppName.');
   }
   final bundles = (raw['bundles'] as Map?) ?? const {};
   final out = <BackupBundle, Map<String, dynamic>>{};

@@ -14,6 +14,7 @@ import '../../core/tv/tv_list_focusable.dart';
 import '../../core/ui/app_dialog.dart';
 import '../../core/ui/settings_widgets.dart';
 import '../../l10n/l10n.dart';
+import '../../core/app_config.dart';
 
 class BackupScreen extends StatefulWidget {
   const BackupScreen({super.key});
@@ -344,7 +345,7 @@ class _BackupScreenState extends State<BackupScreen> {
                     title: 'Back up to a folder',
                     subtitle: configured
                         ? prefs.treeLabel ?? 'Folder chosen'
-                        : 'Pick once, then Zangetsu writes a backup every day. '
+                        : 'Pick once, then $kAppName writes a backup every day. '
                               'Google Drive works.',
                     onTap: _busy ? null : _pickFolder,
                   ),

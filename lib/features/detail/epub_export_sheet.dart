@@ -16,6 +16,7 @@ import '../../core/ui/app_toast.dart';
 import '../../core/ui/settings_widgets.dart';
 import '../../l10n/l10n.dart';
 import '../settings/download_location_screen.dart';
+import '../../core/app_config.dart';
 
 /// "Export as EPUB" — packs every DOWNLOADED chapter of a novel (or a picked
 /// range of them) into a real EPUB file. A chapter's text only exists on
@@ -254,7 +255,7 @@ class _EpubExportBodyState extends State<_EpubExportBody> {
       return;
     }
 
-    final show = 'Zangetsu/${ChapterDownloadStore.safeName(widget.showTitle)}';
+    final show = '$kAppName/${ChapterDownloadStore.safeName(widget.showTitle)}';
     final saved = await _publish(written, show);
     if (!mounted) return;
     setState(() => _exporting = false);

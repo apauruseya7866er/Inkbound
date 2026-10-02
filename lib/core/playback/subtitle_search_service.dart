@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../di/injector.dart';
 import 'playback_prefs.dart';
+import '../app_config.dart';
 
 /// One subtitle hit from an OpenSubtitles search. [fileId] is what the
 /// `/download` endpoint needs to mint a one-time download link; [name] is a
@@ -67,7 +68,7 @@ class SubtitleSearchService {
   static const String _base = 'https://api.opensubtitles.com/api/v1';
 
   /// A descriptive User-Agent — OpenSubtitles requires (and rate-limits by) one.
-  static const String _userAgent = 'Zangetsu v1.0.0';
+  static const String _userAgent = '$kAppName v1.0.0';
 
   PlaybackPrefs get _prefs => sl<PlaybackPrefs>();
 

@@ -6,6 +6,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import '../announce/announcement.dart';
 import '../di/injector.dart';
 import 'notification_service.dart';
+import '../app_config.dart';
 
 /// Firebase Cloud Messaging — broadcast a custom notification to every user for
 /// free (FCM is $0 on all Firebase plans, unmetered).
@@ -63,7 +64,7 @@ class PushService {
       if (n != null) {
         NotificationService.instance.showMessage(
           id: m.hashCode & 0x7fffffff,
-          title: n.title ?? 'Zangetsu',
+          title: n.title ?? kAppName,
           body: n.body ?? '',
           imageUrl: n.android?.imageUrl,
         );
@@ -93,7 +94,7 @@ class PushService {
       unawaited(store.saveNew(
         Announcement(
           id: id,
-          title: n.title ?? 'Zangetsu',
+          title: n.title ?? kAppName,
           body: n.body ?? '',
           actionLabel: link != null ? 'Open' : null,
           actionUrl: link,

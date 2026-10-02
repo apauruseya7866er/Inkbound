@@ -26,13 +26,24 @@ void main() {
   });
 
   test('a choice is remembered', () async {
-    await SplashStyle.select('bankai');
-    expect(SplashStyle.selectedId, 'bankai');
+    await SplashStyle.select('wordmark');
+    expect(SplashStyle.selectedId, 'wordmark');
   });
 
   test('an id this build no longer ships falls back to the default', () async {
     Hive.box(SplashStyle.boxName).put('splashStyleId', 'some-old-style');
     expect(SplashStyle.selectedId, 'wordmark');
+  });
+
+  test('a previously-shipped id resolves to the default, not a blank splash',
+      () async {
+    // 'bankai' was a real option drawn from the upstream project's logo. The id
+    // is gone from [options], so a device that still has it stored must land on
+    // the wordmark rather than fall through to whatever build selectedId returns
+    // for unknown ids.
+    Hive.box(SplashStyle.boxName).put('splashStyleId', 'bankai');
+    expect(SplashStyle.selectedId, SplashStyle.defaultId);
+    expect(SplashStyle.selectedId, isNotEmpty);
   });
 
   test('a non-string value falls back rather than throwing', () {
@@ -41,9 +52,9 @@ void main() {
   });
 
   test('an unknown id is refused, not stored', () async {
-    await SplashStyle.select('bankai');
+    await SplashStyle.select('wordmark');
     await SplashStyle.select('nonsense');
-    expect(SplashStyle.selectedId, 'bankai');
+    expect(SplashStyle.selectedId, 'wordmark');
   });
 
   test('the default option exists and leads the list', () {
@@ -68,7 +79,7 @@ void main() {
 
     test('a write against a closed box is a no-op, not a crash', () async {
       await Hive.close();
-      await expectLater(SplashStyle.select('bankai'), completes);
+      await expectLater(SplashStyle.select('wordmark'), completes);
     });
   });
 }

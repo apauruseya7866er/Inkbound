@@ -1,9 +1,5 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
-import '../../core/ui/splash_style.dart';
-import 'bankai_splash.dart';
 import 'package:hive/hive.dart';
 
 import '../../core/app_mode.dart';
@@ -68,10 +64,6 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
-  /// Read once, at the start of the animation — the picker writes the box, and
-  /// re-reading mid-build would let a change take effect halfway through a run.
-  late final bool _bankai = SplashStyle.selectedId == 'bankai';
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -79,18 +71,6 @@ class _SplashScreenState extends State<SplashScreen>
       body: AnimatedBuilder(
         animation: _c,
         builder: (context, _) {
-          // The mark being cut in, driven by the same controller — one ticker
-          // either way, so picking it costs nothing the wordmark did not.
-          if (_bankai) {
-            return Center(
-              child: LayoutBuilder(
-                builder: (context, box) => BankaiSplash(
-                  progress: _c.value,
-                  size: math.min(box.maxWidth * 0.62, 320),
-                ),
-              ),
-            );
-          }
           final r = _reveal.value;
           return Stack(
             children: [

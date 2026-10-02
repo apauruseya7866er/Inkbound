@@ -14,10 +14,9 @@ class AboutSettingsScreen extends StatefulWidget {
 }
 
 class _AboutSettingsScreenState extends State<AboutSettingsScreen> {
-  static const String _websiteUrl = 'https://zangetsu.online';
-  static const String _telegramUrl = 'https://t.me/+9mQlsdvDlo83Mjk1';
-  static const String _discordUrl = kDiscordInviteUrl;
-  static const String _githubUrl = 'https://github.com/Spyou/Zangetsu';
+  // No website: this fork has no landing page of its own, and the upstream
+  // site is not this app's. No Telegram/Discord either — see kDiscordInviteUrl.
+  static const String _githubUrl = 'https://github.com/apauruseya7866er/Inkbound';
 
   final UpdateService _updateService = UpdateService();
   bool _betaUpdates = false;
@@ -65,24 +64,6 @@ class _AboutSettingsScreenState extends State<AboutSettingsScreen> {
           SettingsSectionLabel(context.l10n.social, muted: true),
           SettingsCard(
             children: [
-              SettingsTile(
-                icon: Icons.language_rounded,
-                title: context.l10n.website,
-                subtitle: 'zangetsu.online',
-                onTap: () => _open(_websiteUrl),
-              ),
-              SettingsTile(
-                icon: Icons.send_rounded,
-                title: context.l10n.telegram,
-                subtitle: context.l10n.communityChat,
-                onTap: () => _open(_telegramUrl),
-              ),
-              SettingsTile(
-                icon: Icons.discord,
-                title: context.l10n.discord,
-                subtitle: context.l10n.joinTheServer,
-                onTap: () => _open(_discordUrl),
-              ),
               SettingsTile(
                 icon: Icons.code_rounded,
                 title: context.l10n.github,

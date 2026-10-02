@@ -26,6 +26,7 @@ import '../zmode/zmode_ids.dart';
 import '../zmode/zmode_module.dart';
 import '../zmode/zmode_prefs.dart';
 import 'states.dart';
+import '../app_config.dart';
 
 /// Installed-and-enabled sources bucketed by category, each as an `(id, label)`
 /// row. Reused by the source switcher and the search source picker.
@@ -418,7 +419,7 @@ ecosystemTabs(List<({String id, String label, String? repo, String? icon})> rows
       if (isAni(r.id)) r,
   ];
   return [
-    if (zangetsu.isNotEmpty) (title: 'Zangetsu', rows: zangetsu),
+    if (zangetsu.isNotEmpty) (title: kAppName, rows: zangetsu),
     if (cs.isNotEmpty) (title: 'CloudStream', rows: cs),
     if (ani.isNotEmpty) (title: 'Aniyomi', rows: ani),
   ];

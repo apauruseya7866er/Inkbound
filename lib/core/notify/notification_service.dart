@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'notification_router.dart';
+import '../app_config.dart';
 
 /// Thin wrapper over flutter_local_notifications.
 ///
@@ -174,7 +175,7 @@ class NotificationService {
       android: AndroidNotificationDetails(
         'announcements',
         'Announcements',
-        channelDescription: 'News and updates from Zangetsu',
+        channelDescription: 'News and updates from $kAppName',
         importance: Importance.high,
         priority: Priority.high,
         styleInformation: style,

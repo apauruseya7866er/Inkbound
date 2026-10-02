@@ -28,9 +28,14 @@ class SplashStyle {
   static const String defaultId = 'wordmark';
 
   /// [defaultId] first, so the picker leads with what a fresh install wears.
+  ///
+  /// One option today. A second animated splash used to be offered here and
+  /// was drawn from the upstream project's logo geometry, which is not this
+  /// app's mark; it is gone rather than re-skinned. Its persisted id now falls
+  /// back to [defaultId] via [selectedId], so anyone who had picked it gets the
+  /// wordmark on the next launch.
   static const List<SplashStyleOption> options = [
     SplashStyleOption(id: 'wordmark', label: 'Wordmark'),
-    SplashStyleOption(id: 'bankai', label: 'Bankai'),
   ];
 
   /// Falls back to [defaultId] for anything unknown, so a build that drops an

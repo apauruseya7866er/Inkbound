@@ -22,10 +22,12 @@ const String kAppId = 'watch_app';
 /// Manifest schema version this app speaks. Repos below this are rejected.
 const int kManifestSchemaVersion = 2;
 
-/// Community Discord invite. Lived in two places (the launch community sheet
-/// and Settings → About) and drifted — the sheet's copy went stale and expired.
-/// One const now, so refreshing the invite is a single edit here.
-const String kDiscordInviteUrl = 'https://discord.gg/hey6vz9kg6';
+/// Community Discord invite.
+///
+/// Empty: this fork has no Discord server of its own, and the upstream
+/// project's invite is not ours to put in front of people. Blank is the
+/// documented "not set up" state — callers hide their tile.
+const String kDiscordInviteUrl = '';
 
 /// Where "Send report" posts the diagnostic log — the Cloudflare Worker in
 /// `cloudflare/log-intake/` (see its README to deploy). No path, no trailing
@@ -34,16 +36,23 @@ const String kDiscordInviteUrl = 'https://discord.gg/hey6vz9kg6';
 /// Empty means "not set up" — the report button falls back to the share sheet
 /// rather than failing, so a fork with no Worker of its own still works.
 ///
+/// Empty here on purpose: the only deployed Worker is the upstream author's,
+/// and reports are full of device details and provider URLs. Nothing leaves
+/// this install unless someone stands up a Worker and pastes its URL below.
+///
 /// Only the public URL lives here. The Discord webhook stays on the Worker:
 /// this app is open source and its APK is public, so anything put in the app
 /// can be read straight back out of it.
-const String kLogIntakeUrl = 'https://zangetsu-logs.log-intake.workers.dev';
+const String kLogIntakeUrl = '';
 
 /// Developer announcements feed (a plain JSON file in the public app repo).
 /// The app READS this on launch to show in-app announcements — never writes.
 /// Edit + push that file to broadcast a message to every user.
-const String kAnnouncementsUrl =
-    'https://raw.githubusercontent.com/Spyou/Zangetsu/main/announcements.json';
+///
+/// Empty: blank means "no feed", and [AnnouncementService] then short-circuits
+/// without a request. There is no announcements.json in this repo yet; point
+/// this at your own to switch the feature back on.
+const String kAnnouncementsUrl = '';
 
 /// TMDB API key for movie/TV trailer lookups (TrailerService). Anime trailers
 /// use AniList and need no key. Supply via `--dart-define=TMDB_API_KEY=...`,
