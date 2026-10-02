@@ -54,7 +54,7 @@ class DownloadManager extends ChangeNotifier {
   final Map<String, TorrentDownloadProgress> torrentProgress = {};
 
   static const String boxName = 'downloads';
-  static const String _sharedDir = 'Zangetsu';
+  static const String _sharedDir = 'Inkbound';
 
   static Future<void> init() async {
     if (!Hive.isBoxOpen(boxName)) {

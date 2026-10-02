@@ -49,7 +49,6 @@ import '../../core/zmode/zmode_prefs.dart';
 import '../../l10n/l10n.dart';
 import '../../core/announce/announcement.dart';
 import '../announce/announcement_sheet.dart';
-import '../community/community_sheet.dart';
 import '../downloads/downloads_screen.dart';
 import '../notify/subscriptions_screen.dart';
 import '../reader/manga_reader_screen.dart';
@@ -182,10 +181,11 @@ class _HomeViewState extends State<_HomeView>
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
         await maybeShowUpdateDialog(context);
-        // One-time community welcome (its own flag, independent of the per-id
-        // announcement feed), then any new developer announcement — all awaited
-        // in sequence so the modals never fight over the stack.
-        if (mounted) await maybeShowCommunitySheet(context);
+        // Then any new developer announcement. The community welcome that used
+        // to sit between the two is gone: it pointed at the upstream project's
+        // Telegram and Discord, which is not this app's community and not this
+        // maintainer's to invite people into. What is left is awaited in
+        // sequence so the modals never fight over the stack.
         if (mounted) await maybeShowAnnouncement(context);
       });
       _checkSourceUpdates();

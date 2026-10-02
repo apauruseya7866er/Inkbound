@@ -338,7 +338,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get couldNotExportLogs => 'ログを書き出せませんでした';
 
   @override
-  String get logsShareSubject => 'Zangetsu のログ';
+  String get logsShareSubject => 'Inkbound のログ';
 
   @override
   String get signInSubtitle => 'リスト・履歴・続きから再生を同期';
@@ -912,7 +912,7 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get bootErrorTitle => 'Zangetsu の起動が完了しませんでした';
+  String get bootErrorTitle => 'Inkbound の起動が完了しませんでした';
 
   @override
   String get bootErrorBody =>
@@ -926,10 +926,10 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get resetAppDataBody =>
-      'Zangetsu がこの端末に保存したデータを消して、まっさらな状態で起動できるようにします。\n\nアカウントとクラウド同期分はそのままです。再サインインすればライブラリが戻ります。';
+      'Inkbound がこの端末に保存したデータを消して、まっさらな状態で起動できるようにします。\n\nアカウントとクラウド同期分はそのままです。再サインインすればライブラリが戻ります。';
 
   @override
-  String get resetAppDataDone => 'Zangetsu を完全に終了して、もう一度開いてください。';
+  String get resetAppDataDone => 'Inkbound を完全に終了して、もう一度開いてください。';
 
   @override
   String get detailsCopied => '詳細をコピーしました — こちらへ送ってください';
@@ -1402,7 +1402,7 @@ class AppLocalizationsJa extends AppLocalizations {
       '自分で色を選ぶには Material You をオフ';
 
   @override
-  String get downloadsZangetsu => 'ダウンロード › 斬月';
+  String get downloadsZangetsu => 'ダウンロード › Inkbound';
 
   @override
   String get removableDrive => 'リムーバブルドライブ';
@@ -2051,7 +2051,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get openZangetsuOnYourNphoneAndScan =>
-      'スマホで Zangetsu を開き、\\nスキャンしてください';
+      'スマホで Inkbound を開き、\\nスキャンしてください';
 
   @override
   String get noApp => 'アプリがありませんか？';
@@ -2110,7 +2110,7 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String
   get onTheZangetsuAppOnYourPhoneOpenNPairATVAndEnterThisCodeOrScanTheQR =>
-      'スマホの Zangetsu で「テレビをペアリング」を開き、\\nこのコードを入力するか、QR をスキャンしてください。';
+      'スマホの Inkbound で「テレビをペアリング」を開き、\\nこのコードを入力するか、QR をスキャンしてください。';
 
   @override
   String get signingIn => 'サインイン中…';
@@ -2136,7 +2136,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get openZangetsuOnYourTVAndSignInWithYourPhoneToSeeIt =>
-      'テレビで Zangetsu を開き、スマホでサインインすると表示されます。';
+      'テレビで Inkbound を開き、スマホでサインインすると表示されます。';
 
   @override
   String get abcd2345 => 'ABCD 2345';
@@ -2179,7 +2179,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get reopenZangetsuToSeeRestoredLibrarySources =>
-      'Zangetsu を開き直すと、復元したライブラリとソースが表示されます。';
+      'Inkbound を開き直すと、復元したライブラリとソースが表示されます。';
 
   @override
   String get saveToAFile => 'ファイルに保存';
@@ -2392,7 +2392,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get noSourcesInThisRepo => 'このリポジトリにソースはありません。';
 
   @override
-  String get zangetsuProviders => 'Zangetsu プロバイダー';
+  String get zangetsuProviders => 'Inkbound プロバイダー';
 
   @override
   String get addRepo => 'リポジトリを追加';
@@ -2495,7 +2495,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'このソース独自の設定を開く（サーバー、言語など）';
 
   @override
-  String get addZangetsuRepo => 'Zangetsu リポジトリを追加';
+  String get addZangetsuRepo => 'Inkbound リポジトリを追加';
 
   @override
   String get theProviderWillBeRemovedFromYourInstalledSources =>
@@ -3627,7 +3627,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get appIconBlurb =>
-      'ホーム画面上のアイコンです。アイコンを変更するとZangetsuが閉じます。Androidがランチャーのエントリを切り替える必要があるためです。';
+      'ホーム画面上のアイコンです。アイコンを変更するとInkboundが閉じます。Androidがランチャーのエントリを切り替える必要があるためです。';
 
   @override
   String useTheIcon(String label) {
@@ -3636,7 +3636,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get useTheIconBody =>
-      'Androidが新しいアイコンを適用するため、Zangetsuは一時的に閉じます。その後、ホーム画面から再度起動してください。\n\nZangetsuがフォルダやドックにある場合は、再度追加する必要があるかもしれません。';
+      'Androidが新しいアイコンを適用するため、Inkboundは一時的に閉じます。その後、ホーム画面から再度起動してください。\n\nInkboundがフォルダやドックにある場合は、再度追加する必要があるかもしれません。';
 
   @override
   String get animRise => '上昇';
@@ -3714,7 +3714,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'クラウドバックアップに失敗しました。インターネット接続を確認してください。繰り返し失敗する場合は、クラウドバックアップストアがまだ設定されていない可能性があります。';
 
   @override
-  String get savedToDownloadsZangetsu => 'ダウンロードに保存済み › 斬月';
+  String get savedToDownloadsZangetsu => 'ダウンロードに保存済み › Inkbound';
 
   @override
   String restoreFailed(String error) {
@@ -3727,7 +3727,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get backupScreenBlurb =>
-      'ソース、リスト、設定を、デバイス上のファイルまたはZangetsuアカウントに保存してください。復元しても、既存のデータは追加されるだけで、削除されることはありません。';
+      'ソース、リスト、設定を、デバイス上のファイルまたはInkboundアカウントに保存してください。復元しても、既存のデータは追加されるだけで、削除されることはありません。';
 
   @override
   String get includeInTheBackup => 'バックアップに含める';
@@ -3945,7 +3945,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get lnreader => 'LNリーダー';
 
   @override
-  String get zangetsu => '斬月';
+  String get zangetsu => 'Inkbound';
 
   @override
   String get cloudStream => 'クラウドストリーム';

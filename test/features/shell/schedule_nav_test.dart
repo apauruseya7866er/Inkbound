@@ -340,12 +340,10 @@ void main() {
 
     await sl.reset();
 
-    // Home's launch sequence shows a one-time community sheet backed by the
-    // 'app_flags' Hive box. Init Hive + mark it seen so that path no-ops
+    // Init Hive so Home's announcement path can read its box without throwing
     // (mirrors production, where Hive is initialized before runApp).
     Hive.init('/tmp/zangetsu_nav_test_hive');
-    final flags = await Hive.openBox('app_flags');
-    await flags.put('communitySheetSeen', true);
+    await Hive.openBox('app_flags');
     await Hive.openBox(ThemeController.boxName);
     // Home's initState fires a delayed (4s) source-update check that reads
     // PlaybackPrefs — pumpAndSettle fast-forwards fake time straight through

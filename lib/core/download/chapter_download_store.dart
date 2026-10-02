@@ -216,7 +216,7 @@ class ChapterDownloadStore {
       ..sort((a, b) => a.path.compareTo(b.path));
     if (files.isEmpty) return d;
 
-    final show = 'Zangetsu/${safeName(d.showTitle)}';
+    final show = 'Inkbound/${safeName(d.showTitle)}';
     final chapter = safeName(d.chapterTitle);
     // Manga leaves as one archive; a novel is a single html file already.
     final packed = d.mode == ContentMode.novel

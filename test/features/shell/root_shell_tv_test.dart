@@ -341,8 +341,7 @@ void main() {
     // shell pages) reads the accent colour from 'theme_prefs'. Init Hive +
     // mark the sheet seen so those paths no-op / read safe defaults.
     Hive.init('/tmp/zangetsu_root_shell_tv_test_hive');
-    final flags = await Hive.openBox('app_flags');
-    await flags.put('communitySheetSeen', true);
+    await Hive.openBox('app_flags');
     await Hive.openBox(ThemeController.boxName);
     // SettingsScreen (rendered eagerly in the shared shell pages) reads
     // sl<PlaybackPrefs>(), which reads its own Hive box — open it first.

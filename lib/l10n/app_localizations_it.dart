@@ -345,7 +345,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get couldNotExportLogs => 'Impossibile esportare i log';
 
   @override
-  String get logsShareSubject => 'Log di Zangetsu';
+  String get logsShareSubject => 'Log di Inkbound';
 
   @override
   String get signInSubtitle =>
@@ -938,7 +938,7 @@ class AppLocalizationsIt extends AppLocalizations {
   }
 
   @override
-  String get bootErrorTitle => 'Zangetsu non ha finito di avviarsi';
+  String get bootErrorTitle => 'Inkbound non ha finito di avviarsi';
 
   @override
   String get bootErrorBody =>
@@ -952,10 +952,10 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get resetAppDataBody =>
-      'Questo cancella ciò che Zangetsu ha salvato su questo dispositivo così può ripartire da zero.\n\nIl tuo account e tutto ciò che è sul cloud non vengono toccati — accedi di nuovo e la libreria torna.';
+      'Questo cancella ciò che Inkbound ha salvato su questo dispositivo così può ripartire da zero.\n\nIl tuo account e tutto ciò che è sul cloud non vengono toccati — accedi di nuovo e la libreria torna.';
 
   @override
-  String get resetAppDataDone => 'Chiudi Zangetsu del tutto e riaprilo.';
+  String get resetAppDataDone => 'Chiudi Inkbound del tutto e riaprilo.';
 
   @override
   String get detailsCopied => 'Dettagli copiati — inviaceli';
@@ -1451,7 +1451,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Disattiva Material You per scegliere un colore tu';
 
   @override
-  String get downloadsZangetsu => 'Download › Zangetsu';
+  String get downloadsZangetsu => 'Download › Inkbound';
 
   @override
   String get removableDrive => 'Unità rimovibile';
@@ -2119,7 +2119,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get openZangetsuOnYourNphoneAndScan =>
-      'Apri Zangetsu sul tuo\\ntelefono e scansiona';
+      'Apri Inkbound sul tuo\\ntelefono e scansiona';
 
   @override
   String get noApp => 'Niente app?';
@@ -2178,7 +2178,7 @@ class AppLocalizationsIt extends AppLocalizations {
   @override
   String
   get onTheZangetsuAppOnYourPhoneOpenNPairATVAndEnterThisCodeOrScanTheQR =>
-      'Nell’app Zangetsu sul telefono, apri\\n«Associa una TV» e inserisci questo codice — oppure scansiona il QR.';
+      'Nell’app Inkbound sul telefono, apri\\n«Associa una TV» e inserisci questo codice — oppure scansiona il QR.';
 
   @override
   String get signingIn => 'Accesso…';
@@ -2204,7 +2204,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get openZangetsuOnYourTVAndSignInWithYourPhoneToSeeIt =>
-      'Apri Zangetsu sulla TV e accedi con il telefono per vederlo.';
+      'Apri Inkbound sulla TV e accedi con il telefono per vederlo.';
 
   @override
   String get abcd2345 => 'ABCD 2345';
@@ -2249,7 +2249,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get reopenZangetsuToSeeRestoredLibrarySources =>
-      'Riapri Zangetsu per vedere libreria e sorgenti ripristinate.';
+      'Riapri Inkbound per vedere libreria e sorgenti ripristinate.';
 
   @override
   String get saveToAFile => 'Salva su file';
@@ -2471,7 +2471,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get noSourcesInThisRepo => 'Nessuna sorgente in questo repo.';
 
   @override
-  String get zangetsuProviders => 'Provider Zangetsu';
+  String get zangetsuProviders => 'Provider Inkbound';
 
   @override
   String get addRepo => 'Aggiungi repo';
@@ -2580,7 +2580,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Apri le impostazioni proprie di questa sorgente (es. server, lingua)';
 
   @override
-  String get addZangetsuRepo => 'Aggiungi repo Zangetsu';
+  String get addZangetsuRepo => 'Aggiungi repo Inkbound';
 
   @override
   String get theProviderWillBeRemovedFromYourInstalledSources =>
@@ -3733,7 +3733,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get appIconBlurb =>
-      'L\'icona sulla schermata iniziale. Zangetsu si chiude quando la modifichi: Android deve sostituire la voce del launcher.';
+      'L\'icona sulla schermata iniziale. Inkbound si chiude quando la modifichi: Android deve sostituire la voce del launcher.';
 
   @override
   String useTheIcon(String label) {
@@ -3742,7 +3742,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get useTheIconBody =>
-      'Zangetsu si chiuderà per consentire ad Android di applicare la nuova icona. Riaprilo dalla schermata iniziale in seguito.\n\nSe Zangetsu si trova in una cartella o nel dock, potrebbe essere necessario aggiungerlo nuovamente.';
+      'Inkbound si chiuderà per consentire ad Android di applicare la nuova icona. Riaprilo dalla schermata iniziale in seguito.\n\nSe Inkbound si trova in una cartella o nel dock, potrebbe essere necessario aggiungerlo nuovamente.';
 
   @override
   String get animRise => 'Salita';
@@ -3822,7 +3822,7 @@ class AppLocalizationsIt extends AppLocalizations {
       'Il backup sul cloud non è riuscito. Verifica di essere online: se il problema persiste, l\'archivio di backup sul cloud potrebbe non essere ancora configurato.';
 
   @override
-  String get savedToDownloadsZangetsu => 'Salvato in Download › Zangetsu';
+  String get savedToDownloadsZangetsu => 'Salvato in Download › Inkbound';
 
   @override
   String restoreFailed(String error) {
@@ -3835,7 +3835,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get backupScreenBlurb =>
-      'Salva le tue fonti, l\'elenco e le impostazioni in un file sul tuo dispositivo o nel tuo account Zangetsu. Il ripristino aggiunge solo gli elementi, non elimina mai quelli già presenti.';
+      'Salva le tue fonti, l\'elenco e le impostazioni in un file sul tuo dispositivo o nel tuo account Inkbound. Il ripristino aggiunge solo gli elementi, non elimina mai quelli già presenti.';
 
   @override
   String get includeInTheBackup => 'Includi nel backup';
@@ -3898,7 +3898,7 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get couldnTOpenInstaller =>
-      'Impossibile aprire il programma di installazione. Abilita l\'opzione \"Installa app sconosciute\" per Zangetsu nelle impostazioni di sistema, quindi riprova.';
+      'Impossibile aprire il programma di installazione. Abilita l\'opzione \"Installa app sconosciute\" per Inkbound nelle impostazioni di sistema, quindi riprova.';
 
   @override
   String get downloadFailedCheckConnection =>
@@ -4063,7 +4063,7 @@ class AppLocalizationsIt extends AppLocalizations {
   String get lnreader => 'LNReader';
 
   @override
-  String get zangetsu => 'Zangetsu';
+  String get zangetsu => 'Inkbound';
 
   @override
   String get cloudStream => 'Flusso di nuvole';
