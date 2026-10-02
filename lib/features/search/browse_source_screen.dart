@@ -323,7 +323,15 @@ class _BrowseSourceViewState extends State<_BrowseSourceView> {
       widget.sourceId,
     );
     if (target == null || target.isEmpty) return;
-    await MihonExtensionService.solveCloudflare(target);
+    // A novel source has to be solved under the UA and header profile its own
+    // lane replays with, or Cloudflare refuses the clearance it just issued and
+    // the source silently stays empty. See MihonExtensionService.solveCloudflare.
+    final isNovel = _eco == SearchEcosystem.lnreader;
+    await MihonExtensionService.solveCloudflare(
+      target,
+      novel: isNovel,
+      headers: isNovel ? lnreaderSolveHeaders : null,
+    );
     // The WebView has closed and its `cf_clearance` is now in the jar, but
     // this list still holds the empty result the challenge produced - the
     // solver resolving its call is the app's cue to try again. Without this

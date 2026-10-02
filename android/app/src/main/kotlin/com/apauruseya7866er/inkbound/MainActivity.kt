@@ -696,9 +696,22 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
                             result.error("bad_args", "url required", null)
                             return@setMethodCallHandler
                         }
-                        csExecutor.execute {
+csExecutor.execute {
+                            // A novel (LNReader) source replays its requests with
+                            // NovelHttp.deviceUserAgent, so the challenge has to be
+                            // solved under that exact string - Cloudflare binds the
+                            // clearance to the UA that earned it. Anything else keeps
+                            // the historic strip-the-WebView-markers default, which the
+                            // CloudStream lane's CfClearance.userAgent replay agrees with.
+                            val novel = call.argument<Boolean>("novel") == true
+                            val solveUa: String? =
+                                if (novel) NovelHttp.deviceUserAgent else null
+                            @Suppress("UNCHECKED_CAST")
+                            val solveHeaders =
+                                call.argument<Map<String, String>>("headers")
                             val solved = try {
-                                com.lagradost.cloudstream3.network.CfWebViewSolver.solve(url)
+                                com.lagradost.cloudstream3.network.CfWebViewSolver
+                                    .solve(url, solveUa, solveHeaders)
                             } catch (e: Exception) {
                                 null
                             }

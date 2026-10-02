@@ -199,7 +199,21 @@ object CfWebViewSolver {
      *  isn't looking shouldn't be made to wait for one. */
     private const val INTERACTED_TIMEOUT_SECONDS = 90L
 
-    fun solve(url: String): Result? {
+    /**
+     * [userAgent] overrides the UA the challenge is solved under. Pass the exact UA the
+     * request that will be REPLAYED sends: Cloudflare binds `cf_clearance` to the UA that
+     * earned it, so solving under one UA and replaying under another gets the clearance
+     * rejected and the source stays blocked with no visible reason. Null keeps the
+     * strip-the-WebView-markers default below.
+     *
+     * [extraHeaders] are forwarded to the solve load so the challenge is solved under the
+     * same header profile the replay will use, filtered by [isRequestHeaderSafe].
+     */
+    fun solve(
+        url: String,
+        userAgent: String? = null,
+        extraHeaders: Map<String, String>? = null,
+    ): Result? {
         android.util.Log.i("CfSolver", "solve() host=${runCatching { android.net.Uri.parse(url).host }.getOrNull()}")
         // Prefer the foreground Activity: the solver WebView must be attached to
         // a real window and rendered, or Cloudflare's JS challenge never runs.
@@ -209,6 +223,12 @@ object CfWebViewSolver {
         val ref = AtomicReference<Result?>()
         val main = Handler(Looper.getMainLooper())
         val webViewRef = AtomicReference<WebView?>()
+        // The clearance already on hand, captured BEFORE anything loads. Success is a
+        // *different* cookie than this one, not merely the presence of one: a stale or
+        // wrong-UA clearance sitting in the jar would otherwise satisfy the check on the
+        // first poll, before Cloudflare had solved anything, and we would report a solve
+        // that never happened and then replay into the same wall.
+        val oldClearance = clearanceCookieFor(url)
         // The WebView must render full-size for Cloudflare's JS challenge to run,
         // but we don't want the user staring at the raw challenge/ad page. So we
         // wrap it in a container and lay a branded "Verifying…" overlay ON TOP —
@@ -234,7 +254,8 @@ object CfWebViewSolver {
             val cookieOrig = CookieManager.getInstance().getCookie(url)
             val cookie = listOfNotNull(cookieCur, cookieOrig)
                 .firstOrNull { it.contains("cf_clearance") }
-            if (cookie != null) {
+            // A *new* clearance only. See [oldClearance].
+            if (cookie != null && cookie != oldClearance) {
                 val ua = wv?.settings?.userAgentString ?: ""
                 // Publish the solving UA so plain (interceptor-less) NiceHttp
                 // requests carrying cf_clearance present the matching UA.
@@ -291,9 +312,20 @@ object CfWebViewSolver {
                 // which real Chrome never sends — and refuse to issue cf_clearance.
                 // The cf_clearance is bound to whatever UA solved it, and we publish
                 // that UA for the replay, so rewriting it here is self-consistent.
-                wv.settings.userAgentString = wv.settings.userAgentString
-                    .replace("; wv", "") // drop the WebView marker some CF checks flag
-                    .replace(Regex("Version/\\d+\\.\\d+ "), "") // and the WebView-only token
+                //
+                // UNLESS the caller supplied the UA its replay will actually send, in
+                // which case that wins verbatim: stripping markers off a UA the replay
+                // does not use is self-inconsistent by construction. The novel lane
+                // needs this - it replays with NovelHttp.deviceUserAgent (the raw
+                // device WebView UA, markers included), so the solve has to use that
+                // same string or Cloudflare rejects the clearance it just issued.
+                if (userAgent != null && userAgent.isNotBlank()) {
+                    wv.settings.userAgentString = userAgent
+                } else {
+                    wv.settings.userAgentString = wv.settings.userAgentString
+                        .replace("; wv", "") // drop the WebView marker some CF checks flag
+                        .replace(Regex("Version/\\d+\\.\\d+ "), "") // and the WebView-only token
+                }
                 CookieManager.getInstance().setAcceptCookie(true)
                 CookieManager.getInstance().setAcceptThirdPartyCookies(wv, true)
                 // Touching the challenge means a person is working on it, so the
@@ -352,7 +384,11 @@ object CfWebViewSolver {
                     } catch (_: Throwable) {
                     }
                 }
-                wv.loadUrl(url)
+                // Forward the request's own headers so the challenge is solved under the
+                // same profile the replay uses. Chromium refuses a set of these outright
+                // (IsRequestHeaderSafe) and passing one throws, so they are filtered.
+                val safeHeaders = filterSafeHeaders(extraHeaders)
+                if (safeHeaders.isEmpty()) wv.loadUrl(url) else wv.loadUrl(url, safeHeaders)
                 // Start polling early (CF often sets the cookie in well under a
                 // second on a cached/managed challenge); a slow challenge just
                 // keeps polling at 300ms up to the 30s latch, same as before.
@@ -397,6 +433,57 @@ object CfWebViewSolver {
         return if (solved) ref.get() else null
     }
 
+    /**
+     * Headers Chromium's `WebView.loadUrl(url, headers)` rejects.
+     *
+     * Mirrors `IsRequestHeaderSafe` in Chromium's `net/http/header_util.cc`: hop-by-hop
+     * and framing headers are managed by the network stack, and handing one to loadUrl
+     * throws `net::ERR_INVALID_ARGUMENT` rather than being ignored. `User-Agent` is
+     * excluded because it is set through `settings.userAgentString`, which is the only
+     * way to make it stick - as a load header it is dropped.
+     */
+    private val UNSAFE_LOAD_HEADERS = setOf(
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "cookie",
+        "cookie2",
+        "host",
+        "keep-alive",
+        "proxy-authorization",
+        "set-cookie",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "user-agent",
+    )
+
+    private fun filterSafeHeaders(headers: Map<String, String>?): Map<String, String> {
+        if (headers.isNullOrEmpty()) return emptyMap()
+        val out = LinkedHashMap<String, String>()
+        for ((rawName, rawValue) in headers) {
+            val name = rawName.lowercase(java.util.Locale.ENGLISH)
+            if (name in UNSAFE_LOAD_HEADERS || name.startsWith("proxy-")) continue
+            if (name == "connection" && rawValue.equals("upgrade", ignoreCase = true)) continue
+            if (rawValue.isEmpty()) continue
+            out[rawName] = rawValue
+        }
+        return out
+    }
+
+    /** The `cf_clearance` pair currently held for [url]'s host, or null. */
+    private fun clearanceCookieFor(url: String): String? {
+        return try {
+            CookieManager.getInstance().getCookie(url)
+                ?.split(';')
+                ?.map { it.trim() }
+                ?.firstOrNull { it.startsWith("cf_clearance=") }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     /// A clean app-bg screen with a small centered CHIP — "Verifying protected
     /// source…" with a spinner — laid over the solver WebView. The WebView must
     /// still render full-size behind it to satisfy Cloudflare's JS challenge, so
@@ -429,7 +516,7 @@ object CfWebViewSolver {
 
         val body = android.widget.TextView(context)
         body.text = "Tap the box below to prove you are not a robot. " +
-            "This is the source's own page, not Zangetsu."
+            "This is the source's own page, not Inkbound."
         body.setTextColor(0xFFA7A7B2.toInt())
         body.textSize = 13f
         val blp = android.widget.LinearLayout.LayoutParams(

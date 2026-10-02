@@ -163,7 +163,10 @@ bool tvosProvidersReady = false;
 /// Accept-Encoding is intentionally left out: dart:io already sends `gzip` and
 /// auto-decompresses it, whereas declaring `deflate` here would hand back a
 /// body dart:io won't decode.
-const Map<String, String> _lnreaderBrowserHeaders = {
+///
+/// Public so the Cloudflare solve can forward the same profile - see
+/// [lnreaderSolveHeaders].
+const Map<String, String> lnreaderBrowserHeaders = {
   'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -172,6 +175,20 @@ const Map<String, String> _lnreaderBrowserHeaders = {
   'Sec-Fetch-Mode': 'cors',
   'Connection': 'keep-alive',
   'Cache-Control': 'max-age=0',
+};
+
+/// The subset of [lnreaderBrowserHeaders] worth replaying into the Cloudflare
+/// solve WebView.
+///
+/// Drops `User-Agent` on purpose: the solve sets that through the WebView's own
+/// settings (the only way it sticks), and it has to be `NovelHttp.deviceUserAgent`
+/// rather than this Windows-Chrome string, because that is the UA the novel lane
+/// actually replays with. Also drops `Connection`/`Cache-Control`, which say
+/// nothing useful to a challenge and are hop-by-hop-ish noise.
+Map<String, String> get lnreaderSolveHeaders => {
+  for (final e in lnreaderBrowserHeaders.entries)
+    if (e.key != 'User-Agent' && e.key != 'Connection' && e.key != 'Cache-Control')
+      e.key: e.value,
 };
 
 /// Headers alone don't clear webnovel.com's Cloudflare bot-fight — confirmed
@@ -507,7 +524,7 @@ Future<void> initDependencies() async {
       final pluginHeaders = init['headers'] is Map
           ? Map<String, dynamic>.from(init['headers'] as Map)
           : const <String, dynamic>{};
-      final mergedHeaders = {..._lnreaderBrowserHeaders, ...pluginHeaders};
+      final mergedHeaders = {...lnreaderBrowserHeaders, ...pluginHeaders};
       final method = (init['method'] as String?)?.toUpperCase() ?? 'GET';
 
       // Native HTTP first on mobile: headers alone don't get past
