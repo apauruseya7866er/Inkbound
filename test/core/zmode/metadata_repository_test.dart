@@ -69,8 +69,8 @@ MetadataRepository _metaRepo({
     );
 
 class _Src implements SourceRepository {
-  _Src({this.streams = _stream});
-  final List<VideoSource> streams;
+  _Src();
+  final List<VideoSource> streams = _stream;
   final log = <String>[];
   @override
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
@@ -137,9 +137,9 @@ class _Src implements SourceRepository {
 }
 
 class _EpSrc implements SourceRepository {
-  _EpSrc(this._eps, {this.streams = _stream});
+  _EpSrc(this._eps);
   final List<Episode> _eps;
-  final List<VideoSource> streams;
+  final List<VideoSource> streams = _stream;
   final log = <String>[];
   @override
   noSuchMethod(Invocation i) => super.noSuchMethod(i);

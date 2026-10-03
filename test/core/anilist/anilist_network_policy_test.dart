@@ -11,6 +11,11 @@ import 'package:watch_app/core/anilist/anilist_network_policy.dart';
 /// and an unconsumed error future fails the test on its own.
 ErrorInterceptorHandler _errHandler() {
   final h = ErrorInterceptorHandler();
+  // Dio marks `ErrorInterceptorHandler.future` protected because only the
+  // interceptor should complete it. A test deliberately completing it is the
+  // one place reading it is the point, so the rejection cannot escape as an
+  // unhandled error and fail an unrelated test.
+  // ignore: invalid_use_of_protected_member
   h.future.ignore();
   return h;
 }

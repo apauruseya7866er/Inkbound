@@ -93,7 +93,6 @@ class _FakeMyListStore implements MyListStore {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -110,7 +109,6 @@ class _FakeListStatusStore implements ListStatusStore {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -127,7 +125,6 @@ class _FakeResumeStore implements ResumeStore {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -141,7 +138,6 @@ class _ResumeAtEpisode55Store implements ResumeStore {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -163,7 +159,6 @@ class _FakeProviderRegistry implements ProviderRegistry {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -181,7 +176,6 @@ class _FakeCloudStreamManager extends ChangeNotifier
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -201,7 +195,6 @@ class _FakeDownloadManager extends ChangeNotifier implements DownloadManager {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 

@@ -65,7 +65,6 @@ class _FakeTracker extends ChangeNotifier implements Tracker {
     required this.name,
     this.connected = false,
     this.list = const [],
-    this.supportsReading = true,
   });
 
   final String name;
@@ -73,7 +72,7 @@ class _FakeTracker extends ChangeNotifier implements Tracker {
   final List<TrackerListItem> list;
 
   @override
-  final bool supportsReading;
+  final bool supportsReading = true;
 
   @override
   String get displayName => name;

@@ -7,7 +7,7 @@ import 'package:watch_app/core/zmode/zmode_source_prefs.dart';
 import 'package:watch_app/core/zmode/zmode_ids.dart';
 
 void main() {
-  late ZSourcePrefs prefs;
+
   late Directory dir;
   const fma = ZCanonical(ZKind.anime, 'mal:5114');
   const allanime = SourceMatch(
@@ -34,14 +34,14 @@ void main() {
     await Hive.close();
     Hive.init(dir.path);
     store = await MatchStore.open();
-    prefs = await ZSourcePrefs.open();
+    await ZSourcePrefs.open();
     expect(store.get(fma, 'allanime')?.sourceId, 'allanime');
     expect(store.get(fma, 'allanime')?.pinned, isFalse);
   });
 
   test('per-source matches do not collide', () async {
     final store = await MatchStore.open();
-    final prefs = await ZSourcePrefs.open();
+await ZSourcePrefs.open();
     await store.save(fma, allanime);
     await store.save(fma, hianime);
     expect(store.get(fma, 'allanime')?.showId, 'fma');
@@ -50,7 +50,7 @@ void main() {
 
   test('pinning source A does not affect source B', () async {
     final store = await MatchStore.open();
-    final prefs = await ZSourcePrefs.open();
+await ZSourcePrefs.open();
     await store.pin(fma, allanime);
     await store.save(fma, hianime);
     expect(store.get(fma, 'allanime')?.pinned, isTrue);
@@ -68,7 +68,7 @@ void main() {
   test('a pin replaces an earlier pin for the same source, and forget clears just that source',
       () async {
     final store = await MatchStore.open();
-    final prefs = await ZSourcePrefs.open();
+await ZSourcePrefs.open();
     await store.pin(fma, allanime);
     await store.save(fma, hianime);
     const fixed = SourceMatch(
@@ -96,7 +96,7 @@ void main() {
   test('malformed optional fields (wrong types) deserialize to empty strings, not throw',
       () async {
     final store = await MatchStore.open();
-    final prefs = await ZSourcePrefs.open();
+await ZSourcePrefs.open();
     final box = Hive.box<Map>(MatchStore.boxName);
     await box.put('${fma.key}@test', {
       'sourceId': 'test',
@@ -114,7 +114,7 @@ void main() {
 
   test('missing required field (sourceId) returns null, not throw', () async {
     final store = await MatchStore.open();
-    final prefs = await ZSourcePrefs.open();
+await ZSourcePrefs.open();
     final box = Hive.box<Map>(MatchStore.boxName);
     await box.put('${fma.key}@test', {
       'showUrl': 'https://test.com',
@@ -126,7 +126,7 @@ void main() {
   });
 
   test('a malformed selection value is ignored, not thrown on', () async {
-    final store = await MatchStore.open();
+    await MatchStore.open();
     final prefs = await ZSourcePrefs.open();
     final box = Hive.box<Map>(MatchStore.boxName);
     await box.put('sel:${fma.key}', {'sourceId': 42}); // wrong type

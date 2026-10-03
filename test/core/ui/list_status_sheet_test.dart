@@ -36,7 +36,6 @@ class _FakeMyListStore implements MyListStore {
   @override
   Future<void> remove(MediaItem m) async => _inList = false;
 
-  @override
   Future<void> pushStatus(MediaItem m) async {}
 
   @override

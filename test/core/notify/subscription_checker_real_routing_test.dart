@@ -14,7 +14,6 @@ import 'package:watch_app/core/mode/content_mode.dart';
 import 'package:watch_app/core/models/episode.dart';
 import 'package:watch_app/core/models/home_section.dart';
 import 'package:watch_app/core/models/media_detail.dart';
-import 'package:watch_app/core/models/media_item.dart';
 import 'package:watch_app/core/models/provider_info.dart';
 import 'package:watch_app/core/notify/subscription_checker.dart';
 import 'package:watch_app/core/notify/subscription_store.dart';

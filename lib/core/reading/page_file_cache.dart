@@ -54,7 +54,7 @@ class PageFileCache {
     try {
       final cbz = CbzImage.tryParse(url);
       if (cbz != null) {
-        return _cacheBytes(
+        return await _cacheBytes(
           url,
           () => _readCbzEntry(cbz.archivePath, cbz.index),
         );
@@ -72,7 +72,7 @@ class PageFileCache {
         final id = int.tryParse(marker);
         if (id == null) return null;
         final channel = mihonId != null ? 'zangetsu/mihon' : 'zangetsu/aniyomi';
-        return _cacheBytes(url, () => _fetchNativeBytes(channel, id, url));
+        return await _cacheBytes(url, () => _fetchNativeBytes(channel, id, url));
       }
 
       return await _lookupCachedFile(url);

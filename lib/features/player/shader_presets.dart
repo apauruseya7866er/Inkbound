@@ -146,7 +146,7 @@ class ShaderPresets {
         }
         onProgress?.call((i + 1) / _allFiles.length);
       }
-      return refreshDownloaded();
+      return await refreshDownloaded();
     } catch (_) {
       await refreshDownloaded();
       return false;

@@ -23,15 +23,17 @@ class _SweepSrc implements SourceRepository {
   _SweepSrc({
     required this.aEps,
     required this.bEps,
-    this.aStreams = const [VideoSource(url: 'https://a/stream')],
-    this.bStreams = const [VideoSource(url: 'https://b/stream')],
     this.hangs = const <String>{},
   });
 
   final List<Episode> aEps;
   final List<Episode> bEps;
-  final List<VideoSource> aStreams;
-  final List<VideoSource> bStreams;
+  final List<VideoSource> aStreams = const [
+    VideoSource(url: 'https://a/stream'),
+  ];
+  final List<VideoSource> bStreams = const [
+    VideoSource(url: 'https://b/stream'),
+  ];
 
   /// Sources whose episode call never answers — a real one measured 38s.
   final Set<String> hangs;

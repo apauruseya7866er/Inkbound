@@ -46,7 +46,7 @@ MediaItem _hit(String src, String title) => MediaItem(
   type: ProviderType.anime, sourceId: src);
 
 void main() {
-  late ZSourcePrefs prefs;
+
   late Directory dir;
   const c = ZCanonical(ZKind.anime, 'mal:5114');
 

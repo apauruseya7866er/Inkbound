@@ -1,0 +1,92 @@
+# Static analysis and tests.
+#
+# Runs on every push and pull request. Two jobs, matching the two things that
+# have actually caught regressions in this repository: the analyzer (silent
+# correctness bugs like a stale `@override` falling through to noSuchMethod) and
+# the test suite.
+#
+# The analyze step passes `--no-fatal-infos` deliberately. Errors and warnings
+# are fatal and both are currently at zero, so this is a real gate rather than a
+# rubber stamp — but the 146 remaining infos are mechanical style, and failing
+# on them would mean a large reformat that conflicts with `upstream` on every
+# sync. See analysis_options.yaml for how to promote infos later.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+# A new push supersedes the previous run for the same ref.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # Baseline mode. The suite was last verified on Windows, where 55 tests fail
+    # for platform reasons only: ~30 cannot load `quickjs_c_bridge.dll`, and the
+    # rest hit Windows file locking (`PathAccessException ... errno = 32` when
+    # Hive quarantines a corrupt box). Those are expected to pass on Linux, but
+    # that has NOT been confirmed from a Windows dev box, so this job reports
+    # rather than blocks until the first green Linux run is seen.
+    #
+    # Delete this line once the first CI run is green and stays green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Test
+        run: flutter test --reporter expanded
+
+  build:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    needs: [analyze, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      # Catches Android/Kotlin breakage that neither the analyzer nor the Dart
+      # test suite can see. The Cloudflare solver lives in Kotlin, so this is the
+      # only job that would have failed when its signature changed.
+      - name: Build
+        run: flutter build apk --release

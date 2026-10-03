@@ -98,7 +98,6 @@ class _FakeMyListStore implements MyListStore {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -117,7 +116,6 @@ class _FakeSearchHistory implements SearchHistory {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -130,7 +128,6 @@ class _FakeSearchPrefs extends ChangeNotifier implements SearchPrefs {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -165,7 +162,6 @@ class _FakeSearchSourcePrefs extends ChangeNotifier
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -181,7 +177,6 @@ class _FakeProviderRegistry implements ProviderRegistry {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -206,7 +201,6 @@ class _FakeAniListService extends ChangeNotifier implements AniListService {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -228,7 +222,6 @@ class _FakeMalService extends ChangeNotifier implements MalService {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -250,7 +243,6 @@ class _FakeSimklService extends ChangeNotifier implements SimklService {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 
@@ -674,7 +666,6 @@ class _FiltersRepo implements MetadataRepository {
   noSuchMethod(Invocation i) => super.noSuchMethod(i);
   // Added with the on-demand resolver: SourceMatcher now asks whether a JS
   // provider is loaded before searching it. These fakes are already "loaded".
-  @override
   Future<bool> ensureSourceLoaded(String sourceId) async => true;
 
 }

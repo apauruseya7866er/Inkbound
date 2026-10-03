@@ -81,14 +81,13 @@ class _FakeTracker implements Tracker {
   _FakeTracker({
     this.name = 'AniList',
     this.connected = true,
-    this.reading = true,
     List<TrackerListItem>? library,
     this.error,
   }) : library = library ?? const [];
 
   final String name;
   bool connected;
-  final bool reading;
+  final bool reading = true;
   List<TrackerListItem> library;
   Object? error;
   int fetchCount = 0;

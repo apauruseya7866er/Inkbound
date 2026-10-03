@@ -12,7 +12,6 @@ import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/zmode/match_store.dart';
 import 'package:watch_app/core/zmode/playback_resolver.dart';
 import 'package:watch_app/core/zmode/source_matcher.dart';
-import 'package:watch_app/core/zmode/zmode_ids.dart';
 import 'package:watch_app/core/zmode/zmode_source_prefs.dart';
 
 const _ep2 = 'zm://anime/mal:100/ep/2';
