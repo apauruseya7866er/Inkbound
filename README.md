@@ -32,6 +32,13 @@
 
 </div>
 
+> **A novel-only fork of Zangetsu.** No account, no cloud, no anime or manga, no
+> second screen. Read-aloud that sounds like a person, sources from the LNReader
+> ecosystem, and a Cloudflare path that actually works.
+> [**Signed APKs →**](https://github.com/apauruseya7866er/Inkbound/releases)
+
+---
+
 ## 💭 Why this exists
 
 [Zangetsu](https://github.com/Spyou/Zangetsu) is a good app with one problem:
@@ -63,12 +70,17 @@ Inkbound is that reader with everything else switched off.
 | CI | — | **Analyzer gate at zero errors/warnings, tests, release build** |
 | Signed releases | Manual | **Every `v*` tag** |
 
+<p align="center">
+  <img src=".github/screenshots/home.png" width="30%" alt="Home" />
+  <img src=".github/screenshots/search.png" width="30%" alt="Search" />
+  <img src=".github/screenshots/detail.png" width="30%" alt="Detail" />
+</p>
+
 **This is a fork, and the difference is intentional, not accidental.** The reader,
 the source system, the downloads, the trackers and the read-aloud engine are
-Krishna Vishwakarma's work, carried over intact. What changed is scope, identity,
-and the parts that were quietly pointing at the upstream author's accounts
-instead of yours. See [Credits](#-credits) — and if you use the original, [star
-it](https://github.com/Spyou/Zangetsu). It deserves it.
+**Krishna Vishwakarma's** work, carried over intact — and it is the larger
+project. If you use Inkbound, please [star the original](https://github.com/Spyou/Zangetsu).
+Full [Credits](#-credits) below.
 
 ---
 
@@ -76,12 +88,12 @@ it](https://github.com/Spyou/Zangetsu). It deserves it.
 
 Not a wish list — this is what is in the tree, and where to look.
 
-### 1. Novel-only, behind one constant
+### 1. Novel-only, behind one flag
 
 Every gate in the app reads a single flag in
 [`lib/core/mode/novel_only.dart`](lib/core/mode/novel_only.dart). The anime and
 manga code is still compiled — not deleted — so it stays type-checked against the
-surrounding code and can be revived by flipping one constant instead of
+surrounding code and can be revived by flipping that one flag instead of
 re-deriving a dozen conditions. A real delete is not possible here:
 `ContentMode`, `ProviderType`, `ZKind` and `MediaKind` are matched exhaustively
 across hundreds of `switch` expressions, so removing a case breaks compilation
@@ -150,7 +162,7 @@ and each rung only runs if the one above failed:
    can point Inkbound at a self-hosted [Solverr](https://github.com/unseensnick/Solverr),
    Byparr or FlareSolverr. Off by default; the app's own solver stays primary.
 
-The hard truth, which the app does not pretend otherwise: **if a site is on
+The hard truth, which the app does not pretend away: **if a site is on
 Cloudflare's strictest tier, no in-app trick is enough** and a real browser has
 to do the solving. That is why the last rung exists.
 
@@ -158,7 +170,7 @@ to do the solving. That is why the last rung exists.
 
 Inkbound serves sources from **[apauruseya7866er/plugins](https://github.com/apauruseya7866er/plugins)**,
 a fork of the LNReader plugin ecosystem. It tracks upstream so its ~290 sources
-stay available, and it is where **our own scraper fixes are published** — so a
+today stay available, and it is where **our own scraper fixes are published** — so a
 source broken for everyone here is fixed once, here, for everyone using this
 index.
 
@@ -173,13 +185,14 @@ links — and is not linked anywhere else.
 
 ### 9. Engineering you can check
 
-- **CI gates the analyzer.** `analysis_options.yaml` escalates the rules that
-  are actually dangerous; the repo currently sits at **0 errors and 0 warnings**,
-  and the workflow fails if that regresses.
-- **Tests run in CI**, including the ones worth having: 64 analyzer warnings were
-  cleared, and among them were **41 stale `@override` annotations in test fakes**
-  that were silently falling through to `noSuchMethod` — tests passing without
-  exercising anything.
+- **CI gates the analyzer.** `analysis_options.yaml` escalates the rules that are
+  actually dangerous, and the workflow is **configured to fail on any error or
+  warning** — not merely to report one.
+  [![Analyze](https://github.com/apauruseya7866er/Inkbound/actions/workflows/ci.yml/badge.svg?job=analyze)](https://github.com/apauruseya7866er/Inkbound/actions/workflows/ci.yml)
+- **Fakes are exercised, not merely passing.** A prior cleanup removed **41 stale
+  `@override` annotations in test fakes** that were falling through to
+  `noSuchMethod`, so those tests were green without calling what they claimed to
+  test. The rule is escalated so it cannot come back quietly.
 - **Signed releases from tags.** Push `v*`, get a signed APK on the releases
   page, and the release is refused if it turns out to be debug-signed.
 
@@ -201,19 +214,21 @@ that stay dark when the system flips to dark.
 **Local-first, on purpose.** No account, no telemetry, nothing leaving the phone
 unless you export it.
 
-### What this build deliberately doesn't do
+### Known rough edges
 
-- **Novels only.** Anime and manga are gated off, not shipped as features. See
-  [above](#1-novel-only-behind-one-constant).
-- **No cloud, no account, no sync.** By choice, described above.
-- **No second-screen pairing.** Casting and remote control were removed.
-- **No APK in the repository.** Builds are attached to
-  [releases](https://github.com/apauruseya7866er/Inkbound/releases) instead of
-  committed binaries.
+Naming them in one place, because a README that only lists strengths is not
+worth reading:
 
-> **Note:** the app still installs under the launcher name `Zangetsu`, inherited
-> from the original project, because the package identity is what makes an update
-> an *update*. The project is Inkbound.
+- **The launcher still says `Zangetsu`.** The package identity is what makes an
+  update an *update*; renaming it would orphan every existing install. The
+  project is Inkbound.
+- **Mixing a release build with a source build needs an uninstall.** The signing
+  boundary is real — see [below](#-getting-the-app).
+- **The strictest Cloudflare tier needs an external solver.** No in-app trick
+  clears it; see [layer 4](#6-cloudflare-handled-in-layers).
+- **56 tests fail on Linux CI.** ~30 need a `quickjs_c_bridge.dll` that has no
+  Linux build, the rest bake in Windows file-locking assumptions. The test job is
+  therefore non-blocking; `analyze` and the release build are the gates.
 
 ---
 
@@ -243,7 +258,7 @@ Nobody edits a contributors list. Names appear because you committed code:
 | Mechanism | What it does |
 |---|---|
 | **Commit author identity** | Anything authored by an email linked to a GitHub account appears on the repository's contributors graph and in `git shortlog -sne` — with no file to update. |
-| **`Co-Authored-By:` trailers** | Co-authored commits are attributed to the co-author automatically. The git tooling for this repo asks for them where AI tooling contributed. |
+| **`Co-Authored-By:` trailers** | Co-authored commits are attributed to the co-author automatically. Repo tooling prompts for a `Co-Authored-By:` trailer when AI tooling contributed. |
 | **CLA sign-off** | Every pull request records a Contributor License Agreement sign-off in the commit trailer, so consent is provable from history. |
 | **`CONTRIBUTORS.md`** | Regenerated from git history by a scheduled workflow — see below. |
 | **Upstream history, intact** | This fork's history is not rewritten. All 2,300+ commits and every person who authored one remain attributed in the log, permanently. |
@@ -255,11 +270,11 @@ date, the fix is to run the workflow — not to hand-edit the file.
 
 ### How to be listed
 
-1. Open a pull request. Sign the CLA.
-2. Merge with a **Squash and merge** so your work lands as one commit on `main`.
+Open a pull request. Your commit must carry a CLA sign-off trailer.
 
-That is the whole process. There is no `git add` to a contributors file, because
-there is no contributors file to add to.
+That's it — the maintainer squash-merges, and the roster regenerates from the
+history. There is no `git add` to a contributors file, because there is no
+contributors file to add yourself to.
 
 ### Review and ownership are enforced, not promised
 
@@ -286,8 +301,8 @@ Every `v*` tag produces one.
 
 ### Build it yourself
 
-You will need the [Flutter SDK](https://docs.flutter.dev/get-started/install)
-with Dart `^3.11.5` and an Android toolchain.
+You will need the [Flutter SDK](https://docs.flutter.dev/get-started/install) —
+Dart 3.11.5 or later — and an Android toolchain.
 
 ```bash
 git clone https://github.com/apauruseya7866er/Inkbound.git
