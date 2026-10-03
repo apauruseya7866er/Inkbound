@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 2.2.0+13502
+version: 3.0.0+13502
 
 environment:
   sdk: ^3.11.5
@@ -266,10 +266,11 @@ flutter:
   generate: true
   uses-material-design: true
   assets:
-    # Novel sources are NOT bundled. They come from the official LNReader plugin
-    # repo, whose index URL is seeded on first launch (see
-    # lib/core/lnreader/seed_repo.dart) — 284 maintained sources, and scraper
-    # fixes arrive upstream instead of being frozen into a release.
+    # Novel sources are NOT bundled. They come from Inkbound's own LNReader
+    # plugin repo (apauruseya7866er/plugins), whose index URL is seeded on
+    # first launch (see lib/core/lnreader/seed_repo.dart) — 292 maintained
+    # sources, and scraper fixes arrive via the index instead of being frozen
+    # into a release.
     #
     # Video extractors are shared host helpers, not sources, so they stay
     # bundled. The novel-only build skips loading them (see injector.dart);
