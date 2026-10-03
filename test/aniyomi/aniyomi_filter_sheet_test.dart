@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:watch_app/core/aniyomi/aniyomi_filters.dart';
-import 'package:watch_app/features/aniyomi/aniyomi_filter_sheet.dart';
+import 'package:watch_app/features/search/filters/aniyomi_filter_sheet.dart';
 
 // ---------------------------------------------------------------------------
 // Helpers
