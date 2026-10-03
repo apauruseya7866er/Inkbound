@@ -1,0 +1,11 @@
+# Sole-maintainer review.
+#
+# Every path requires the maintainer's review, so no pull request - from a
+# stranger, a bot, or an automated dependency update - can merge without it.
+# The rule lives in the repository configuration rather than in a README
+# paragraph, which is the point.
+#
+# Code owners only gate merges; they do not grant write access, and GitHub
+# branch protection must still be enabled on main for this file to have teeth.
+
+* @apauruseya7866er

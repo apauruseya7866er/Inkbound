@@ -1,119 +1,293 @@
 <div align="center">
 
-<img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=0:FF4D57,100:1a1a2e&height=220&section=header&text=Inkbound&fontSize=75&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Read.%20Listen.%20Read%20offline.&descAlignY=58&descSize=20" />
+<img width="100%" src="https://capsule-render.vercel.app/api?type=waving&color=0:FF4D57,100:1a1a2e&height=230&section=header&text=Inkbound&fontSize=78&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Novels%20only.%20Local%20only.%20Yours.&descAlignY=58&descSize=21" />
 
-<img src="assets/icon/app_icon.png" width="120" alt="Inkbound" />
+<img src="assets/icon/app_icon.png" width="124" alt="Inkbound" />
 
-### A novel reader for Android — inspired by [Zangetsu](https://github.com/Spyou/Zangetsu)
+### A novel-only reader for Android
 
 [![License](https://img.shields.io/github/license/apauruseya7866er/Inkbound?style=for-the-badge&color=FF4D57)](LICENSE)
+[![Releases](https://img.shields.io/github/v/release/apauruseya7866er/Inkbound?display_name=tag&style=for-the-badge&color=FF4D57)](https://github.com/apauruseya7866er/Inkbound/releases)
 [![Issues](https://img.shields.io/github/issues/apauruseya7866er/Inkbound?style=for-the-badge&color=FF4D57&logo=github)](https://github.com/apauruseya7866er/Inkbound/issues)
+[![CI](https://github.com/apauruseya7866er/Inkbound/actions/workflows/ci.yml/badge.svg)](https://github.com/apauruseya7866er/Inkbound/actions/workflows/ci.yml)
 
-![Platform](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
-![Flutter](https://img.shields.io/badge/Built%20with-Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)
+![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)
+![Flutter](https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white)
 ![Dart](https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white)
+![GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-ff5d5d?style=for-the-badge)
 
 <br/>
 
 <p align="center">
+  <a href="#-why-this-exists"><b>Why this exists</b></a> ·
+  <a href="#-whats-actually-different"><b>What's different</b></a> ·
   <a href="#-what-it-does"><b>What it does</b></a> ·
-  <a href="#-inspiration--credits"><b>Inspiration &amp; credits</b></a> ·
-  <a href="#-build-it-yourself"><b>Build it yourself</b></a> ·
-  <a href="#%EF%B8%8F-disclaimer"><b>Disclaimer</b></a> ·
-  <a href="#-license"><b>License</b></a>
+  <a href="#-sources"><b>Sources</b></a> ·
+  <a href="#-contributors--ownership"><b>Contributors</b></a> ·
+  <a href="#-getting-the-app"><b>Get it</b></a> ·
+  <a href="#-credits"><b>Credits</b></a>
 </p>
 
 <img width="100%" src="https://capsule-render.vercel.app/api?type=rect&color=0:FF4D57,100:1a1a2e&height=4" />
 
 </div>
 
+## 💭 Why this exists
+
+[Zangetsu](https://github.com/Spyou/Zangetsu) is a good app with one problem:
+**it is three apps wearing a trenchcoat.**
+
+It reads novels, and it streams anime and reads manga. If you are one of the
+large majority who installed it for novels, you are paying for the other two in
+ways that are easy to miss:
+
+- **Settings you never open and cannot delete.** Anime and manga source
+  management, trackers, region pickers, video players, a second-screen remote.
+- **An APK carrying code you will never execute.** Anime and manga catalogues
+  load at startup whether you want them or not.
+- **A mode switch** that defaults you into a three-way "Streaming / Manga /
+  Novel" picker — one tap before you reach the thing you opened the app for.
+- **Bugs you did not cause**, reported by people using a half of the app you
+  never touched.
+
+Inkbound is that reader with everything else switched off.
+
+| | **Zangetsu** | **Inkbound** |
+|---|---|---|
+| Media | Anime · Manga · Novels | **Novels only** |
+| Account | Sign-in, cloud sync, Watch Together | **None. Nothing to log into.** |
+| Data leaves the device | Only if you sign in | **Never, unless you export it yourself** |
+| Second screen | Cast + remote control | **Removed** |
+| Source index | Upstream LNReader | **Its own** — upstream tracked, our fixes published |
+| Cloudflare handling | WebView solver | **Layered**: native TLS path, automatic solve, optional external proxy |
+| CI | — | **Analyzer gate at zero errors/warnings, tests, release build** |
+| Signed releases | Manual | **Every `v*` tag** |
+
+**This is a fork, and the difference is intentional, not accidental.** The reader,
+the source system, the downloads, the trackers and the read-aloud engine are
+Krishna Vishwakarma's work, carried over intact. What changed is scope, identity,
+and the parts that were quietly pointing at the upstream author's accounts
+instead of yours. See [Credits](#-credits) — and if you use the original, [star
+it](https://github.com/Spyou/Zangetsu). It deserves it.
+
+---
+
+## 🔧 What's actually different
+
+Not a wish list — this is what is in the tree, and where to look.
+
+### 1. Novel-only, behind one constant
+
+Every gate in the app reads a single flag in
+[`lib/core/mode/novel_only.dart`](lib/core/mode/novel_only.dart). The anime and
+manga code is still compiled — not deleted — so it stays type-checked against the
+surrounding code and can be revived by flipping one constant instead of
+re-deriving a dozen conditions. A real delete is not possible here:
+`ContentMode`, `ProviderType`, `ZKind` and `MediaKind` are matched exhaustively
+across hundreds of `switch` expressions, so removing a case breaks compilation
+everywhere. A flag keeps the tree honest *and* reversible.
+
+### 2. No account. No cloud. No sync.
+
+The account layer is **removed, not hidden** — there is no Supabase reference
+left in dependency injection. There is nothing to sign up for, no token to
+expire, and no server that learns which novels you read. Your library, history
+and progress live on the device.
+
+Backups are still yours: point the app at **any folder you choose**, including a
+synced one, and it writes a plain JSON file you can read without this app.
+
+### 3. Read-aloud that sounds like a person
+
+- Full-sentence highlighting that tracks along with the narration.
+- Voice, speed, pitch, and a sleep timer.
+- A **sentence-gap control** — the pause between sentences is tuned down so it
+  reads like speech instead of a machine enumerating clauses.
+- Narration continues with the screen off, **resumes from the sentence you left
+  rather than the chapter**, and stops when you swipe the app out of the task
+  switcher instead of talking to an empty room.
+
+### 4. Reading progress that survives Android
+
+The obvious implementation — save on pause — loses your place when the system
+kills a backgrounded app, which is exactly what it does to a reader. Inkbound
+**writes the reading position to disk before the app can be killed**, and stores
+it per book. Close it, swipe it away, come back tomorrow: it reopens on the line
+you left, not the top of the chapter.
+
+### 5. Text cleanup that follows through
+
+Real sources ship junk inside the prose: donation pleas, Discord and Patreon
+links, chapter footers, translator notes, decorative rules.
+
+- Built-in rules strip it from the page.
+- **Long-press any sentence to hide it — everywhere**, not just in the book you
+  hid it in.
+- The same rules apply to the page *and* to narration, so **the narrator never
+  reads an ad aloud.**
+
+### 6. Cloudflare, handled in layers
+
+Most source scrapers break the moment a site sits behind Cloudflare, and the
+usual responses are all wrong in a different way. Inkbound treats it as a ladder,
+and each rung only runs if the one above failed:
+
+1. **The right TLS stack.** The novel fetch runs on Android's native HTTP stack
+   so it presents a browser-like TLS fingerprint. Sources behind a fingerprint
+   gate never answer `dart:io` at all, and no header block fixes that.
+2. **One cookie jar, not two.** The reader, the source system and the WebView
+   solver all read and write the same cookie store. There is no second jar to
+   arbitrate against, so a clearance earned in the solver cannot be shadowed by
+   a stale copy held elsewhere — a real bug that shipped in an earlier
+   revision of this fork.
+3. **An automatic solve.** A Cloudflare challenge is detected on the response
+   itself, and solved in a hidden WebView — under the same User-Agent the replay
+   will send, because Cloudflare binds a clearance to the browser that earned it.
+   **No tapping, no empty list.** If it needs a human, the app offers the visible
+   solve.
+4. **An external solver, if you want one.** For the hardest tier — where a
+   clearance is bound to a fingerprint the app genuinely cannot reproduce — you
+   can point Inkbound at a self-hosted [Solverr](https://github.com/unseensnick/Solverr),
+   Byparr or FlareSolverr. Off by default; the app's own solver stays primary.
+
+The hard truth, which the app does not pretend otherwise: **if a site is on
+Cloudflare's strictest tier, no in-app trick is enough** and a real browser has
+to do the solving. That is why the last rung exists.
+
+### 7. Its own source index
+
+Inkbound serves sources from **[apauruseya7866er/plugins](https://github.com/apauruseya7866er/plugins)**,
+a fork of the LNReader plugin ecosystem. It tracks upstream so its ~290 sources
+stay available, and it is where **our own scraper fixes are published** — so a
+source broken for everyone here is fixed once, here, for everyone using this
+index.
+
+### 8. Upstream ties cut where they belonged to someone else
+
+Pointing users at the original author's donation links, Discord, website and
+community prompts is not a fork's job. The community prompt is gone, About shows
+only this project's GitHub, the payment tiles are gone, and the updater and font
+CDNs point at infrastructure this repository controls. `zangetsu.online` is kept
+for exactly one thing — a share-link redirect that has to resolve for old
+links — and is not linked anywhere else.
+
+### 9. Engineering you can check
+
+- **CI gates the analyzer.** `analysis_options.yaml` escalates the rules that
+  are actually dangerous; the repo currently sits at **0 errors and 0 warnings**,
+  and the workflow fails if that regresses.
+- **Tests run in CI**, including the ones worth having: 64 analyzer warnings were
+  cleared, and among them were **41 stale `@override` annotations in test fakes**
+  that were silently falling through to `noSuchMethod` — tests passing without
+  exercising anything.
+- **Signed releases from tags.** Push `v*`, get a signed APK on the releases
+  page, and the release is refused if it turns out to be debug-signed.
+
+---
+
 ## 📖 What it does
 
-Inkbound is a novel reader for Android. One app for browsing many novel
-sources, reading them comfortably, listening when you'd rather not read, and
-keeping them for offline.
+**Many sources, one library.** Add source plugins and each gets its own row on
+the home page, pinned and ordered by you. Search and browse across all of them.
 
-**Many sources, one library.** Add source plugins and each one gets its own row
-on the home page, pinned and ordered by you. Search and browse across all of
-them.
+**A reader built for long chapters.** Continuous scroll or page-by-page, with
+font, size, line height, letter and word spacing, alignment, and reading themes
+that stay dark when the system flips to dark.
 
-**A reader built for long chapters.** Continuous scrolling or page-by-page, with
-font, size, line height, letter and word spacing, alignment and themes — plus
-dark reading themes that stay dark when the system flips.
+**Downloads and offline.** Pull chapters down and read without a connection.
 
-**Read-aloud that doesn't sound robotic.** Full-sentence highlighting that
-follows along, a voice picker, speed and pitch, a sleep timer, and a
-**sentence-gap control** so the pause between sentences sounds like a person
-rather than a machine. Narration keeps going with the screen off, resumes from
-the sentence you left, and stops when you swipe the app away.
+**History where you expect it.** History sits on the dock, not buried in a menu.
 
-**Text cleanup.** Built-in rules strip the injected junk real sources ship —
-donation pleas, Discord and Patreon links, chapter footers, translator credits,
-and decorative separator lines. Long-press any sentence to hide it everywhere,
-not just in the book you hid it in. The same rules apply to the page *and* to
-read-aloud, so the narrator never reads an ad.
-
-**Reading progress that sticks.** Your position is saved as you read and written
-to disk before the app can be killed — close it, swipe it away, come back
-tomorrow, and it reopens on the line you left, not the top of the chapter.
-
-**Offline.** Download chapters and read them without a connection.
-
-**Local-first, on purpose.** There is no account to make and nothing to sign in
-to. Your library, history and progress live on your device. Want a backup? Point
-the app at any folder you choose — including a synced one — and it writes a
-plain JSON file you can read yourself.
+**Local-first, on purpose.** No account, no telemetry, nothing leaving the phone
+unless you export it.
 
 ### What this build deliberately doesn't do
 
-Being honest about the edges matters more than a longer feature list:
+- **Novels only.** Anime and manga are gated off, not shipped as features. See
+  [above](#1-novel-only-behind-one-constant).
+- **No cloud, no account, no sync.** By choice, described above.
+- **No second-screen pairing.** Casting and remote control were removed.
+- **No APK in the repository.** Builds are attached to
+  [releases](https://github.com/apauruseya7866er/Inkbound/releases) instead of
+  committed binaries.
 
-- **Novels only.** The anime, movie and TV code paths are compiled in but gated
-  off, so the app ships as a novel reader. See
-  [`lib/core/mode/novel_only.dart`](lib/core/mode/novel_only.dart) — one constant
-  flips it back.
-- **No cloud, no account, no sync.** Everything stays on the device. There is
-  nothing to sign in to and nothing leaves the phone unless you export it.
-- **No second-screen pairing.** Casting and remote-control features were removed.
-- **Signed releases from tags.** Push a `v*` tag and the Release APK workflow
-  builds a signed APK and attaches it to the
-  [release](https://github.com/apauruseya7866er/Inkbound/releases). Grab it from
-  there instead of building it yourself, if you would rather not set up the
-  Android toolchain.
-
-> **Note:** the app currently still installs under the launcher name
-> `Zangetsu`, inherited from the original project. The repository is Inkbound.
+> **Note:** the app still installs under the launcher name `Zangetsu`, inherited
+> from the original project, because the package identity is what makes an update
+> an *update*. The project is Inkbound.
 
 ---
 
-## 🙏 Inspiration & credits
+## 📚 Sources
 
-**Inkbound would not exist without [Zangetsu](https://github.com/Spyou/Zangetsu)
-by Krishna Vishwakarma.** It is a novel-focused fork of that project, and it
-carries the reader, the source system, downloads, trackers, the read-aloud
-engine and most of everything else you see here. If you like this app, please
-consider starring the original — it's the larger project, and this one stands on
-it.
+Inkbound ships **no content and no sources of its own.** It loads community
+scrapers from the [LNReader](https://github.com/LNReader/lnreader-sources)
+ecosystem, served through
+**[apauruseya7866er/plugins](https://github.com/apauruseya7866er/plugins)**
+(`plugins/v3.0.0`).
 
-The source plugins come from the
-[LNReader](https://github.com/LNReader/lnreader-sources) ecosystem, which is a
-large part of why multi-source works as well as it does. Inkbound serves them
-from its own index — [apauruseya7866er/plugins](https://github.com/apauruseya7866er/plugins),
-which tracks upstream and is where our own source fixes are published.
-
-Thanks also to everyone who has contributed to Zangetsu over the years. That
-project's history, and the 2,300+ commits behind this fork, are the work of many
-people.
+- The first launch seeds that index, so there is a catalogue immediately.
+- The Sources screen can add further repositories by URL.
+- Fixing a broken scraper means a pull request against the plugins repository.
 
 ---
 
-## 🛠 Build it yourself
+## 👥 Contributors & ownership
 
-Prebuilt APKs are on the [releases page](https://github.com/apauruseya7866er/Inkbound/releases) —
-each `v*` tag produces one. This section is for building from source, which you
-need anyway to change anything. You'll need the
-[Flutter SDK](https://docs.flutter.dev/get-started/install) with Dart `^3.11.5`
-and an Android toolchain.
+**Inkbound is maintained by one person: [apauruseya7866er](https://github.com/apauruseya7866er).**
+Contributions are welcome, and ownership is not on the table.
+
+### Attribution is automatic, not hand-written
+
+Nobody edits a contributors list. Names appear because you committed code:
+
+| Mechanism | What it does |
+|---|---|
+| **Commit author identity** | Anything authored by an email linked to a GitHub account appears on the repository's contributors graph and in `git shortlog -sne` — with no file to update. |
+| **`Co-Authored-By:` trailers** | Co-authored commits are attributed to the co-author automatically. The git tooling for this repo asks for them where AI tooling contributed. |
+| **CLA sign-off** | Every pull request records a Contributor License Agreement sign-off in the commit trailer, so consent is provable from history. |
+| **`CONTRIBUTORS.md`** | Regenerated from git history by a scheduled workflow — see below. |
+| **Upstream history, intact** | This fork's history is not rewritten. All 2,300+ commits and every person who authored one remain attributed in the log, permanently. |
+
+**`CONTRIBUTORS.md` is generated, not typed.** A scheduled workflow reads
+`git shortlog`, merges the duplicate identities that accumulate when someone
+changes their email or username, and rewrites the roster. If it is ever out of
+date, the fix is to run the workflow — not to hand-edit the file.
+
+### How to be listed
+
+1. Open a pull request. Sign the CLA.
+2. Merge with a **Squash and merge** so your work lands as one commit on `main`.
+
+That is the whole process. There is no `git add` to a contributors file, because
+there is no contributors file to add to.
+
+### Review and ownership are enforced, not promised
+
+- [`.github/CODEOWNERS`](.github/CODEOWNERS) requires the maintainer's review
+  on every path in the repository — the setting is in the repo, not in a README
+  paragraph.
+- [`.github/funding.yml`](.github/funding.yml) points GitHub's Sponsor button at
+  the maintainer, so sponsorship and funding have one unambiguous destination.
+- Pull requests require the CLA. See [`CLA.md`](CLA.md) and
+  [`AI_POLICY.md`](AI_POLICY.md) — AI-assisted contributions are welcome when
+  they are disclosed and a human stands behind them.
+
+---
+
+## 📦 Getting the app
+
+**Signed APKs are on the [releases page](https://github.com/apauruseya7866er/Inkbound/releases).**
+Every `v*` tag produces one.
+
+> If you install a release build and later build from source without
+> `android/key.properties`, you get a **debug-signed** APK. Android will refuse
+> to upgrade across that boundary — uninstall before switching. This is the one
+> sharp edge in the whole project.
+
+### Build it yourself
+
+You will need the [Flutter SDK](https://docs.flutter.dev/get-started/install)
+with Dart `^3.11.5` and an Android toolchain.
 
 ```bash
 git clone https://github.com/apauruseya7866er/Inkbound.git
@@ -124,18 +298,31 @@ flutter run                 # debug build on a connected device
 flutter build apk --release # release APK → build/app/outputs/flutter-apk/
 ```
 
-A local `flutter build apk --release` without a `android/key.properties` file
-produces a **debug-signed** APK. That is fine for your own device and fine for
-CI, but it is not what the releases page publishes, and Android will refuse to
-upgrade a debug-signed install to a properly signed one — so uninstall before
-switching between them.
+Signing config lives in `android/key.properties`, deliberately not in the
+repository; `android/key.properties.example` shows the expected shape.
 
-Signing config lives in `android/key.properties`, which is deliberately not in
-this repository. `android/key.properties.example` shows the expected shape.
+**Stack:** Flutter and Dart, [Hive](https://pub.dev/packages/hive) for local
+storage, Kotlin `MethodChannel`s for the TTS engine, the JavaScript source
+runtime, and storage access.
 
-**Tech stack:** Flutter and Dart, [Hive](https://pub.dev/packages/hive) for
-local storage, Kotlin `MethodChannel`s for the TTS engine, the JavaScript source
-runtime and storage access framework.
+---
+
+## 🙏 Credits
+
+**Inkbound would not exist without [Zangetsu](https://github.com/Spyou/Zangetsu)
+by [Krishna Vishwakarma](https://github.com/Spyou).** It carries the reader, the
+source system, downloads, trackers, the read-aloud engine and most of everything
+else you see here. The great majority of the 2,300+ commits in this history are
+theirs, and so are most of the ideas. Please consider starring the original.
+
+Thank you to everyone who has contributed to Zangetsu over the years, and to
+everyone who has contributed here. The full roster is in
+[`CONTRIBUTORS.md`](CONTRIBUTORS.md).
+
+Source plugins come from the
+[LNReader](https://github.com/LNReader/lnreader-sources) ecosystem, which is why
+multi-source works as well as it does. Third-party notices are in
+[`NOTICE.md`](NOTICE.md).
 
 ---
 
@@ -143,16 +330,17 @@ runtime and storage access framework.
 
 > [!IMPORTANT]
 > **Inkbound is a reading tool only.** It does not host, provide, distribute or
-> maintain any content or source extensions.
+> maintain any content or source extension.
 
-- **User responsibility** — you are solely responsible for how you use the app
-  and for any third-party source you choose to install, and must comply with all
-  applicable law and with copyright and intellectual-property rights.
-- **No liability** — the maintainers of Inkbound disclaim all liability for
-  misuse or legal issues arising from your use of the app or of any third-party
-  service. Concerns about a third-party source belong with whoever made it.
-- **No affiliation** — this project is not affiliated with or endorsed by the
-  authors of any source extension it can load.
+- **Your responsibility.** You are solely responsible for how you use the app and
+  for any third-party source you install, and must comply with applicable law and
+  with copyright and intellectual-property rights.
+- **No liability.** The maintainers disclaim all liability for misuse or legal
+  issues arising from your use of the app or of any third-party service.
+  Concerns about a third-party source belong with whoever made it.
+- **No affiliation.** This project is not affiliated with or endorsed by the
+  authors of any source extension it can load, nor by the Zangetsu project
+  beyond the fork relationship described above.
 
 ---
 
@@ -163,24 +351,28 @@ Inkbound is licensed under the **[GNU GPL-3.0](LICENSE)**.
 Copyright © 2026 **Krishna Vishwakarma** (original Zangetsu project).
 Modifications and the novel-only reworking © 2026 **apauruseya7866er**.
 
-The full GPL-3.0 text is in [`LICENSE`](LICENSE); attribution requirements in
-[`NOTICE.md`](NOTICE.md) and the upstream contribution terms in
-[`CLA.md`](CLA.md) still apply to this codebase.
+The full GPL-3.0 text is in [`LICENSE`](LICENSE). Attribution requirements in
+[`NOTICE.md`](NOTICE.md), contribution terms in [`CLA.md`](CLA.md), and the
+[AI usage policy](AI_POLICY.md) still apply to this codebase.
 
 <div align="center">
 
 <br/>
 
-<img src="assets/icon/app_icon.png" width="70" alt="Inkbound"/>
+<img src="assets/icon/app_icon.png" width="72" alt="Inkbound"/>
 
 ### Inkbound
-*A novel reader, forked from Zangetsu.*
+*Novels only. Local only. Yours.*
 
 <br/>
 
 [🐛 Report an issue](https://github.com/apauruseya7866er/Inkbound/issues)
-&nbsp;&nbsp;•&nbsp;&nbsp;
-[⭐ Star the original](https://github.com/Spyou/Zangetsu)
+&nbsp;•&nbsp;
+[📦 Releases](https://github.com/apauruseya7866er/Inkbound/releases)
+&nbsp;•&nbsp;
+[🔌 Plugin index](https://github.com/apauruseya7866er/plugins)
+&nbsp;•&nbsp;
+[⭐ Star Zangetsu](https://github.com/Spyou/Zangetsu)
 
 <br/>
 

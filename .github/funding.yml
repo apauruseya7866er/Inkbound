@@ -1,0 +1,10 @@
+# Gives GitHub's Sponsor button a single, unambiguous destination.
+#
+# This is a personal project, so funding goes to the maintainer rather than to
+# the upstream Zangetsu project, whose donation links were deliberately removed
+# from the app - see the README section "Upstream ties cut where they belonged
+# to someone else".
+#
+# Replace `username` with your GitHub Sponsors handle before the first release,
+# or delete this file to leave the button off entirely.
+custom: ["apauruseya7866er"]

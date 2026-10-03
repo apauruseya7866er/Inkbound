@@ -1,0 +1,70 @@
+name: Contributors
+
+# Regenerates the roster in CONTRIBUTORS.md from git history.
+#
+# The point is that the list is never hand-maintained: a name is present because
+# the person committed code, so it cannot go stale or be forgotten. Runs weekly
+# and on demand; only opens a pull request when the generated block actually
+# differs from what is committed.
+on:
+  schedule:
+    # Sunday 04:17 UTC. An off-the-hour minute avoids the rush at :00.
+    - cron: '17 4 * * 0'
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'CONTRIBUTORS.md'
+      - '.github/workflows/contributors.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Only one regeneration at a time, and never cancel one mid-run.
+concurrency:
+  group: contributors
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Refresh the contributors roster
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Full history, not a shallow clone: the roster counts every commit the
+      # project has ever had, including the upstream years that are not reachable
+      # from this branch's recent history.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the roster
+        run: python scripts/generate_contributors.py
+
+      - name: Open a pull request if anything changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          base: ${{ github.ref_name }}
+          branch: automation/contributors-roster
+          commit-message: 'chore: refresh the contributors roster'
+          title: 'chore: refresh the contributors roster'
+          body: |
+            Regenerated from `git shortlog` by the Contributors workflow.
+
+            No hand-editing needed - if your name is missing, it is because your
+            commits are not attributed to an email linked to a GitHub account.
+            Fix that on your GitHub profile, then re-run this workflow.
+          delete-branch: true
+          labels: automation
+
+      - name: Fail if the roster could not be generated
+        if: failure()
+        run: echo "::error::Roster generation failed - CONTRIBUTORS.md may be stale."
