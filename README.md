@@ -23,7 +23,6 @@
   <a href="#-whats-actually-different"><b>What's different</b></a> ·
   <a href="#-what-it-does"><b>What it does</b></a> ·
   <a href="#-sources"><b>Sources</b></a> ·
-  <a href="#-contributors--ownership"><b>Contributors</b></a> ·
   <a href="#-getting-the-app"><b>Get it</b></a> ·
   <a href="#-credits"><b>Credits</b></a>
 </p>
@@ -323,6 +322,15 @@ The full GPL-3.0 text is in [`LICENSE`](LICENSE). Attribution requirements in
 [🔌 Plugin index](https://github.com/apauruseya7866er/plugins)
 &nbsp;•&nbsp;
 [⭐ Star Zangetsu](https://github.com/Spyou/Zangetsu)
+
+<br/>
+
+<details>
+<summary>👀 Visitors</summary>
+
+![Visitors](https://count.moeyy.cn/@apauruseya7866er.Inkbound?theme=yousa-ling&padding=6&align=center&darkmode=auto)
+
+</details>
 
 <br/>
 
