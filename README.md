@@ -70,12 +70,6 @@ Inkbound is that reader with everything else switched off.
 | CI | — | **Analyzer gate at zero errors/warnings, tests, release build** |
 | Signed releases | Manual | **Every `v*` tag** |
 
-<p align="center">
-  <img src=".github/screenshots/home.png" width="30%" alt="Home" />
-  <img src=".github/screenshots/search.png" width="30%" alt="Search" />
-  <img src=".github/screenshots/detail.png" width="30%" alt="Detail" />
-</p>
-
 **This is a fork, and the difference is intentional, not accidental.** The reader,
 the source system, the downloads, the trackers and the read-aloud engine are
 **Krishna Vishwakarma's** work, carried over intact — and it is the larger
@@ -214,22 +208,6 @@ that stay dark when the system flips to dark.
 **Local-first, on purpose.** No account, no telemetry, nothing leaving the phone
 unless you export it.
 
-### Known rough edges
-
-Naming them in one place, because a README that only lists strengths is not
-worth reading:
-
-- **The launcher still says `Zangetsu`.** The package identity is what makes an
-  update an *update*; renaming it would orphan every existing install. The
-  project is Inkbound.
-- **Mixing a release build with a source build needs an uninstall.** The signing
-  boundary is real — see [below](#-getting-the-app).
-- **The strictest Cloudflare tier needs an external solver.** No in-app trick
-  clears it; see [layer 4](#6-cloudflare-handled-in-layers).
-- **56 tests fail on Linux CI.** ~30 need a `quickjs_c_bridge.dll` that has no
-  Linux build, the rest bake in Windows file-locking assumptions. The test job is
-  therefore non-blocking; `analyze` and the release build are the gates.
-
 ---
 
 ## 📚 Sources
@@ -243,49 +221,6 @@ ecosystem, served through
 - The first launch seeds that index, so there is a catalogue immediately.
 - The Sources screen can add further repositories by URL.
 - Fixing a broken scraper means a pull request against the plugins repository.
-
----
-
-## 👥 Contributors & ownership
-
-**Inkbound is maintained by one person: [apauruseya7866er](https://github.com/apauruseya7866er).**
-Contributions are welcome, and ownership is not on the table.
-
-### Attribution is automatic, not hand-written
-
-Nobody edits a contributors list. Names appear because you committed code:
-
-| Mechanism | What it does |
-|---|---|
-| **Commit author identity** | Anything authored by an email linked to a GitHub account appears on the repository's contributors graph and in `git shortlog -sne` — with no file to update. |
-| **`Co-Authored-By:` trailers** | Co-authored commits are attributed to the co-author automatically. Repo tooling prompts for a `Co-Authored-By:` trailer when AI tooling contributed. |
-| **CLA sign-off** | Every pull request records a Contributor License Agreement sign-off in the commit trailer, so consent is provable from history. |
-| **`CONTRIBUTORS.md`** | Regenerated from git history by a scheduled workflow — see below. |
-| **Upstream history, intact** | This fork's history is not rewritten. All 2,300+ commits and every person who authored one remain attributed in the log, permanently. |
-
-**`CONTRIBUTORS.md` is generated, not typed.** A scheduled workflow reads
-`git shortlog`, merges the duplicate identities that accumulate when someone
-changes their email or username, and rewrites the roster. If it is ever out of
-date, the fix is to run the workflow — not to hand-edit the file.
-
-### How to be listed
-
-Open a pull request. Your commit must carry a CLA sign-off trailer.
-
-That's it — the maintainer squash-merges, and the roster regenerates from the
-history. There is no `git add` to a contributors file, because there is no
-contributors file to add yourself to.
-
-### Review and ownership are enforced, not promised
-
-- [`.github/CODEOWNERS`](.github/CODEOWNERS) requires the maintainer's review
-  on every path in the repository — the setting is in the repo, not in a README
-  paragraph.
-- [`.github/funding.yml`](.github/funding.yml) points GitHub's Sponsor button at
-  the maintainer, so sponsorship and funding have one unambiguous destination.
-- Pull requests require the CLA. See [`CLA.md`](CLA.md) and
-  [`AI_POLICY.md`](AI_POLICY.md) — AI-assisted contributions are welcome when
-  they are disclosed and a human stands behind them.
 
 ---
 
