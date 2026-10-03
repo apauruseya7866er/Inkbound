@@ -51,7 +51,7 @@ Regenerated automatically; identities sharing a name are merged.
 |---|---:|---|
 | Krishna Vishwakarma | 2084 | Original Zangetsu author — reader, sources, downloads, trackers, TTS |
 | Nathen Brewer | 172 | Upstream (Zangetsu) |
-| apauruseya7866er | **40** | **Maintainer — Inkbound's author and sole owner** |
+| apauruseya7866er | **42** | **Maintainer — Inkbound's author and sole owner** |
 | mo7AmMeD64 | 10 | Upstream (Zangetsu) |
 | Debjit | 9 | Upstream (Zangetsu) |
 | Leo Camus | 7 | Upstream (Zangetsu) |
