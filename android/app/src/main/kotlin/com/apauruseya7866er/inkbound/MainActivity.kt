@@ -27,6 +27,8 @@ import com.apauruseya7866er.inkbound.cloudstream.RepoManager
 import com.apauruseya7866er.inkbound.cloudstream.SubscriptionWorker
 import com.apauruseya7866er.inkbound.mihon.MihonBridge
 import com.apauruseya7866er.inkbound.tiles.TileBridge
+import eu.kanade.tachiyomi.network.FlareSolverrConfig
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverrClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -696,22 +698,9 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
                             result.error("bad_args", "url required", null)
                             return@setMethodCallHandler
                         }
-csExecutor.execute {
-                            // A novel (LNReader) source replays its requests with
-                            // NovelHttp.deviceUserAgent, so the challenge has to be
-                            // solved under that exact string - Cloudflare binds the
-                            // clearance to the UA that earned it. Anything else keeps
-                            // the historic strip-the-WebView-markers default, which the
-                            // CloudStream lane's CfClearance.userAgent replay agrees with.
-                            val novel = call.argument<Boolean>("novel") == true
-                            val solveUa: String? =
-                                if (novel) NovelHttp.deviceUserAgent else null
-                            @Suppress("UNCHECKED_CAST")
-                            val solveHeaders =
-                                call.argument<Map<String, String>>("headers")
+                        csExecutor.execute {
                             val solved = try {
-                                com.lagradost.cloudstream3.network.CfWebViewSolver
-                                    .solve(url, solveUa, solveHeaders)
+                                com.lagradost.cloudstream3.network.CfWebViewSolver.solve(url)
                             } catch (e: Exception) {
                                 null
                             }
@@ -1250,6 +1239,62 @@ csExecutor.execute {
                     } catch (e: Exception) {
                         runOnUiThread { result.error("novel_http_failed", e.message, null) }
                     }
+                }
+            }
+
+        // Cloudflare bypass proxy: lets the Settings screen read and write the
+        // two values the interceptor consults on every request (is it on, and
+        // where does it live), and run its "Test" button. The interceptor reads
+        // FlareSolverrConfig directly, so nothing here is on the request path —
+        // this only has to push what the user chose into the shared config.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zangetsu/cloudflare_bypass")
+            .setMethodCallHandler { call, result ->
+                FlareSolverrConfig.load(this)
+                when (call.method) {
+                    "get" -> result.success(
+                        mapOf(
+                            "enabled" to FlareSolverrConfig.enabled,
+                            "url" to FlareSolverrConfig.url,
+                        )
+                    )
+                    "set" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val url = call.argument<String>("url").orEmpty()
+                        // Normalise here so the interceptor never has to wonder
+                        // whether a trailing slash or surrounding space was typed.
+                        FlareSolverrConfig.set(this, enabled, url)
+                        result.success(true)
+                    }
+                    // Connectivity check for the settings button. A solve can take
+                    // up to 60s, so it runs off the main thread and the result
+                    // comes back as an explicit ok/error rather than a throw.
+                    "test" -> {
+                        val url = call.argument<String>("url")?.trim().orEmpty()
+                        if (url.isEmpty()) {
+                            result.error("bad_args", "url required", null)
+                            return@setMethodCallHandler
+                        }
+                        CoroutineScope(Dispatchers.IO).launch {
+                            val outcome = FlareSolverrClient.shared().test(url)
+                            runOnUiThread {
+                                outcome
+                                    .onSuccess { ua ->
+                                        result.success(
+                                            mapOf("ok" to true, "userAgent" to ua),
+                                        )
+                                    }
+                                    .onFailure { e ->
+                                        result.success(
+                                            mapOf(
+                                                "ok" to false,
+                                                "error" to (e.message ?: e.toString()),
+                                            ),
+                                        )
+                                    }
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
             }
 

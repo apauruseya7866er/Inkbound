@@ -225,36 +225,18 @@ class MihonExtensionService {
   /// (The JS-provider path clears its own in `_solveCfImpl`; this is the same
   /// thing for the native ecosystems, which all come through here.)
   ///
-/// The native call resolves when the screen CLOSES, not on a verified
+  /// The native call resolves when the screen CLOSES, not on a verified
   /// clearance, so this also clears when the user simply backed out. That is
   /// self-correcting: the next request hits the challenge and re-flags it.
-  ///
-  /// [novel] must be true for an LNReader source. It makes the solver solve
-  /// under `NovelHttp.deviceUserAgent` — the exact UA the novel lane replays
-  /// with — instead of the default stripped one. Cloudflare binds a clearance
-  /// to the UA that earned it, so solving under any other string produces a
-  /// cookie the replay is then refused, and the source stays blocked with
-  /// nothing on screen to explain it.
-  ///
-  /// [headers] are the browser-ish headers the novel lane sends, forwarded so
-  /// the challenge is solved under the same header profile the replay uses.
-  static Future<void> solveCloudflare(
-    String url, {
-    bool novel = false,
-    Map<String, String>? headers,
-  }) async {
+  static Future<void> solveCloudflare(String url) async {
     try {
-      await _channel.invokeMethod<void>('solveCloudflare', {
-        'url': url,
-        'novel': novel,
-        'headers': ?headers,
-      });
+      await _channel.invokeMethod<void>('solveCloudflare', {'url': url});
       final host = Uri.tryParse(url)?.host;
       if (host != null && host.isNotEmpty) CfSolveNeeded.clear(host);
     } on PlatformException catch (e) {
       debugPrint('[mihon] solveCloudflare failed: $e');
-} on MissingPluginException {
-      // Non-Android host - no native solver.
+    } on MissingPluginException {
+      // Non-Android host — no native solver.
     }
   }
 

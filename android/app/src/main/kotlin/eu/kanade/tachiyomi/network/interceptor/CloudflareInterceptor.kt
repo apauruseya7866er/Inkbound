@@ -6,6 +6,7 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import eu.kanade.tachiyomi.network.AndroidCookieJar
+import eu.kanade.tachiyomi.network.FlareSolverrConfig
 import eu.kanade.tachiyomi.util.system.WebViewClientCompat
 import eu.kanade.tachiyomi.util.system.isOutdated
 import eu.kanade.tachiyomi.util.system.toast
@@ -14,6 +15,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
 import okhttp3.Request
 import okhttp3.Response
+import org.jsoup.Jsoup
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -22,13 +24,29 @@ class CloudflareInterceptor(
     private val context: Context,
     private val cookieManager: AndroidCookieJar,
     defaultUserAgentProvider: () -> String,
+    // The optional self-hosted bypass proxy. Null when the build doesn't include
+    // one; when present it is inert until the user turns it on in Settings.
+    private val flareSolverr: FlareSolverrClient? = null,
 ) : WebViewInterceptor(context, defaultUserAgentProvider) {
 
     private val executor = ContextCompat.getMainExecutor(context)
 
     override fun shouldIntercept(response: Response): Boolean {
         if (response.request.url.host.contains("anilist.co")) return false
-        return response.code in ERROR_CODES && response.header("Server") in SERVER_CHECK
+        if (response.code !in ERROR_CODES || response.header("Server") !in SERVER_CHECK) {
+            return false
+        }
+        // Not every Cloudflare-served 403 is a solvable challenge — a geo block or
+        // an origin error looks the same from the status line. Require a marker
+        // from the challenge page so only a real challenge costs a solve; without
+        // this the WebView is paid for on every ordinary 403, and geo blocks
+        // never clear no matter how long we wait.
+        val document = Jsoup.parse(
+            response.peekBody(Long.MAX_VALUE).string(),
+            response.request.url.toString(),
+        )
+        return document.getElementById("challenge-error-title") != null ||
+            document.getElementById("challenge-error-text") != null
     }
 
     override fun intercept(
@@ -102,9 +120,36 @@ class CloudflareInterceptor(
             cookieManager.remove(request.url, COOKIE_NAMES, 0)
             val oldCookie = cookieManager.get(request.url)
                 .firstOrNull { it.name == "cf_clearance" }
-            resolveWithWebView(request, oldCookie)
 
-            return chain.proceed(request)
+            val host = request.url.host
+            val fsUrl = FlareSolverrConfig.url
+            val proxy = flareSolverr
+            val useProxy = proxy != null && FlareSolverrConfig.isActive
+
+            if (useProxy && proxy.shouldSkipWebView(host)) {
+                // This host already beat the WebView once. Skip straight to the
+                // proxy rather than re-paying the solve timeout on every request.
+                proxy.resolve(fsUrl, request)?.let { return it }
+            } else {
+                try {
+                    resolveWithWebView(request, oldCookie)
+                } catch (e: CloudflareBypassException) {
+                    if (!useProxy) throw e
+                    // Don't re-pay the WebView timeout on later requests to a host
+                    // it cannot clear: record it so they go to the proxy directly.
+                    proxy.markWebViewUnsolvable(host)
+                    proxy.resolve(fsUrl, request)?.let { return it }
+                }
+            }
+
+            // WebView path (or a sibling-thread proxy solve): retry normally.
+            // The application interceptor chain does not re-run on chain.proceed()
+            // from inside an interceptor, so apply any proxy-pinned UA here.
+            val retryRequest = proxy?.pinnedUserAgentFor(host)?.let { pinnedUa ->
+                request.newBuilder().header("User-Agent", pinnedUa).build()
+            } ?: request
+
+            return chain.proceed(retryRequest)
         }
         // Because OkHttp's enqueue only handles IOExceptions, wrap the exception so that
         // we don't crash the entire app

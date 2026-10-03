@@ -1,114 +1,19 @@
 package com.apauruseya7866er.inkbound
 
-import android.os.SystemClock
-import android.webkit.CookieManager
-import com.apauruseya7866er.inkbound.mihon.WebViewVisits
-import java.util.concurrent.ConcurrentHashMap
+import com.apauruseya7866er.inkbound.cloudstream.WebkitCookieJar
+import com.lagradost.cloudstream3.CloudStreamApp
+import eu.kanade.tachiyomi.network.AndroidCookieJar
+import eu.kanade.tachiyomi.network.FlareSolverrConfig
+import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import eu.kanade.tachiyomi.network.interceptor.CloudflareRequiredException
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverrClient
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.Cookie
-import okhttp3.CookieJar
-import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-
-/**
- * In-memory cookie jar keyed by host, so a Cloudflare clearance cookie set on
- * one request is re-sent on the next within this process. Not persisted
- * across app restarts — ponytail: fine for now, a CF cookie is short-lived
- * and the plugin re-issues requests every session anyway.
- */
-internal class InMemoryCookieJar : CookieJar {
-    private val store = ConcurrentHashMap<String, List<Cookie>>()
-    private val storedAtMs = ConcurrentHashMap<String, Long>()
-
-    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
-        if (cookies.isNotEmpty()) {
-            store[url.host] = cookies
-            // Monotonic, not wall clock: this is only ever compared against
-            // the WebView visit stamp, and an NTP correction landing between
-            // the two would otherwise order them backwards.
-            storedAtMs[url.host] = SystemClock.elapsedRealtime()
-        }
-    }
-
-    override fun loadForRequest(url: HttpUrl): List<Cookie> {
-        // Expiry is an absolute epoch time, so that one comparison stays on
-        // the wall clock.
-        val now = System.currentTimeMillis()
-        val own = store[url.host]?.filter { it.expiresAt > now } ?: emptyList()
-        return mergeCookies(
-            own = own,
-            fromWebView = webViewCookies(url),
-            webViewIsNewer = WebViewVisits.isNewerThan(url.host, storedAtMs[url.host] ?: 0L),
-        )
-    }
-
-    /**
-     * Cookies the WebView holds for this host, merged in READ-ONLY.
-     *
-     * This is what carries a `cf_clearance` earned in the visible solver into
-     * the novel client. It only works alongside [NovelHttp.deviceUserAgent]:
-     * a clearance is bound to the User-Agent that earned it, so the WebView's
-     * cookie is rejected unless our requests present the same UA. Removing
-     * either half puts the source straight back to blocked — verified by
-     * removing this and watching Novel Updates fail again.
-     *
-     * Deliberately one-way: nothing received here is written back to the
-     * WebView jar, so the novel lane still cannot disturb CloudStream or Mihon
-     * cookie state. Which copy wins when both hold a name is [mergeCookies].
-     */
-    private fun webViewCookies(url: HttpUrl): List<Cookie> {
-        val raw = runCatching {
-            CookieManager.getInstance().getCookie(url.toString())
-        }.getOrNull() ?: return emptyList()
-        if (raw.isBlank()) return emptyList()
-        return raw.split(';').mapNotNull { pair ->
-            val t = pair.trim()
-            val eq = t.indexOf('=')
-            if (eq <= 0) return@mapNotNull null
-            runCatching {
-                Cookie.Builder().name(t.substring(0, eq)).value(t.substring(eq + 1))
-                    .domain(url.host).build()
-            }.getOrNull()
-        }
-    }
-}
-
-/**
- * Merges the jar's own cookies with the WebView's, deciding by AGE which copy
- * of a shared name is sent.
- *
- * Normally the locally-held one wins: it came off a response to one of our own
- * requests, so a fresh response cookie is never shadowed by a stale WebView
- * one. That is what carries a `cf_clearance` correctly and it stays the
- * default.
- *
- * It is backwards the moment the user signs in. A logged-out session cookie is
- * stamped by okhttp with no expiry, so it never ages out and would shadow the
- * logged-in one for the rest of the process. [webViewIsNewer] is the tiebreak:
- * the user has been in the visible WebView on THIS host since this host's
- * cookies were stored, so the WebView's copy is the more recent truth. A
- * response that arrives after that visit stores again and takes precedence
- * straight back.
- *
- * Both halves of that comparison are per host (see WebViewVisits), so a visit
- * to one source can never hand the WebView's copy the win on another.
- */
-internal fun mergeCookies(
-    own: List<Cookie>,
-    fromWebView: List<Cookie>,
-    webViewIsNewer: Boolean,
-): List<Cookie> {
-    if (webViewIsNewer) {
-        val shadowed = fromWebView.map { it.name }.toSet()
-        return own.filterNot { it.name in shadowed } + fromWebView
-    }
-    val have = own.map { it.name }.toSet()
-    return own + fromWebView.filterNot { it.name in have }
-}
 
 /**
  * Dedicated OkHttp fetch used ONLY for the LNReader novel-plugin path.
@@ -140,14 +45,57 @@ object NovelHttp {
     // Built on first use, not at app boot — stays dormant unless a novel
     // source actually needs it.
     private val client: OkHttpClient by lazy {
-        OkHttpClient.Builder()
+        val builder = OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
-            .cookieJar(InMemoryCookieJar())
+            // One jar, backed by the WebView CookieManager — the same one the
+            // CloudStream (WebkitCookieJar) and Mihon (AndroidCookieJar) lanes
+            // use. This lane previously kept its own in-memory store and MERGED
+            // the WebView's cookies into it per request, deciding a shared name
+            // by comparing a response timestamp against a WebView-visit stamp.
+            // That merge is the likeliest reason a solve stopped working: the
+            // two copies are already in one jar now, so there is nothing left
+            // to arbitrate and no way for a stale copy to shadow a fresh one.
+            .cookieJar(WebkitCookieJar())
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .callTimeout(30, TimeUnit.SECONDS)
-            .build()
+
+        // Solve Cloudflare on this lane the way the Mihon lane does, instead of
+        // only when the user notices an empty list and taps Solve. The
+        // interceptor is where three things this lane needs are already right:
+        //
+        //  - It only fires on a real challenge: 403/503 from a server whose
+        //    header names Cloudflare, so an ordinary site 403 is never mistaken.
+        //  - createWebView() solves under the UA of the request that hit the
+        //    challenge. Because [request] below rewrites User-Agent to
+        //    [deviceUserAgent] BEFORE OkHttp runs, that is the same UA the
+        //    replay sends — so the cf_clearance is not minted for a UA we never
+        //    present. It also forwards the request's own headers, filtered by
+        //    Chromium's IsRequestHeaderSafe.
+        //  - It deletes any existing cf_clearance first and only counts a
+        //    DIFFERENT one as success, so a stale cookie can't report a solve
+        //    that never happened.
+        //
+        // Without a Context (unit tests, very early boot) this is skipped and
+        // the lane behaves as it did before: plain fetch, Dart surfaces the
+        // challenge and offers the visible solve.
+        val context = CloudStreamApp.getContext()
+        if (context != null) {
+            FlareSolverrConfig.load(context)
+            builder.addInterceptor(
+                CloudflareInterceptor(
+                    context,
+                    AndroidCookieJar(),
+                    { NetworkHelper.defaultUserAgentProvider() },
+                    // Same proxy instance as the Mihon lane, so a session, a UA
+                    // pin or a "the WebView can't clear this host" note learned
+                    // on one lane applies to the other.
+                    FlareSolverrClient.shared(),
+                )
+            )
+        }
+        builder.build()
     }
 
     /** What a novel fetch answers with. Response headers are carried because
@@ -160,8 +108,8 @@ object NovelHttp {
         val headers: Map<String, String>,
         /** Cloudflare wants a human to pass a challenge. Dart surfaces this as
          *  the "Solve Cloudflare" prompt — without it a fresh install can never
-         *  mint the cf_clearance that [InMemoryCookieJar.webViewCookies] then
-         *  carries, and the source stays blocked forever. */
+         *  mint the cf_clearance that the shared WebView jar then carries, and
+         *  the source stays blocked forever. */
         val cloudflare: Boolean,
     )
 
@@ -203,20 +151,30 @@ object NovelHttp {
             }
         }
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
-            val respBody = response.body?.string() ?: ""
-            // A header can legitimately repeat (Set-Cookie); join the way HTTP
-            // itself does so nothing is silently dropped.
-            val respHeaders = response.headers.names().associateWith { name ->
-                response.headers.values(name).joinToString(", ")
+        try {
+            client.newCall(requestBuilder.build()).execute().use { response ->
+                val respBody = response.body?.string() ?: ""
+                // A header can legitimately repeat (Set-Cookie); join the way HTTP
+                // itself does so nothing is silently dropped.
+                val respHeaders = response.headers.names().associateWith { name ->
+                    response.headers.values(name).joinToString(", ")
+                }
+                Response(
+                    response.code,
+                    respBody,
+                    response.request.url.toString(),
+                    respHeaders,
+                    looksLikeChallenge(response.code, response.headers),
+                )
             }
-            Response(
-                response.code,
-                respBody,
-                response.request.url.toString(),
-                respHeaders,
-                looksLikeChallenge(response.code, response.headers),
-            )
+        } catch (e: CloudflareRequiredException) {
+            // The interceptor's headless WebView could not clear an interactive
+            // challenge. Reported as a 403 with cloudflare=true rather than a
+            // thrown error so the plugin sees an ordinary refused fetch (it is
+            // JavaScript and swallows its own failures anyway) and Dart latches
+            // NovelCloudflare, which is what makes the visible
+            // SourceWebViewActivity solve get offered.
+            Response(403, "", e.url, emptyMap(), cloudflare = true)
         }
     }
 }

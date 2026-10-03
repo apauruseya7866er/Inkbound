@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.network
 import android.content.Context
 import android.webkit.WebSettings
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverrClient
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import okhttp3.Cache
@@ -59,6 +60,21 @@ class NetworkHelper(
     val cookieJar = AndroidCookieJar()
 
     /**
+     * The optional self-hosted Cloudflare bypass proxy (Solverr / Byparr /
+     * FlareSolverr). Held here rather than created per interceptor so the Mihon
+     * and novel lanes share one session, one per-host UA pin and one record of
+     * which hosts the WebView cannot clear.
+     *
+     * Inert until the user enables it in Settings and supplies a URL — see
+     * [FlareSolverrConfig.isActive].
+     */
+    val flareSolverr = FlareSolverrClient.shared()
+
+    init {
+        FlareSolverrConfig.load(context)
+    }
+
+    /**
      * Extension-facing client: the app's shared client (CloudStream's baseClient)
      * with an HTTP response cache installed. `newBuilder()` leaves the shared
      * client itself uncached, so the CloudStream streaming path is unchanged.
@@ -100,8 +116,16 @@ class NetworkHelper(
         .apply { interceptors().add(0, UncaughtExceptionInterceptor()) }
         // Same story: extensions also assert a UserAgentInterceptor on the default
         // client ("UserAgentInterceptor must be present in default client"). It
-        // just fills in a default User-Agent when a request has none.
-        .addInterceptor(UserAgentInterceptor(::defaultUserAgentProvider))
+        // just fills in a default User-Agent when a request has none, and now
+        // also prefers a per-host UA pinned by the Cloudflare bypass proxy —
+        // a clearance is bound to the UA that earned it, so a host the proxy
+        // solved has to be presented that proxy's UA, not the app default.
+        .addInterceptor(
+            UserAgentInterceptor(
+                ::defaultUserAgentProvider,
+                { host -> flareSolverr?.pinnedUserAgentFor(host) },
+            )
+        )
         // 15 MB is plenty for JSON (browse/detail/chapter lists); LRU-evicted.
         .cache(Cache(File(context.cacheDir, "network_cache"), 15L * 1024 * 1024))
         // Read+write cookies through the global WebView CookieManager. Without
@@ -117,7 +141,12 @@ class NetworkHelper(
         // other open sources pass straight through untouched. Added to the Mihon
         // client only — the shared CloudStream/anime client is not modified.
         .addInterceptor(
-            CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider),
+            CloudflareInterceptor(
+                context,
+                cookieJar,
+                ::defaultUserAgentProvider,
+                flareSolverr,
+            ),
         )
         // Pin the User-Agent of clearance-carrying requests, at the wire.
         //

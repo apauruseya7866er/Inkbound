@@ -37,6 +37,9 @@ class SettingsBackup {
     'privacy_prefs', // incognito
     'novel_lang_prefs', // novel language filter
     'torrent_prefs', // torrent settings
+    'cloudflare_bypass_prefs', // Cloudflare bypass proxy: enabled + its URL. A
+    // local address, so it is of no use on another device, but backing it up
+    // keeps the setting alongside everything else the user configured.
     'locale_prefs', // app language override
     'zmode_prefs', // Zangetsu Mode toggle + stream kind
     'source_domain_overrides', // per-source domain the user set by hand

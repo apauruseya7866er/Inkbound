@@ -74,6 +74,8 @@ import 'connections_screen_tv.dart';
 import 'settings_search_index.dart';
 import 'cubit/settings_cubit.dart';
 import '../../core/tv/tv_focusable.dart';
+import '../../core/network/cloudflare_bypass_prefs.dart';
+import 'cloudflare_bypass_screen.dart';
 
 part 'settings_playback.dart';
 part 'settings_storage.dart';
@@ -1174,6 +1176,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
         if (mounted) setState(() {});
       },
     ),
+    if (Platform.isAndroid)
+      _SettingsEntry(
+        section: SettingsSection.advanced,
+        icon: Icons.shield_moon_outlined,
+        title: l10n.cfBypassTitle,
+        subtitle: sl<CloudflareBypassPrefs>().isActive
+            ? Uri.tryParse(sl<CloudflareBypassPrefs>().url)?.host ??
+                  sl<CloudflareBypassPrefs>().url
+            : l10n.off,
+        keywords:
+            'cloudflare bypass proxy flaresolverr byparr solverr challenge 403 captcha networking',
+        onTap: () async {
+          await _push(const CloudflareBypassScreen());
+          if (mounted) setState(() {});
+        },
+      ),
     _SettingsEntry(
       section: SettingsSection.advanced,
       icon: Icons.bug_report_outlined,

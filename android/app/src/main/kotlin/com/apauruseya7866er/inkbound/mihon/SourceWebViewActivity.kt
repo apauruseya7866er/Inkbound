@@ -7,7 +7,6 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.os.Message
-import android.os.SystemClock
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
@@ -22,7 +21,6 @@ import eu.kanade.tachiyomi.network.AndroidCookieJar
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.setUserAgent
-import java.util.concurrent.ConcurrentHashMap
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
@@ -55,39 +53,6 @@ internal fun shouldCloseOnPageFinished(
     if (stayOpen) return false
     if (alreadySolved) return false
     return cookie.contains("cf_clearance")
-}
-
-/**
- * When this screen was last closed, PER HOST.
- *
- * Read by the novel client's cookie jar to decide whether its own stored
- * cookie or the WebView's is the newer one. Pulled out of the Activity so it
- * can be tested without one, same as [shouldCloseOnPageFinished].
- *
- * Per host and not one shared stamp, because this screen serves every source
- * and both modes: a single stamp meant a sign-in on one source marked every
- * other host as freshly visited too, and a stale WebView cookie could then
- * shadow a cookie that had just come off a response for an unrelated site.
- *
- * The stamp is monotonic. The value it is compared against is written on a
- * response, so a wall clock stepped by an NTP correction in between can order
- * the two backwards.
- *
- * Hosts are matched exactly, the same key the novel jar stores under — a
- * sign-in on www.example.com does not cover a request to example.com. That
- * only costs the sign-in tiebreak on a source whose site and requests
- * disagree, which falls back to "the local copy wins", the safe default.
- */
-internal object WebViewVisits {
-    private val visitedAtMs = ConcurrentHashMap<String, Long>()
-
-    fun record(host: String) {
-        if (host.isNotBlank()) visitedAtMs[host] = SystemClock.elapsedRealtime()
-    }
-
-    /** Whether [host] has been visited since its cookies were stored. */
-    fun isNewerThan(host: String, storedAtMs: Long): Boolean =
-        (visitedAtMs[host] ?: 0L) > storedAtMs
 }
 
 class SourceWebViewActivity : AppCompatActivity() {
@@ -218,11 +183,6 @@ class SourceWebViewActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        // Whatever the mode was, the WebView jar has just been through a real
-        // browsing session and is the freshest view of THIS site's cookies.
-        // Only this site's: every other host's cookies are exactly as old as
-        // they were before the user opened this screen.
-        WebViewVisits.record(siteHost)
         // Only the Cloudflare mode has a Dart call waiting on it. Resolving
         // from login mode could answer a solve started by a background browse
         // that nobody has actually completed.

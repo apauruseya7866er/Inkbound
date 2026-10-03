@@ -1,41 +1,37 @@
 package com.apauruseya7866er.inkbound
 
 import android.webkit.CookieManager
-import androidx.test.core.app.ApplicationProvider
-import com.apauruseya7866er.inkbound.mihon.SourceWebViewActivity
-import com.apauruseya7866er.inkbound.mihon.WebViewVisits
-import java.time.Duration
+import com.apauruseya7866er.inkbound.cloudstream.WebkitCookieJar
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowSystemClock
 
 /**
- * The wiring around [mergeCookies], which is where the interesting half lives:
- * the merge itself is pinned by NovelCookieMergeTest, but WHICH copy is called
- * newer is decided by the jar, the visit stamp and the host they are keyed by.
+ * The novel lane's cookie storage, driven through the real jar and the real
+ * [CookieManager] rather than by calling helpers with hand-picked arguments.
  *
- * Driven through the real jar, the real CookieManager and (for the stamp) the
- * real screen rather than by calling mergeCookies with hand-picked flags, so
- * that hardcoding the flag, flipping the comparison, keying the stamp globally
- * or dropping it altogether all show up here.
+ * There is exactly one jar now: the WebView [CookieManager], shared with the
+ * CloudStream and Mihon lanes. That is the point of these tests. The lane used
+ * to keep a private in-memory store and merge the WebView's cookies into it on
+ * every request, picking between two copies of the same name by comparing a
+ * response timestamp against a WebView-visit stamp — so a clearance written by
+ * the solver and one held by the client were two facts that could disagree, and
+ * the loser was silently sent instead.
  *
- * Each test uses its own host: the visit store is process-wide, exactly as it
+ * Each test uses its own host: the CookieManager is process-wide, exactly as it
  * is in the app.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class NovelCookieJarTest {
 
-    private val jar = InMemoryCookieJar()
+    private val jar = WebkitCookieJar()
 
     @Before
     fun acceptCookies() {
@@ -43,45 +39,40 @@ class NovelCookieJarTest {
     }
 
     @Test
-    fun `a sign-in on this host beats the cookie we already held`() {
-        val url = "https://signin.test/".toHttpUrl()
-        jar.saveFromResponse(url, listOf(cookie(url, "PHPSESSID", "guest")))
-        tick()
-        setWebViewCookie(url, "PHPSESSID", "signed-in")
-        WebViewVisits.record(url.host)
+    fun `a cookie the client received is sent on the next request`() {
+        val url = "https://received.test/".toHttpUrl()
+        jar.saveFromResponse(url, listOf(cookie(url, "cf_clearance", "minted")))
 
-        assertEquals("signed-in", valueOf(jar.loadForRequest(url), "PHPSESSID"))
+        assertEquals("minted", valueOf(jar.loadForRequest(url), "cf_clearance"))
     }
 
     @Test
-    fun `a sign-in on one host leaves another host alone`() {
-        // The regression this guards: one shared visit stamp let a sign-in on
-        // any source hand the WebView's stale copy the win on every other.
-        val other = "https://other.test/".toHttpUrl()
-        jar.saveFromResponse(other, listOf(cookie(other, "cf_clearance", "fresh")))
-        tick()
-        setWebViewCookie(other, "cf_clearance", "stale")
-        WebViewVisits.record("visited.test")
+    fun `a clearance written by the solver is carried into the client`() {
+        // The whole reason this lane reads the WebView jar: the user solves the
+        // challenge in a visible WebView, and the novel client has to present
+        // that same cookie on its next request.
+        val url = "https://solved.test/".toHttpUrl()
+        setWebViewCookie(url, "cf_clearance", "from-solver")
 
-        assertEquals("fresh", valueOf(jar.loadForRequest(other), "cf_clearance"))
+        assertEquals("from-solver", valueOf(jar.loadForRequest(url), "cf_clearance"))
     }
 
     @Test
-    fun `a response after the visit takes precedence straight back`() {
-        // The Cloudflare guarantee: a clearance that came off one of our own
-        // responses is never shadowed by an older WebView copy.
-        val url = "https://reclaim.test/".toHttpUrl()
+    fun `a response overwrites the WebView copy instead of being arbitrated`() {
+        // Previously a tiebreak decided between the two. Now the freshest write
+        // to the one jar simply wins, so a stale copy cannot shadow it.
+        val url = "https://overwrite.test/".toHttpUrl()
         setWebViewCookie(url, "cf_clearance", "stale")
-        WebViewVisits.record(url.host)
-        tick()
         jar.saveFromResponse(url, listOf(cookie(url, "cf_clearance", "fresh")))
 
-        assertEquals("fresh", valueOf(jar.loadForRequest(url), "cf_clearance"))
+        val sent = jar.loadForRequest(url).filter { it.name == "cf_clearance" }
+        assertEquals(1, sent.size)
+        assertEquals("fresh", sent.single().value)
     }
 
     @Test
-    fun `a name only the WebView holds is sent either way`() {
-        val url = "https://extra.test/".toHttpUrl()
+    fun `a name only one holder has is still sent`() {
+        val url = "https://partial.test/".toHttpUrl()
         jar.saveFromResponse(url, listOf(cookie(url, "ours", "1")))
         setWebViewCookie(url, "theirs", "2")
 
@@ -91,21 +82,15 @@ class NovelCookieJarTest {
     }
 
     @Test
-    fun `closing the screen stamps the host it was opened for`() {
-        // The one Activity-driven case here: everything above is worthless if
-        // nothing ever records a visit.
-        val intent = SourceWebViewActivity.intentFor(
-            ApplicationProvider.getApplicationContext(),
-            "https://closed.test/",
-            stayOpen = true,
-        )
-        Robolectric.buildActivity(SourceWebViewActivity::class.java, intent).setup().destroy()
+    fun `one host's cookies never reach another`() {
+        // Cookies are domain-scoped in the WebView jar, so this is the jar's
+        // guarantee rather than anything the client has to remember to check.
+        val first = "https://scoped-one.test/".toHttpUrl()
+        val second = "https://scoped-two.test/".toHttpUrl()
+        jar.saveFromResponse(first, listOf(cookie(first, "cf_clearance", "one")))
 
-        assertTrue(WebViewVisits.isNewerThan("closed.test", 0L))
-        assertFalse(WebViewVisits.isNewerThan("unopened.test", 0L))
+        assertTrue(jar.loadForRequest(second).none { it.name == "cf_clearance" })
     }
-
-    private fun tick() = ShadowSystemClock.advanceBy(Duration.ofMillis(10))
 
     private fun cookie(url: okhttp3.HttpUrl, name: String, value: String) =
         Cookie.Builder().name(name).value(value).domain(url.host).build()
