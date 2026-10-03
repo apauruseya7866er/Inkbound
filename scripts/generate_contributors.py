@@ -44,9 +44,19 @@ UPSTREAM = {
     "leo": "Leo Camus",
 }
 
+EM_DASH = "\u2014"
+
+# Built at import time from an escape rather than typed as a literal. A Windows
+# checkout can be read through cp1252, where a literal em dash in this source
+# decodes to a replacement character - which then propagates into the generated
+# block and makes the workflow open a pull request on every run. An ASCII escape
+# decodes identically under any encoding.
 ROLES = {
-    "apauruseya7866er": "**Maintainer — Inkbound's author and sole owner**",
-    "krishna": "Original Zangetsu author — reader, sources, downloads, trackers, TTS",
+    "apauruseya7866er": f"**Maintainer {EM_DASH} Inkbound's author and sole owner**",
+    "krishna": (
+        f"Original Zangetsu author {EM_DASH} reader, sources, downloads, "
+        "trackers, TTS"
+    ),
 }
 
 
