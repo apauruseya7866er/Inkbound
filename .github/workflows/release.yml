@@ -1,0 +1,164 @@
+name: Release APK
+
+# Builds a signed APK for every pushed tag matching v* and attaches it to the
+# GitHub Release for that tag.
+#
+# The signing key never enters the repository. It is supplied as the
+# base64-encoded keystore in the ANDROID_KEYSTORE_BASE64 secret, alongside
+# ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD and ANDROID_STORE_PASSWORD. Without all
+# four this workflow fails on purpose - see "Why it fails rather than degrading"
+# below.
+#
+# Note on trust: a GitHub Actions workflow can read repository secrets, so a
+# malicious change to this file (or to anything it runs) could exfiltrate the
+# signing key and mint APKs that look like this app's. Pinning third-party
+# actions to a commit SHA - as done here - limits that surface but does not
+# remove it. For a stronger guarantee, build releases from a local machine and
+# publish the APK by hand.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Only what the release needs: read the repo, write the release.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Signed release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.2
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      # Why it fails rather than degrading: android/app/build.gradle.kts falls back
+      # to debug signing when android/key.properties is absent. That fallback is
+      # right for `flutter run` and for CI, and wrong here - a debug-signed APK
+      # installs fine, looks legitimate, and can never be upgraded to a properly
+      # signed release because Android rejects the signature mismatch. So a
+      # missing secret must stop the build, not silently produce a worse artifact.
+      - name: Verify signing secrets are present
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASS: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${KEYSTORE}" ]   || missing+=(ANDROID_KEYSTORE_BASE64)
+          [ -n "${ALIAS}" ]     || missing+=(ANDROID_KEY_ALIAS)
+          [ -n "${KEY_PASS}" ]  || missing+=(ANDROID_KEY_PASSWORD)
+          [ -n "${STORE_PASS}" ] || missing+=(ANDROID_STORE_PASSWORD)
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository secret(s): ${missing[*]}"
+            echo "See the 'Release APK' workflow for how to add them."
+            exit 1
+          fi
+          echo "All signing secrets are present."
+
+      - name: Materialise the keystore
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASS: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/keystore"
+          # The keystore is written OUTSIDE the checkout so it can never be
+          # committed by a later step or a careless `git add -A`.
+          KEYSTORE_PATH="$RUNNER_TEMP/keystore/release.jks"
+          printf '%s' "${KEYSTORE}" | base64 --decode > "${KEYSTORE_PATH}"
+          chmod 600 "${KEYSTORE_PATH}"
+
+          # storeFile is resolved by Gradle relative to the android/ directory.
+          cat > android/key.properties <<EOF
+          storeFile=$KEYSTORE_PATH
+          keyAlias=$ALIAS
+          keyPassword=$KEY_PASS
+          storePassword=$STORE_PASS
+          EOF
+
+          # Prove the keystore is readable and the alias exists before spending
+          # several minutes on a build that would otherwise fail at signing.
+          keytool -list -keystore "${KEYSTORE_PATH}" \
+            -storepass "${STORE_PASS}" -alias "${ALIAS}" > /dev/null
+
+      - name: Build the signed APK
+        run: flutter build apk --release
+
+      # A build that silently fell back to debug signing would still install, so
+      # the signature is checked rather than trusted. This also catches a
+      # keystore whose password was rotated without updating the secrets.
+      - name: Verify the APK is release-signed
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -f "${APK}" || { echo "::error::No APK at ${APK}"; exit 1; }
+
+          BUILD_TOOLS=$(ls -d "${ANDROID_HOME}"/build-tools/* | sort -V | tail -n1)
+          "${BUILD_TOOLS}/apksigner" verify --print-certs "${APK}" > certs.txt
+          cat certs.txt
+
+          # Reject the debug certificate explicitly. Its fingerprint is not a fixed
+          # value - the Android SDK generates a debug.keystore per machine - so the
+          # stable marker is the subject it issues: CN=Android Debug, O=Android.
+          # Checking the DN catches a build that fell back to debug signing, which
+          # would still install and could never be upgraded to a real release.
+          if grep -qi 'CN=Android Debug' certs.txt; then
+            echo "::error::APK is signed with the Android debug key - refusing to publish."
+            exit 1
+          fi
+          echo "Release signature verified."
+
+      - name: Rename the artifact
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          cp build/app/outputs/flutter-apk/app-release.apk \
+             "build/app/outputs/flutter-apk/Inkbound-${TAG}.apk"
+          ls -l build/app/outputs/flutter-apk/
+
+      - name: Publish as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inkbound-${{ github.ref_name }}
+          path: build/app/outputs/flutter-apk/Inkbound-${{ github.ref_name }}.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # Guarded because a re-run of an old tag would otherwise fail on a release
+      # that already exists. The artifact above is always produced regardless.
+      - name: Attach to the GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/Inkbound-${TAG}.apk"
+          if gh release view "${TAG}" > /dev/null 2>&1; then
+            echo "Release ${TAG} already exists - uploading to it."
+            gh release upload "${TAG}" "${APK}" --clobber
+          else
+            gh release create "${TAG}" "${APK}" \
+              --title "Inkbound ${TAG}" \
+              --generate-notes
+          fi

@@ -75,8 +75,11 @@ Being honest about the edges matters more than a longer feature list:
 - **No cloud, no account, no sync.** Everything stays on the device. There is
   nothing to sign in to and nothing leaves the phone unless you export it.
 - **No second-screen pairing.** Casting and remote-control features were removed.
-- **No releases yet.** This repository has no published APKs. Build it yourself
-  below.
+- **Signed releases from tags.** Push a `v*` tag and the Release APK workflow
+  builds a signed APK and attaches it to the
+  [release](https://github.com/apauruseya7866er/Inkbound/releases). Grab it from
+  there instead of building it yourself, if you would rather not set up the
+  Android toolchain.
 
 > **Note:** the app currently still installs under the launcher name
 > `Zangetsu`, inherited from the original project. The repository is Inkbound.
@@ -94,7 +97,9 @@ it.
 
 The source plugins come from the
 [LNReader](https://github.com/LNReader/lnreader-sources) ecosystem, which is a
-large part of why multi-source works as well as it does.
+large part of why multi-source works as well as it does. Inkbound serves them
+from its own index — [apauruseya7866er/plugins](https://github.com/apauruseya7866er/plugins),
+which tracks upstream and is where our own source fixes are published.
 
 Thanks also to everyone who has contributed to Zangetsu over the years. That
 project's history, and the 2,300+ commits behind this fork, are the work of many
@@ -104,7 +109,9 @@ people.
 
 ## 🛠 Build it yourself
 
-No prebuilt APKs — this is the source. You'll need the
+Prebuilt APKs are on the [releases page](https://github.com/apauruseya7866er/Inkbound/releases) —
+each `v*` tag produces one. This section is for building from source, which you
+need anyway to change anything. You'll need the
 [Flutter SDK](https://docs.flutter.dev/get-started/install) with Dart `^3.11.5`
 and an Android toolchain.
 
@@ -116,6 +123,12 @@ flutter pub get
 flutter run                 # debug build on a connected device
 flutter build apk --release # release APK → build/app/outputs/flutter-apk/
 ```
+
+A local `flutter build apk --release` without a `android/key.properties` file
+produces a **debug-signed** APK. That is fine for your own device and fine for
+CI, but it is not what the releases page publishes, and Android will refuse to
+upgrade a debug-signed install to a properly signed one — so uninstall before
+switching between them.
 
 Signing config lives in `android/key.properties`, which is deliberately not in
 this repository. `android/key.properties.example` shows the expected shape.

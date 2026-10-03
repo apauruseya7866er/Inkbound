@@ -1207,6 +1207,10 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
                     .takeIf { it.isNotBlank() }
             }.getOrNull()
         }
+        // The Cloudflare interceptor needs a Context for its solver WebView. The
+        // application context is used rather than `this` so nothing static holds
+        // an Activity, matching how the Mihon lane builds its own solver.
+        NovelHttp.appContext = applicationContext
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "zangetsu/novel_http")
             .setMethodCallHandler { call, result ->
                 if (call.method != "request") {

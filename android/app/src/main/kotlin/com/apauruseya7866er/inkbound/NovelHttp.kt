@@ -42,6 +42,19 @@ object NovelHttp {
      */
     @Volatile
     var deviceUserAgent: String? = null
+
+    /**
+     * Application context, set once from MainActivity.
+     *
+     * The Cloudflare interceptor needs a Context to build its solver WebView and
+     * its main-thread executor. It deliberately does NOT read
+     * [CloudStreamApp.getContext]: that is populated by the CloudStream
+     * PluginHost, which a novel-only build never stands up — so asking it here
+     * returned null on precisely the build whose only lane is this one, and the
+     * interceptor was skipped silently.
+     */
+    @Volatile
+    var appContext: android.content.Context? = null
     // Built on first use, not at app boot — stays dormant unless a novel
     // source actually needs it.
     private val client: OkHttpClient by lazy {
@@ -80,7 +93,7 @@ object NovelHttp {
         // Without a Context (unit tests, very early boot) this is skipped and
         // the lane behaves as it did before: plain fetch, Dart surfaces the
         // challenge and offers the visible solve.
-        val context = CloudStreamApp.getContext()
+        val context = appContext ?: CloudStreamApp.getContext()
         if (context != null) {
             FlareSolverrConfig.load(context)
             builder.addInterceptor(
