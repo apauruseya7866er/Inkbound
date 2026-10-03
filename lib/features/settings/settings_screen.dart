@@ -1181,13 +1181,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
         section: SettingsSection.advanced,
         icon: Icons.shield_moon_outlined,
         title: l10n.cfBypassTitle,
-        subtitle: sl<CloudflareBypassPrefs>().isActive
+        // Guarded, not a bare sl<>(). Every entry in this list literal is
+        // constructed eagerly when the Profile tab builds, so one unguarded
+        // lookup for a service that failed to register takes the entire screen
+        // down rather than one row. That is exactly how the released build lost
+        // its Profile tab: this row read CloudflareBypassPrefs, whose
+        // registration had never shipped, and the whole page rendered blank.
+        // A missing registration must cost one row, not the screen.
+        subtitle: !sl.isRegistered<CloudflareBypassPrefs>()
+            ? l10n.off
+            : sl<CloudflareBypassPrefs>().isActive
             ? Uri.tryParse(sl<CloudflareBypassPrefs>().url)?.host ??
                   sl<CloudflareBypassPrefs>().url
             : l10n.off,
         keywords:
             'cloudflare bypass proxy flaresolverr byparr solverr challenge 403 captcha networking',
         onTap: () async {
+          if (!sl.isRegistered<CloudflareBypassPrefs>()) return;
           await _push(const CloudflareBypassScreen());
           if (mounted) setState(() {});
         },

@@ -75,6 +75,7 @@ import '../metadata/tmdb.dart';
 import 'package:watch_app/core/metadata/tmdb_fallback.dart';
 import '../metadata/title_logo_service.dart';
 import '../mode/content_mode_cubit.dart';
+import '../network/cloudflare_bypass_prefs.dart';
 import '../mode/novel_only.dart';
 import '../trailer/trailer_service.dart';
 import '../anilist/anilist_graphql.dart';
@@ -293,6 +294,12 @@ Future<void> initDependencies() async {
   sl.registerSingleton<DownloadPrefs>(DownloadPrefs());
   await TorrentPrefs.init();
   sl.registerSingleton<TorrentPrefs>(TorrentPrefs());
+  await CloudflareBypassPrefs.init();
+  sl.registerSingleton<CloudflareBypassPrefs>(CloudflareBypassPrefs());
+  // Push the persisted bypass-proxy values into the native config the
+  // Cloudflare interceptors read, so a setting chosen in a previous session
+  // applies without re-toggling it.
+  await sl<CloudflareBypassPrefs>().syncToNative();
   sl.registerSingleton<TorrentService>(TorrentService());
   sl.registerSingleton<TorrentDownloadService>(TorrentDownloadService());
   await SearchHistory.init();
