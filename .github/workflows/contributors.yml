@@ -49,9 +49,19 @@ jobs:
       - name: Build the roster
         run: python scripts/generate_contributors.py
 
+      # Non-fatal on purpose. Creating a pull request as an action needs
+      # "Allow GitHub Actions to create and approve pull requests" enabled in
+      # Settings -> Actions -> General, which is off by default - and this job
+      # must not sit permanently red waiting on a repository setting. The roster
+      # is a convenience; the authoritative record is the git history either way.
       - name: Open a pull request if anything changed
+        id: pr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
+          # Falls back to the workflow token when no fine-grained token is set,
+          # which works once the repository setting above is enabled.
+          token: ${{ secrets.CONTRIBUTORS_PR_TOKEN || secrets.GITHUB_TOKEN }}
           base: ${{ github.ref_name }}
           branch: automation/contributors-roster
           commit-message: 'chore: refresh the contributors roster'
@@ -64,6 +74,17 @@ jobs:
             Fix that on your GitHub profile, then re-run this workflow.
           delete-branch: true
           labels: automation
+
+      - name: Explain how to enable roster updates
+        if: steps.pr.outcome == 'failure' && github.ref_name == github.event.repository.default_branch
+        run: |
+          echo "::warning::Could not open the roster pull request."
+          echo "::warning::Either enable 'Allow GitHub Actions to create and approve"
+          echo "::warning::pull requests' in Settings -> Actions -> General, or add a"
+          echo "::warning::CONTRIBUTORS_PR_TOKEN secret holding a fine-grained token with"
+          echo "::warning::'Contents: write' and 'Pull requests: write' on this repository."
+          echo "::warning::Until then the roster is regenerated locally with:"
+          echo "::warning::  python scripts/generate_contributors.py"
 
       - name: Fail if the roster could not be generated
         if: failure()
