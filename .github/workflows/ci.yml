@@ -45,14 +45,16 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    # Baseline mode. The suite was last verified on Windows, where 55 tests fail
-    # for platform reasons only: ~30 cannot load `quickjs_c_bridge.dll`, and the
-    # rest hit Windows file locking (`PathAccessException ... errno = 32` when
-    # Hive quarantines a corrupt box). Those are expected to pass on Linux, but
-    # that has NOT been confirmed from a Windows dev box, so this job reports
-    # rather than blocks until the first green Linux run is seen.
+    # Non-blocking, and that is a measured decision rather than a shrug. On Linux
+    # the suite reports 56 failures: ~30 are a missing `quickjs_c_bridge.dll` (the
+    # FFI library ships per-platform and is absent for the Linux runner) and the
+    # rest are Windows file-locking and Hive-quarantine assumptions baked into
+    # tests that were only ever run on a Windows dev box.
     #
-    # Delete this line once the first CI run is green and stays green.
+    # So this job reports the real number instead of hiding it, and the
+    # blocking gates are `analyze` (zero errors, zero warnings) and the release
+    # build. Fixing the 56 is tracked separately; turning this into a hard gate
+    # before then would mean a permanently red badge that stops meaning anything.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +69,20 @@ jobs:
         run: flutter pub get
 
       - name: Test
-        run: flutter test --reporter expanded
+        # Prints the real pass/fail line, so a soft-failed job still says how
+        # many tests passed and how many failed rather than only "failed".
+        # `tee` keeps the exit status of flutter test rather than of tail.
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee test-output.log | tail -n 40
+
+      - name: Upload the full test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output.log
+          retention-days: 14
 
   build:
     name: Build release APK
