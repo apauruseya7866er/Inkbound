@@ -895,6 +895,59 @@
 	"reTest": "Re-test",
 	"noEnabledSourcesToTest": "No enabled sources to test.",
 	"notSearched": "Not searched",
+	"selectSourcesToRemove": "Select sources",
+	"selectSourcesToRemoveHint": "Tick the sources to remove, then confirm once. \u201cAll problems\u201d ticks everything that isn\u2019t working.",
+	"selectAllProblems": "Select all problems",
+	"sourcesSelectedCount": "{count} selected",
+	"@sourcesSelectedCount": {
+		"placeholders": {
+			"count": {
+				"type": "int"
+			}
+		}
+	},
+	"uninstallSelectedCount": "Uninstall ({count})",
+	"@uninstallSelectedCount": {
+		"placeholders": {
+			"count": {
+				"type": "int"
+			}
+		}
+	},
+	"uninstallSelectedSourcesQuestion": "Uninstall {count} sources?",
+	"@uninstallSelectedSourcesQuestion": {
+		"placeholders": {
+			"count": {
+				"type": "int"
+			}
+		}
+	},
+	"uninstallSelectedSourcesMessage": "This removes the selected sources from this device. You can install them again later.",
+	"removingSources": "Removing\u2026",
+	"uninstalledSourcesCount": "Uninstalled {count} sources",
+	"@uninstalledSourcesCount": {
+		"placeholders": {
+			"count": {
+				"type": "int"
+			}
+		}
+	},
+	"uninstallFailedCount": "{count} could not be removed",
+	"@uninstallFailedCount": {
+		"placeholders": {
+			"count": {
+				"type": "int"
+			}
+		}
+	},
+	"uninstallSourceTooltip": "Uninstall {name}",
+	"@uninstallSourceTooltip": {
+		"placeholders": {
+			"name": {
+				"type": "String"
+			}
+		}
+	},
 	"thisSourceHasNoSettings": "This source has no settings",
 	"resetToDefaults": "Reset to defaults",
 	"providerSettings": "Provider settings",
@@ -3019,5 +3072,17 @@
 	"exportedToFolder": "Exported to {folder}",
 	"@exportedToFolder": {"placeholders": {"folder": {"type": "String"}}},
 	"epubExportFailed": "Couldn't save the EPUB",
-	"export": "Export"
+	"export": "Export",
+
+	"networking": "Networking",
+	"cfBypassTitle": "Cloudflare bypass",
+	"cfBypassEnable": "Use a bypass proxy",
+	"cfBypassBlurb": "Optional. Most sources need nothing here \u2014 the app solves Cloudflare itself. Use a proxy only for sources it cannot clear, where the clearance cannot be replayed by the app.",
+	"cfBypassProxy": "Bypass proxy",
+	"cfBypassUrlLabel": "Proxy URL",
+	"cfBypassUrlBlurb": "Solverr, Byparr or FlareSolverr. All listen on port 8191.",
+	"cfBypassTest": "Test",
+	"cfBypassTestOk": "The proxy answered",
+	"cfBypassTestFailed": "The proxy could not solve",
+	"cfBypassHowTo": "Run one on a machine your device can reach, e.g. `docker run -d --name=solverr -p 8191:8191 --shm-size=512m --restart unless-stopped ghcr.io/unseensnick/solverr:latest`. Keep it on your own network \u2014 a proxy open to the internet is an open proxy for anyone who finds it."
 }

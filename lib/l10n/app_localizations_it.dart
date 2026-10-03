@@ -2567,6 +2567,53 @@ class AppLocalizationsIt extends AppLocalizations {
   String get notSearched => 'Non cercato';
 
   @override
+  String get selectSourcesToRemove => 'Select sources';
+
+  @override
+  String get selectSourcesToRemoveHint =>
+      'Tick the sources to remove, then confirm once. “All problems” ticks everything that isn’t working.';
+
+  @override
+  String get selectAllProblems => 'Select all problems';
+
+  @override
+  String sourcesSelectedCount(int count) {
+    return '$count selected';
+  }
+
+  @override
+  String uninstallSelectedCount(int count) {
+    return 'Uninstall ($count)';
+  }
+
+  @override
+  String uninstallSelectedSourcesQuestion(int count) {
+    return 'Uninstall $count sources?';
+  }
+
+  @override
+  String get uninstallSelectedSourcesMessage =>
+      'This removes the selected sources from this device. You can install them again later.';
+
+  @override
+  String get removingSources => 'Removing…';
+
+  @override
+  String uninstalledSourcesCount(int count) {
+    return 'Uninstalled $count sources';
+  }
+
+  @override
+  String uninstallFailedCount(int count) {
+    return '$count could not be removed';
+  }
+
+  @override
+  String uninstallSourceTooltip(String name) {
+    return 'Uninstall $name';
+  }
+
+  @override
   String get thisSourceHasNoSettings => 'Questa sorgente non ha impostazioni';
 
   @override
@@ -5335,4 +5382,40 @@ class AppLocalizationsIt extends AppLocalizations {
 
   @override
   String get export => 'Export';
+
+  @override
+  String get networking => 'Networking';
+
+  @override
+  String get cfBypassTitle => 'Cloudflare bypass';
+
+  @override
+  String get cfBypassEnable => 'Use a bypass proxy';
+
+  @override
+  String get cfBypassBlurb =>
+      'Optional. Most sources need nothing here — the app solves Cloudflare itself. Use a proxy only for sources it cannot clear, where the clearance cannot be replayed by the app.';
+
+  @override
+  String get cfBypassProxy => 'Bypass proxy';
+
+  @override
+  String get cfBypassUrlLabel => 'Proxy URL';
+
+  @override
+  String get cfBypassUrlBlurb =>
+      'Solverr, Byparr or FlareSolverr. All listen on port 8191.';
+
+  @override
+  String get cfBypassTest => 'Test';
+
+  @override
+  String get cfBypassTestOk => 'The proxy answered';
+
+  @override
+  String get cfBypassTestFailed => 'The proxy could not solve';
+
+  @override
+  String get cfBypassHowTo =>
+      'Run one on a machine your device can reach, e.g. `docker run -d --name=solverr -p 8191:8191 --shm-size=512m --restart unless-stopped ghcr.io/unseensnick/solverr:latest`. Keep it on your own network — a proxy open to the internet is an open proxy for anyone who finds it.';
 }

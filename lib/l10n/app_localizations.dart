@@ -4856,6 +4856,72 @@ abstract class AppLocalizations {
   /// **'Not searched'**
   String get notSearched;
 
+  /// No description provided for @selectSourcesToRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Select sources'**
+  String get selectSourcesToRemove;
+
+  /// No description provided for @selectSourcesToRemoveHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tick the sources to remove, then confirm once. “All problems” ticks everything that isn’t working.'**
+  String get selectSourcesToRemoveHint;
+
+  /// No description provided for @selectAllProblems.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all problems'**
+  String get selectAllProblems;
+
+  /// No description provided for @sourcesSelectedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String sourcesSelectedCount(int count);
+
+  /// No description provided for @uninstallSelectedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Uninstall ({count})'**
+  String uninstallSelectedCount(int count);
+
+  /// No description provided for @uninstallSelectedSourcesQuestion.
+  ///
+  /// In en, this message translates to:
+  /// **'Uninstall {count} sources?'**
+  String uninstallSelectedSourcesQuestion(int count);
+
+  /// No description provided for @uninstallSelectedSourcesMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This removes the selected sources from this device. You can install them again later.'**
+  String get uninstallSelectedSourcesMessage;
+
+  /// No description provided for @removingSources.
+  ///
+  /// In en, this message translates to:
+  /// **'Removing…'**
+  String get removingSources;
+
+  /// No description provided for @uninstalledSourcesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Uninstalled {count} sources'**
+  String uninstalledSourcesCount(int count);
+
+  /// No description provided for @uninstallFailedCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} could not be removed'**
+  String uninstallFailedCount(int count);
+
+  /// No description provided for @uninstallSourceTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Uninstall {name}'**
+  String uninstallSourceTooltip(String name);
+
   /// No description provided for @thisSourceHasNoSettings.
   ///
   /// In en, this message translates to:
@@ -9151,6 +9217,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Export'**
   String get export;
+
+  /// No description provided for @networking.
+  ///
+  /// In en, this message translates to:
+  /// **'Networking'**
+  String get networking;
+
+  /// No description provided for @cfBypassTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cloudflare bypass'**
+  String get cfBypassTitle;
+
+  /// No description provided for @cfBypassEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a bypass proxy'**
+  String get cfBypassEnable;
+
+  /// No description provided for @cfBypassBlurb.
+  ///
+  /// In en, this message translates to:
+  /// **'Optional. Most sources need nothing here — the app solves Cloudflare itself. Use a proxy only for sources it cannot clear, where the clearance cannot be replayed by the app.'**
+  String get cfBypassBlurb;
+
+  /// No description provided for @cfBypassProxy.
+  ///
+  /// In en, this message translates to:
+  /// **'Bypass proxy'**
+  String get cfBypassProxy;
+
+  /// No description provided for @cfBypassUrlLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Proxy URL'**
+  String get cfBypassUrlLabel;
+
+  /// No description provided for @cfBypassUrlBlurb.
+  ///
+  /// In en, this message translates to:
+  /// **'Solverr, Byparr or FlareSolverr. All listen on port 8191.'**
+  String get cfBypassUrlBlurb;
+
+  /// No description provided for @cfBypassTest.
+  ///
+  /// In en, this message translates to:
+  /// **'Test'**
+  String get cfBypassTest;
+
+  /// No description provided for @cfBypassTestOk.
+  ///
+  /// In en, this message translates to:
+  /// **'The proxy answered'**
+  String get cfBypassTestOk;
+
+  /// No description provided for @cfBypassTestFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The proxy could not solve'**
+  String get cfBypassTestFailed;
+
+  /// No description provided for @cfBypassHowTo.
+  ///
+  /// In en, this message translates to:
+  /// **'Run one on a machine your device can reach, e.g. `docker run -d --name=solverr -p 8191:8191 --shm-size=512m --restart unless-stopped ghcr.io/unseensnick/solverr:latest`. Keep it on your own network — a proxy open to the internet is an open proxy for anyone who finds it.'**
+  String get cfBypassHowTo;
 }
 
 class _AppLocalizationsDelegate
