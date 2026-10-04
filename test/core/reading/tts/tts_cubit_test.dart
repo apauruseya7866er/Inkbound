@@ -23,6 +23,7 @@ class FakeTtsPlatform implements TtsPlatform {
   int lastStartIndex = -1;
   int startCalls = 0;
   int stopCalls = 0;
+  Completer<void>? stopGate;
   int pauseCalls = 0;
   int resumeCalls = 0;
   int initCalls = 0;
@@ -42,8 +43,7 @@ class FakeTtsPlatform implements TtsPlatform {
   void emit(TtsEngineEvent event) => _events.add(event);
 
   /// Simulates the engine finishing initialising.
-  void becomeReady({bool ready = true}) =>
-      emit(TtsInitialised(ready: ready));
+  void becomeReady({bool ready = true}) => emit(TtsInitialised(ready: ready));
 
   /// Simulates the native stream failing.
   void emitError(Object error) => _events.addError(error);
@@ -63,7 +63,10 @@ class FakeTtsPlatform implements TtsPlatform {
   }
 
   @override
-  Future<void> stop() async => stopCalls++;
+  Future<void> stop() async {
+    stopCalls++;
+    await stopGate?.future;
+  }
 
   @override
   Future<void> pause() async => pauseCalls++;
@@ -140,7 +143,8 @@ class FakeTtsPlatform implements TtsPlatform {
   Future<void> dispose() => _events.close();
 }
 
-const _chapterHtml = '<p>First sentence here. Second one follows.</p>'
+const _chapterHtml =
+    '<p>First sentence here. Second one follows.</p>'
     '<p>Third sentence now. Fourth closes it.</p>';
 
 void main() {
@@ -341,14 +345,16 @@ void main() {
       await cubit.close();
     });
 
-    test('play with nothing loaded reports an error and does not call out',
-        () async {
-      final cubit = await build();
-      await cubit.play();
-      expect(platform.startCalls, 0);
-      expect(cubit.state.errorMessage, isNotNull);
-      await cubit.close();
-    });
+    test(
+      'play with nothing loaded reports an error and does not call out',
+      () async {
+        final cubit = await build();
+        await cubit.play();
+        expect(platform.startCalls, 0);
+        expect(cubit.state.errorMessage, isNotNull);
+        await cubit.close();
+      },
+    );
 
     test('an engine that refuses to start surfaces an error', () async {
       final cubit = await build();
@@ -458,7 +464,6 @@ void main() {
       await cubit.close();
     });
 
-
     test('toggle flips between playing and paused', () async {
       final cubit = await build();
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
@@ -490,6 +495,30 @@ void main() {
       expect(prefs.resumePoint('b1'), isNull);
       await cubit.close();
     });
+
+    test(
+      'stop marks narration inactive before waiting for the engine',
+      () async {
+        final cubit = await build();
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
+
+        platform.stopGate = Completer<void>();
+        final stopping = cubit.stop(clearPosition: false);
+        await Future<void>.delayed(Duration.zero);
+
+        expect(cubit.state.status, TtsStatus.idle);
+        platform.emit(const TtsCompleted());
+        await Future<void>.delayed(Duration.zero);
+        expect(cubit.state.status, TtsStatus.idle);
+
+        platform.stopGate!.complete();
+        await stopping;
+        await cubit.close();
+      },
+    );
   });
 
   group('seeking', () {
@@ -501,10 +530,8 @@ void main() {
       // the progress bar past the middle skipped to the next chapter.
       final cubit = await build();
       const sentences = 40;
-      final html = '<p>${List.generate(
-        sentences,
-        (i) => 'Sentence number $i stands here.',
-      ).join(' ')}</p>';
+      final html =
+          '<p>${List.generate(sentences, (i) => 'Sentence number $i stands here.').join(' ')}</p>';
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: html);
       platform.becomeReady();
       await Future<void>.delayed(Duration.zero);
@@ -512,7 +539,11 @@ void main() {
 
       expect(cubit.state.totalSentences, sentences);
 
-      for (final target in [sentences ~/ 2, (sentences * 3) ~/ 4, sentences - 2]) {
+      for (final target in [
+        sentences ~/ 2,
+        (sentences * 3) ~/ 4,
+        sentences - 2,
+      ]) {
         await cubit.seek(target);
         expect(
           platform.lastUnits.length,
@@ -854,10 +885,7 @@ void main() {
         html: '<p>Only paragraph here. And more.</p>',
       );
 
-      expect(
-        cubit.state.sentences.last.pauseAfterMs,
-        TtsPause.normal,
-      );
+      expect(cubit.state.sentences.last.pauseAfterMs, TtsPause.normal);
       await cubit.close();
     });
 
@@ -900,30 +928,35 @@ void main() {
       await cubit.close();
     });
 
-    test('picking the step already chosen does not talk to the engine', () async {
-      final cubit = await build();
-      await cubit.setSentenceGap(TtsSentenceGap.min);
-      final after = platform.pauseScales.length;
+    test(
+      'picking the step already chosen does not talk to the engine',
+      () async {
+        final cubit = await build();
+        await cubit.setSentenceGap(TtsSentenceGap.min);
+        final after = platform.pauseScales.length;
 
-      await cubit.setSentenceGap(TtsSentenceGap.min);
+        await cubit.setSentenceGap(TtsSentenceGap.min);
 
-      expect(platform.pauseScales, hasLength(after));
-      await cubit.close();
-    });
+        expect(platform.pauseScales, hasLength(after));
+        await cubit.close();
+      },
+    );
 
-    test('the saved step is restored and re-sent once the engine is ready',
-        () async {
-      await prefs.setSentenceGap(TtsSentenceGap.max);
-      platform = FakeTtsPlatform();
-      final cubit = await build();
+    test(
+      'the saved step is restored and re-sent once the engine is ready',
+      () async {
+        await prefs.setSentenceGap(TtsSentenceGap.max);
+        platform = FakeTtsPlatform();
+        final cubit = await build();
 
-      platform.becomeReady();
-      await Future<void>.delayed(Duration.zero);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
 
-      expect(cubit.state.sentenceGap, TtsSentenceGap.max);
-      expect(platform.pauseScales.last, TtsSentenceGap.scales.last);
-      await cubit.close();
-    });
+        expect(cubit.state.sentenceGap, TtsSentenceGap.max);
+        expect(platform.pauseScales.last, TtsSentenceGap.scales.last);
+        await cubit.close();
+      },
+    );
 
     test('starting narration re-asserts the scale', () async {
       // The service is a separate component the system can tear down and rebuild;
@@ -973,10 +1006,7 @@ void main() {
     test('the notification shows the work and the sentence', () async {
       final cubit = await build();
       cubit.attachChapterSource(
-        autoAdvance: TtsAutoAdvance(
-          source: _FakeChapterSource(),
-          index: 0,
-        ),
+        autoAdvance: TtsAutoAdvance(source: _FakeChapterSource(), index: 0),
         workTitle: 'A Wizard of Earthsea',
       );
       cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
@@ -1019,21 +1049,23 @@ void main() {
       await cubit.close();
     });
 
-    test('a chapter change takes the service down but keeps the position',
-        () async {
-      final cubit = await build();
-      cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
-      platform.becomeReady();
-      await Future<void>.delayed(Duration.zero);
-      await cubit.play();
-      platform.emit(const TtsSentenceStarted(2));
-      await Future<void>.delayed(Duration.zero);
+    test(
+      'a chapter change takes the service down but keeps the position',
+      () async {
+        final cubit = await build();
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
+        platform.emit(const TtsSentenceStarted(2));
+        await Future<void>.delayed(Duration.zero);
 
-      await cubit.stop(clearPosition: false);
-      expect(platform.stopServiceCalls, 1);
-      expect(prefs.resumePoint('b1')?.sentenceIndex, 2);
-      await cubit.close();
-    });
+        await cubit.stop(clearPosition: false);
+        expect(platform.stopServiceCalls, 1);
+        expect(prefs.resumePoint('b1')?.sentenceIndex, 2);
+        await cubit.close();
+      },
+    );
 
     // Narration can end without this cubit hearing about it — the notification,
     // a media key, or the app being swiped out of the task switcher, which stops
@@ -1183,10 +1215,9 @@ void main() {
           bookId: 'b1',
           chapterId: source.chapterId(next),
           views: [
-            for (final s
-                in SentenceParser.parseHtml(
-                  await source.chapterText(next),
-                ).sentences)
+            for (final s in SentenceParser.parseHtml(
+              await source.chapterText(next),
+            ).sentences)
               TtsSentenceView(
                 index: s.index,
                 text: s.text,
@@ -1308,58 +1339,70 @@ void main() {
       await cubit.close();
     });
 
-    test('a repeated completion does not tear down the chapter it just started',
-        () async {
-      // The engine can report completion twice: once when the last sentence
-      // finishes and again as a flushed queue drains. The second advance finds
-      // a chapter that is no longer the one it asked for, calls the move a
-      // failure, and stops the service the first one had just started — which
-      // from the outside is indistinguishable from auto-advance never working.
-      final cubit = await build();
-      final source = _FakeChapterSource(count: 3);
-      cubit.attachChapterSource(
-        autoAdvance: TtsAutoAdvance(source: source, index: 0),
-        workTitle: 'Test Book',
-      );
-      final navigated = <int>[];
-      installReader(cubit, source, navigated, turn: const Duration(milliseconds: 20));
-      cubit.loadChapter(bookId: 'b1', chapterId: 'c0', html: _chapterHtml);
-      platform.becomeReady();
-      await Future<void>.delayed(Duration.zero);
-      await cubit.play();
+    test(
+      'a repeated completion does not tear down the chapter it just started',
+      () async {
+        // The engine can report completion twice: once when the last sentence
+        // finishes and again as a flushed queue drains. The second advance finds
+        // a chapter that is no longer the one it asked for, calls the move a
+        // failure, and stops the service the first one had just started — which
+        // from the outside is indistinguishable from auto-advance never working.
+        final cubit = await build();
+        final source = _FakeChapterSource(count: 3);
+        cubit.attachChapterSource(
+          autoAdvance: TtsAutoAdvance(source: source, index: 0),
+          workTitle: 'Test Book',
+        );
+        final navigated = <int>[];
+        installReader(
+          cubit,
+          source,
+          navigated,
+          turn: const Duration(milliseconds: 20),
+        );
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c0', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
 
-      platform.emit(const TtsCompleted());
-      platform.emit(const TtsCompleted());
-      await Future<void>.delayed(const Duration(milliseconds: 80));
+        platform.emit(const TtsCompleted());
+        platform.emit(const TtsCompleted());
+        await Future<void>.delayed(const Duration(milliseconds: 80));
 
-      expect(navigated, [1], reason: 'the second completion must be ignored');
-      expect(cubit.state.chapterId, 'chapter-url-1');
-      expect(cubit.state.isSpeaking, isTrue);
-      expect(platform.serviceUp, isTrue);
-      await cubit.close();
-    });
+        expect(navigated, [1], reason: 'the second completion must be ignored');
+        expect(cubit.state.chapterId, 'chapter-url-1');
+        expect(cubit.state.isSpeaking, isTrue);
+        expect(platform.serviceUp, isTrue);
+        await cubit.close();
+      },
+    );
 
-    test('completing with nothing that can turn the page stops the session',
-        () async {
-      // A chapter list but no screen attached: background narration with no
-      // reader is the end of the session, not an infinite roll.
-      final cubit = await build();
-      cubit.attachChapterSource(
-        autoAdvance: TtsAutoAdvance(source: _FakeChapterSource(count: 3), index: 0),
-        workTitle: 'Test Book',
-      );
-      cubit.loadChapter(bookId: 'b1', chapterId: 'c0', html: _chapterHtml);
-      platform.becomeReady();
-      await Future<void>.delayed(Duration.zero);
-      await cubit.play();
+    test(
+      'completing with nothing that can turn the page stops the session',
+      () async {
+        // A chapter list but no screen attached: background narration with no
+        // reader is the end of the session, not an infinite roll.
+        final cubit = await build();
+        cubit.attachChapterSource(
+          autoAdvance: TtsAutoAdvance(
+            source: _FakeChapterSource(count: 3),
+            index: 0,
+          ),
+          workTitle: 'Test Book',
+        );
+        cubit.loadChapter(bookId: 'b1', chapterId: 'c0', html: _chapterHtml);
+        platform.becomeReady();
+        await Future<void>.delayed(Duration.zero);
+        await cubit.play();
 
-      platform.emit(const TtsCompleted());
-      await Future<void>.delayed(const Duration(milliseconds: 10));
+        platform.emit(const TtsCompleted());
+        await Future<void>.delayed(const Duration(milliseconds: 10));
 
-      expect(cubit.state.status, TtsStatus.idle);
-      expect(platform.serviceUp, isFalse);
-      await cubit.close();
-    });
+        expect(cubit.state.status, TtsStatus.idle);
+        expect(platform.serviceUp, isFalse);
+        await cubit.close();
+      },
+    );
 
     test('advancing keeps the same book', () async {
       final cubit = await withChapters();
@@ -1517,9 +1560,12 @@ void main() {
       final cubit = await loaded();
       // Nothing to check against, so the index is taken at face value rather
       // than guessed at.
-      expect(cubit.resolveResumeIndex(
-        const TtsResumePoint(chapterId: 'c1', sentenceIndex: 3),
-      ), 3);
+      expect(
+        cubit.resolveResumeIndex(
+          const TtsResumePoint(chapterId: 'c1', sentenceIndex: 3),
+        ),
+        3,
+      );
       await cubit.close();
     });
 
@@ -1596,4 +1642,3 @@ class _FakeChapterSource implements TtsChapterSource {
   @override
   String chapterId(int index) => 'chapter-url-$index';
 }
-

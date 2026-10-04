@@ -257,7 +257,10 @@ class TextFilterEngine {
       // Absorbing the separators around a cut is what stops "start , TWO end",
       // but it can also glue two words together. Put one space back whenever a
       // cut landed between two word characters.
-      if (justCut && lastKept.isNotEmpty && !_isSpace(lastKept) && _isWord(text[from])) {
+      if (justCut &&
+          lastKept.isNotEmpty &&
+          !_isSpace(lastKept) &&
+          _isWord(text[from])) {
         out.write(' ');
       }
       out.write(text.substring(from, to));
@@ -288,7 +291,9 @@ class TextFilterEngine {
     for (final cut in cuts) {
       final last = merged.isEmpty ? null : merged.last;
       if (last != null && cut.start <= last.end) {
-        if (cut.end > last.end) merged[merged.length - 1] = TextCut(last.start, cut.end);
+        if (cut.end > last.end) {
+          merged[merged.length - 1] = TextCut(last.start, cut.end);
+        }
       } else {
         merged.add(cut);
       }
@@ -306,7 +311,10 @@ class TextFilterEngine {
       }
       final last = grown.isEmpty ? null : grown.last;
       if (last != null && start <= last.end) {
-        grown[grown.length - 1] = TextCut(last.start, end > last.end ? end : last.end);
+        grown[grown.length - 1] = TextCut(
+          last.start,
+          end > last.end ? end : last.end,
+        );
       } else {
         grown.add(TextCut(start, end));
       }
@@ -339,7 +347,15 @@ class TextFilterEngine {
   static bool _isSpace(String ch) => _spaceCodes.contains(ch.codeUnitAt(0));
 
   static const Set<int> _spaceCodes = {
-    0x20, 0x09, 0x0A, 0x0D, 0x00A0, 0x2007, 0x202F, 0x200B, 0x3000,
+    0x20,
+    0x09,
+    0x0A,
+    0x0D,
+    0x00A0,
+    0x2007,
+    0x202F,
+    0x200B,
+    0x3000,
   };
 
   static final RegExp _wordChar = RegExp(r'[\p{L}\p{N}]', unicode: true);
@@ -383,7 +399,13 @@ class TextFilterEngine {
   /// unbalanced-quote pass below walks straight past it. It is punctuation
   /// pretending to be a sentence, and the page should not show it.
   static const List<String> _emptyQuotePairs = [
-    '""', "''", '“”', '‘’', '「」', '『』', '《》',
+    '""',
+    "''",
+    '“”',
+    '‘’',
+    '「」',
+    '『』',
+    '《》',
   ];
 
   static String _dropEmptyQuotes(String s) {
@@ -444,18 +466,22 @@ class _Compiled {
 const List<TextFilterRule> builtinTextFilterRules = [
   TextFilterRule(
     id: 'builtin_discord',
-    pattern: r'\bdiscord\.(?:gg|com|app|me|io)\S*|^\s*join\s+(?:us\s+)?(?:on\s+)?(?:my\s+|our\s+|the\s+)?discord\b.*',
+    pattern:
+        r'\bdiscord\.(?:gg|com|app|me|io)\S*|^\s*join\s+(?:us\s+)?(?:on\s+)?(?:my\s+|our\s+|the\s+)?discord\b.*',
     label: 'Discord invites / links',
   ),
   TextFilterRule(
     id: 'builtin_patreon',
     pattern:
-        r'\bpatreon\.com\S*|^\s*my\s+patreon\b.*'
+        r'\bp(?:a|@)treon\.com\S*|^\s*my\s+p(?:a|@)treon\b.*'
         // The one call-to-action strong enough to match anywhere in a line
         // rather than at the start of it. Sources append it to the end of a
         // real paragraph often enough ("He smiled. Please support me on
         // Patreon!"), and this phrase is not something a novel says.
-        r'|\b(?:please\s+)?support\s+me\s+on\s+patreon\b.*',
+        r'|\b(?:please\s+)?support\s+(?:me|us|the\s+(?:author|writer|creator|translator))'
+        r'\s+(?:on|via|through)\s+p(?:a|@)treon\b.*'
+        r'|^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:to\s+)?(?:my|our)\s+p(?:a|@)treon\b.*'
+        r'|^\s*an\s*[:：-]\s*(?:check\s+out\s+)?(?:my|our)\s+p(?:a|@)treon\b.*',
     label: 'Patreon mentions',
   ),
   TextFilterRule(
@@ -467,7 +493,8 @@ const List<TextFilterRule> builtinTextFilterRules = [
   TextFilterRule(
     id: 'builtin_support_me',
     pattern:
-        r'^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:me|us)\b.*|^\s*(?:ko-?fi|paypal\.me|cash\.app|buymeacoffee|ko-fi)\S*',
+        r'^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:me|us|the\s+(?:author|writer|creator|translator)|my\s+(?:work|writing|novel))\b.*'
+        r'|^\s*(?:ko-?fi|paypal\.me|cash\.app|buymeacoffee|ko-fi)\S*',
     label: 'Donation / support pleas',
   ),
   TextFilterRule(

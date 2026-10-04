@@ -151,6 +151,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   TtsCubit? _tts;
   TtsChapterSource? _ttsChapters;
   StreamSubscription<TtsState>? _ttsSubscription;
+  final GlobalKey _readerHitTestKey = GlobalKey();
 
   /// The chapter segmented against the text this screen actually renders, or
   /// null when it could not be segmented.
@@ -472,10 +473,29 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     final html = _html;
     if (html == null || _text == null || !mounted) return;
     final prefs = sl<ReaderPrefs>();
-    // Only silence the voice when a rule actually removes something. Turning
-    // the cleanup off restores text, which does not invalidate a running
-    // narration so much as leave it behind.
-    if (prefs.textFiltersEnabled) await _tts?.stop();
+    final tts = _tts;
+    final previousSentence = tts?.state.currentSentence?.text;
+    final previousIndex = tts?.state.currentIndex ?? 0;
+    // User-hidden sentences still apply when built-in cleanup is disabled.
+    // Stop before replacing the queue in either case: otherwise the platform
+    // can continue speaking stale sentence indices against the new chapter.
+    if (tts?.state.isActive ?? false) {
+      try {
+        await tts!.stop(clearPosition: false);
+      } catch (error) {
+        debugPrint('[TtsCubit] could not stop before text cleanup: $error');
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Could not safely update text while read-aloud is active.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    }
     if (!mounted) return;
 
     final cleaned = filterNovelHtml(_text!.html, prefs.textFilterEngine);
@@ -495,12 +515,27 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // it already has — the one that still contains the sentence just hidden.
     _ttsAligned = null;
     if (!_adoptAlignedChapter(cleaned, force: true)) {
-      _tts?.loadChapter(
+      tts?.loadChapter(
         bookId: widget.showId,
         chapterId: _chapter.url,
         html: cleaned,
         force: true,
       );
+    }
+    if (tts != null && tts.state.totalSentences > 0) {
+      var resumeIndex = previousIndex.clamp(0, tts.state.totalSentences - 1);
+      if (previousSentence != null) {
+        var nearestDistance = 1 << 30;
+        for (var i = 0; i < tts.state.sentences.length; i++) {
+          if (tts.state.sentences[i].text != previousSentence) continue;
+          final distance = (i - previousIndex).abs();
+          if (distance < nearestDistance) {
+            resumeIndex = i;
+            nearestDistance = distance;
+          }
+        }
+      }
+      await tts.seek(resumeIndex);
     }
     // The page the reader was on no longer exists if what was hidden was part of
     // it, so re-anchor to the top rather than leaving them somewhere other than
@@ -977,6 +1012,8 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     int chapterOffset;
     if (_isPaginated) {
       if (_pages.isEmpty) return null;
+      final bodyPosition = _readerBodyPosition(global);
+      if (bodyPosition == null) return null;
       final painter = TextPainter(
         text: _pages[_pageIndex.clamp(0, _pages.length - 1)],
         textDirection: Directionality.of(context),
@@ -984,7 +1021,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, global.dy - 32),
+        Offset(
+          bodyPosition.dx - prefs.marginWidth,
+          pageTextYForReaderPosition(
+            bodyY: bodyPosition.dy,
+            safeAreaTop: MediaQuery.paddingOf(context).top,
+            contentTopPadding: _readerContentVerticalPadding,
+          ),
+        ),
       );
       painter.dispose();
       // The page is a contiguous slice of the chapter, so the page's own start
@@ -1000,9 +1044,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     } else {
       final offsets = _blockOffsets;
       if (offsets == null || !_scrollController.hasClients) return null;
-      // 32 is the `SliverPadding` above the first block, and the body sits under
-      // the system bars only after `SafeArea` has taken them out.
-      final topInContent = global.dy + _scrollController.position.pixels;
+      final bodyPosition = _readerBodyPosition(global);
+      if (bodyPosition == null) return null;
+      final topInContent = scrollContentYForReaderPosition(
+        bodyY: bodyPosition.dy,
+        safeAreaTop: MediaQuery.paddingOf(context).top,
+        scrollOffset: _scrollController.position.pixels,
+      );
       int? block;
       var yInBlock = 0.0;
       for (var b = 0; b + 1 < offsets.length; b++) {
@@ -1025,7 +1073,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, yInBlock),
+        Offset(bodyPosition.dx - prefs.marginWidth, yInBlock),
       );
       painter.dispose();
       chapterOffset = layout.blocks[block].start + position.offset;
@@ -1045,6 +1093,12 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       start: hit.start,
       end: hit.end,
     );
+  }
+
+  Offset? _readerBodyPosition(Offset globalPosition) {
+    final renderObject = _readerHitTestKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    return renderObject.globalToLocal(globalPosition);
   }
 
   /// The segmentation the long press is measured against.
@@ -1190,6 +1244,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
               // Touch pauses; lifting resumes after a grace. See the manga
               // reader — stopping outright on a drag made a nudge fatal.
               child: Listener(
+                key: _readerHitTestKey,
                 onPointerDown: (_) => _autoScroll.pauseForTouch(),
                 onPointerUp: (_) => _autoScroll.resumeAfterTouch(),
                 onPointerCancel: (_) => _autoScroll.resumeAfterTouch(),

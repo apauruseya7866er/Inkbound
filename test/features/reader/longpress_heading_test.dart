@@ -12,6 +12,30 @@ import 'package:watch_app/features/reader/tts_alignment.dart';
 /// visible and completely untouchable: the lookup returned nothing and the long
 /// press ended in silence, with no dialog to explain why.
 void main() {
+  group('long-press coordinate conversion', () {
+    test('scroll hit testing removes safe-area offset before block lookup', () {
+      expect(
+        scrollContentYForReaderPosition(
+          bodyY: 244,
+          safeAreaTop: 24,
+          scrollOffset: 300,
+        ),
+        520,
+      );
+    });
+
+    test('paged hit testing removes safe-area and page padding', () {
+      expect(
+        pageTextYForReaderPosition(
+          bodyY: 244,
+          safeAreaTop: 24,
+          contentTopPadding: 32,
+        ),
+        188,
+      );
+    });
+  });
+
   group('a heading block, which read-aloud never speaks', () {
     // The chapter as it arrived: prose, then the injected line in a heading.
     const html =
@@ -36,14 +60,18 @@ void main() {
       expect(hit.blockIndex, 1);
     });
 
-    test('a press anywhere in that line finds it, not just the first character',
-        () {
-      for (final needle in ['P@treon', 'extra Chapters']) {
-        final at = layout.text.indexOf(needle);
-        expect(hideableRangeAt(layout, at, sentences)?.text,
-            'AN: Check out my P@treon For +40 extra Chapters.');
-      }
-    });
+    test(
+      'a press anywhere in that line finds it, not just the first character',
+      () {
+        for (final needle in ['P@treon', 'extra Chapters']) {
+          final at = layout.text.indexOf(needle);
+          expect(
+            hideableRangeAt(layout, at, sentences)?.text,
+            'AN: Check out my P@treon For +40 extra Chapters.',
+          );
+        }
+      },
+    );
 
     test('hiding it takes the line out and leaves the prose', () {
       final hit = hideableRangeAt(layout, adStart, sentences)!;
@@ -68,8 +96,7 @@ void main() {
 
     test('the second sentence is found on its own', () {
       final at = layout.text.indexOf('Then');
-      expect(hideableRangeAt(layout, at, sentences)!.text,
-          'Then he stopped.');
+      expect(hideableRangeAt(layout, at, sentences)!.text, 'Then he stopped.');
     });
   });
 
@@ -78,10 +105,7 @@ void main() {
     final layout = NovelTextLayout.fromHtml(html);
 
     test('an offset past the end finds nothing', () {
-      expect(
-        hideableRangeAt(layout, layout.length, const []),
-        isNull,
-      );
+      expect(hideableRangeAt(layout, layout.length, const []), isNull);
     });
 
     test('a negative offset finds nothing', () {

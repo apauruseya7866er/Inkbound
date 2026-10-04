@@ -60,12 +60,18 @@ void main() {
           builtins,
         ),
       );
-      expect(layout.blocks.map((b) => b.textOf(layout)), ['One.', 'Two.', 'Three.']);
+      expect(layout.blocks.map((b) => b.textOf(layout)), [
+        'One.',
+        'Two.',
+        'Three.',
+      ]);
     });
 
     test('keeps styling on the parts a rule did not touch', () {
       final out = filterNovelTokens(
-        tokenizeNovelHtml('<p><b>Stay bold.</b> Please support me on Patreon.</p>'),
+        tokenizeNovelHtml(
+          '<p><b>Stay bold.</b> Please support me on Patreon.</p>',
+        ),
         builtins,
       );
       // The ad is the tail of the paragraph, so the bold run survives whole.
@@ -81,6 +87,19 @@ void main() {
         builtins,
       );
       expect(bodyOf(out), 'He turned.');
+    });
+
+    test('removes an obfuscated Patreon footer from chapter HTML', () {
+      final out = filterNovelHtml(
+        '<p>Story text.</p>'
+        '<p>AN: Check out my P@treon For +40 extra Chapters.</p>'
+        '<p>More story.</p>',
+        builtins,
+      );
+      expect(
+        NovelTextLayout(tokenizeNovelHtml(out)).text,
+        'Story text.\nMore story.\n',
+      );
     });
 
     test('a cut that would glue two words puts one space back', () {
@@ -122,10 +141,7 @@ void main() {
       final tokens = tokenizeNovelHtml(
         '<p>He looked at the sea.</p><p>It was calm.</p>',
       );
-      expect(
-        textOf(filterNovelTokens(tokens, builtins)),
-        textOf(tokens),
-      );
+      expect(textOf(filterNovelTokens(tokens, builtins)), textOf(tokens));
     });
   });
 
@@ -169,8 +185,10 @@ void main() {
       // Written back raw, the `<3` would be read as a tag by the next pass, and
       // the rest of the line with it.
       expect(out, contains('&lt;3'));
-      expect(NovelTextLayout(tokenizeNovelHtml(out)).text,
-          'if you <3 this, & read on\n');
+      expect(
+        NovelTextLayout(tokenizeNovelHtml(out)).text,
+        'if you <3 this, & read on\n',
+      );
     });
 
     test('a run that loses bold but keeps italic stays well-formed', () {
@@ -192,12 +210,15 @@ void main() {
     });
 
     test('produces HTML that lays out as the filtered text', () {
-      const html = '<p>Story text.</p>'
+      const html =
+          '<p>Story text.</p>'
           '<p>Please support me on Patreon!</p>'
           '<p>More story.</p>';
       final out = filterNovelHtml(html, builtins);
-      expect(NovelTextLayout(tokenizeNovelHtml(out)).text,
-          'Story text.\nMore story.\n');
+      expect(
+        NovelTextLayout(tokenizeNovelHtml(out)).text,
+        'Story text.\nMore story.\n',
+      );
     });
 
     test('is stable: filtering twice changes nothing the second time', () {
@@ -216,11 +237,14 @@ void main() {
     // re-filtered the chapter, and the sentence stayed put - because the rule
     // was anchored to the whole line and the line held more than the sentence.
     test('a hidden sentence is removed from the middle of a line', () {
-      const html = '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
+      const html =
+          '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
       final engine = TextFilterEngine([
         TextFilterRule.hiddenSentence('read at novelsb.com!', id: 'h1'),
       ]);
-      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
+      final text = NovelTextLayout(
+        tokenizeNovelHtml(filterNovelHtml(html, engine)),
+      ).text;
       expect(text, contains('If you like it'));
       expect(text, contains('New chapters daily.'));
       expect(text, isNot(contains('novelsb.com')));
@@ -229,25 +253,36 @@ void main() {
       // terminators are deliberately not absorbed; a comma is.
     });
 
-    test('two sentences hidden from one line both go, and the line survives', () {
-      const html = '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
-      final engine = TextFilterEngine([
-        TextFilterRule.hiddenSentence('read at novelsb.com!', id: 'h1'),
-        TextFilterRule.hiddenSentence('New chapters daily.', id: 'h2'),
-      ]);
-      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
-      // What is left is still a line with real prose in it, not a collapsed
-      // empty paragraph.
-      expect(text.trim(), 'If you like it');
-    });
+    test(
+      'two sentences hidden from one line both go, and the line survives',
+      () {
+        const html =
+            '<p>If you like it, read at novelsb.com! New chapters daily.</p>';
+        final engine = TextFilterEngine([
+          TextFilterRule.hiddenSentence('read at novelsb.com!', id: 'h1'),
+          TextFilterRule.hiddenSentence('New chapters daily.', id: 'h2'),
+        ]);
+        final text = NovelTextLayout(
+          tokenizeNovelHtml(filterNovelHtml(html, engine)),
+        ).text;
+        // What is left is still a line with real prose in it, not a collapsed
+        // empty paragraph.
+        expect(text.trim(), 'If you like it');
+      },
+    );
 
-    test('hiding the last sentence of a line does not take the stop with it', () {
-      const html = '<p>Stay with me.</p><p>Read at novelsb.com!</p>';
-      final engine = TextFilterEngine([
-        TextFilterRule.hiddenSentence('Read at novelsb.com!', id: 'h1'),
-      ]);
-      final text = NovelTextLayout(tokenizeNovelHtml(filterNovelHtml(html, engine))).text;
-      expect(text.trim(), 'Stay with me.');
-    });
+    test(
+      'hiding the last sentence of a line does not take the stop with it',
+      () {
+        const html = '<p>Stay with me.</p><p>Read at novelsb.com!</p>';
+        final engine = TextFilterEngine([
+          TextFilterRule.hiddenSentence('Read at novelsb.com!', id: 'h1'),
+        ]);
+        final text = NovelTextLayout(
+          tokenizeNovelHtml(filterNovelHtml(html, engine)),
+        ).text;
+        expect(text.trim(), 'Stay with me.');
+      },
+    );
   });
 }
