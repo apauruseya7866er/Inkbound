@@ -1,15 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// The read-aloud highlight: a soft blue box with a blue outline around the
-/// sentence being spoken.
+/// The read-aloud highlight: a soft lavender fill behind the sentence being
+/// spoken, with a dark foreground for comfortable contrast.
 ///
 /// ### Why this is painted rather than styled
 ///
-/// `TextStyle.background` cannot draw a border, and a border is the part that
-/// makes the highlight read as a deliberate marker instead of a smudge of
-/// colour behind the words — especially on the light page themes, where a tint
-/// alone disappears into the paper. `TextStyle` has no border primitive at all,
-/// so the box has to be painted.
+/// A lightly padded fill is painted per text line, so wrapped sentences read as
+/// one continuous highlight without the heavy outlined capsule of the old
+/// treatment.
 ///
 /// ### Why it cannot drift out of line with the text
 ///
@@ -37,14 +35,12 @@ class TtsHighlightText extends StatelessWidget {
   final int? rangeStart;
   final int? rangeEnd;
 
-  /// Translucent blue fill, and a near-opaque blue outline.
-  static const Color fillColor = Color(0x333B82F6);
-  static const Color borderColor = Color(0xE63B82F6);
-  static const double borderWidth = 1.2;
-  static const double cornerRadius = 6;
+  /// Pale periwinkle fill and a readable dark foreground.
+  static const Color fillColor = Color(0xFFDDE1FC);
+  static const Color textColor = Color(0xFF292A45);
+  static const double cornerRadius = 4;
 
-  /// Breathing room inside the outline, so the border does not sit on the
-  /// glyphs and the box does not look like it is clipping the descenders.
+  /// Breathing room around the glyphs without crowding descenders.
   static const double padHorizontal = 5;
   static const double padVertical = 3;
 
@@ -56,28 +52,94 @@ class TtsHighlightText extends StatelessWidget {
         return CustomPaint(
           painter: boxes.isEmpty
               ? null
-              : _HighlightBoxPainter(
-                  boxes,
-                  fill: fillColor,
-                  border: borderColor,
-                ),
-          child: Text.rich(span, textAlign: textAlign),
+              : _HighlightBoxPainter(boxes: boxes, fill: fillColor),
+          child: Text.rich(
+            rangeStart == null || rangeEnd == null || rangeEnd! <= rangeStart!
+                ? span
+                : _highlightForeground(span, rangeStart!, rangeEnd!),
+            textAlign: textAlign,
+          ),
         );
       },
+    );
+  }
+
+  TextSpan _highlightForeground(TextSpan span, int start, int end) {
+    var offset = 0;
+
+    List<InlineSpan> visitChildren(Iterable<InlineSpan>? spans) {
+      if (spans == null) return const [];
+      final result = <InlineSpan>[];
+      for (final child in spans) {
+        if (child is! TextSpan) {
+          result.add(child);
+          continue;
+        }
+        final text = child.text;
+        final children = <InlineSpan>[];
+        if (text != null && text.isNotEmpty) {
+          final from = (start - offset).clamp(0, text.length);
+          final to = (end - offset).clamp(0, text.length);
+          if (from > 0) {
+            children.add(
+              TextSpan(text: text.substring(0, from), style: child.style),
+            );
+          }
+          if (to > from) {
+            children.add(
+              TextSpan(
+                text: text.substring(from, to),
+                style: (child.style ?? const TextStyle()).copyWith(
+                  color: TtsHighlightText.textColor,
+                ),
+              ),
+            );
+          }
+          if (to < text.length) {
+            children.add(
+              TextSpan(text: text.substring(to), style: child.style),
+            );
+          }
+          offset += text.length;
+        }
+        children.addAll(visitChildren(child.children));
+        result.add(
+          TextSpan(
+            style: child.style,
+            children: children,
+            recognizer: child.recognizer,
+            mouseCursor: child.mouseCursor,
+            onEnter: child.onEnter,
+            onExit: child.onExit,
+            semanticsLabel: child.semanticsLabel,
+            locale: child.locale,
+            spellOut: child.spellOut,
+          ),
+        );
+      }
+      return result;
+    }
+
+    return TextSpan(
+      style: span.style,
+      children: visitChildren([span]),
+      semanticsLabel: span.semanticsLabel,
+      locale: span.locale,
+      spellOut: span.spellOut,
     );
   }
 
   /// The line boxes the range covers, in the same coordinate space the child
   /// text is painted in.
   List<Rect> _boxes(BuildContext context, double maxWidth) => ttsHighlightBoxes(
-        span: span,
-        start: rangeStart,
-        end: rangeEnd,
-        maxWidth: maxWidth,
-        textDirection: Directionality.of(context),
-        textAlign: textAlign,
-        textScaler: MediaQuery.textScalerOf(context),
-      );
+    span: span,
+    start: rangeStart,
+    end: rangeEnd,
+    maxWidth: maxWidth,
+    textDirection: Directionality.of(context),
+    textAlign: textAlign,
+    textScaler: MediaQuery.textScalerOf(context),
+  );
 }
 
 /// The rectangles a read-aloud highlight should be drawn around.
@@ -121,10 +183,6 @@ List<Rect> ttsHighlightBoxes({
 
 /// The single rectangle that encloses every box in [boxes].
 ///
-/// One outline around the whole highlighted phrase rather than one per line:
-/// a sentence wrapping over three lines should read as one marked phrase, and
-/// three stacked outlines read as three unrelated highlights.
-///
 /// Returns null for an empty list. Pure, so the geometry can be tested without
 /// a canvas.
 Rect? ttsHighlightRect(List<Rect> boxes) {
@@ -148,31 +206,32 @@ Rect? ttsHighlightRect(List<Rect> boxes) {
 }
 
 class _HighlightBoxPainter extends CustomPainter {
-  const _HighlightBoxPainter(this.boxes, {required this.fill, required this.border});
+  const _HighlightBoxPainter({required this.boxes, required this.fill});
 
   final List<Rect> boxes;
   final Color fill;
-  final Color border;
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rect = ttsHighlightRect(boxes);
-    if (rect == null) return;
-    final rrect = RRect.fromRectAndRadius(
-      rect,
-      const Radius.circular(TtsHighlightText.cornerRadius),
-    );
-    canvas.drawRRect(rrect, Paint()..color = fill);
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..color = border
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = TtsHighlightText.borderWidth,
-    );
+    final paint = Paint()..color = fill;
+    for (final box in boxes) {
+      final rect = Rect.fromLTRB(
+        box.left - TtsHighlightText.padHorizontal,
+        box.top - TtsHighlightText.padVertical,
+        box.right + TtsHighlightText.padHorizontal,
+        box.bottom + TtsHighlightText.padVertical,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          rect,
+          const Radius.circular(TtsHighlightText.cornerRadius),
+        ),
+        paint,
+      );
+    }
   }
 
   @override
   bool shouldRepaint(_HighlightBoxPainter old) =>
-      old.boxes != boxes || old.fill != fill || old.border != border;
+      old.boxes != boxes || old.fill != fill;
 }

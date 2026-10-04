@@ -1,7 +1,14 @@
+import 'package:flutter/material.dart';
+
 import '../../features/detail/detail_screen.dart';
+import '../../features/reader/novel_reader_screen.dart';
 import '../di/injector.dart';
+import '../models/episode.dart';
 import '../models/media_item.dart';
+import '../models/provider_info.dart';
 import '../mode/mode_policy.dart';
+import '../reading/read_history.dart';
+import '../reading/tts/tts_prefs.dart';
 import '../ui/global_messenger.dart';
 import 'subscription_store.dart';
 
@@ -46,6 +53,60 @@ Future<void> openShowFromNotification(String? payload) async {
         sourceId: sourceId,
         cover: sub?.cover,
         coverHeaders: sub?.coverHeaders,
+      ),
+    ),
+  );
+}
+
+/// Restore the chapter and sentence saved by read-aloud when its notification
+/// launches the app after the reader route has been discarded.
+Future<void> openTtsReaderFromNotification() async {
+  final activeReader = NovelReaderScreen.ttsNotificationHandler;
+  if (activeReader != null) {
+    if (await activeReader()) return;
+  }
+
+  final nav = rootNavigatorKey.currentState;
+  if (nav == null || !sl.isRegistered<TtsPrefs>()) return;
+  final prefs = sl<TtsPrefs>();
+  final bookId = prefs.lastBookId;
+  if (bookId == null || bookId.isEmpty) return;
+  final point = prefs.savedPosition(bookId);
+  if (point == null) return;
+  final history = sl<ReadHistory>().all();
+  ReadEntry? entry;
+  for (final candidate in history) {
+    if (candidate.showId == bookId && candidate.type == ProviderType.novel) {
+      entry = candidate;
+      break;
+    }
+  }
+  if (entry == null) return;
+  final selectedEntry = entry;
+
+  final chapter = Episode(
+    id: point.chapterId,
+    title: selectedEntry.chapterUrl == point.chapterId
+        ? (selectedEntry.chapterNumber == null
+              ? 'Chapter'
+              : 'Chapter ${selectedEntry.chapterNumber!.toInt()}')
+        : 'Chapter',
+    number: selectedEntry.chapterUrl == point.chapterId
+        ? selectedEntry.chapterNumber
+        : null,
+    url: point.chapterId,
+  );
+  await nav.push(
+    MaterialPageRoute<void>(
+      builder: (_) => NovelReaderScreen(
+        sourceId: selectedEntry.sourceId,
+        showId: selectedEntry.showId,
+        showTitle: selectedEntry.title,
+        cover: selectedEntry.cover,
+        chapters: [chapter],
+        startIndex: 0,
+        resolveChapters: true,
+        restoreTtsPosition: true,
       ),
     ),
   );

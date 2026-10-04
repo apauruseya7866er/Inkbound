@@ -39,10 +39,20 @@ void main() {
     test('novel defaults', () async {
       await ReaderPrefs.init();
       final p = ReaderPrefs();
-      expect(p.fontFamily, 'inter');
+      expect(p.fontFamily, 'serif');
+      expect(p.fontSize, 17);
       expect(p.textAlignJustify, isFalse);
       expect(p.paragraphSpacing, 8);
       expect(p.novelPaginated, isFalse);
+    });
+
+    test('explicit novel font choices are preserved', () async {
+      await ReaderPrefs.init();
+      final p = ReaderPrefs();
+      await p.setFontFamily('inter');
+      await p.setFontSize(20);
+      expect(p.fontFamily, 'inter');
+      expect(p.fontSize, 20);
     });
   });
 
@@ -82,13 +92,16 @@ void main() {
       },
     );
 
-    test('legacy direction/background getters keep working untouched', () async {
-      await ReaderPrefs.init();
-      final p = ReaderPrefs();
-      await p.setDirection('rtl');
-      await p.setBackground('dark');
-      expect(p.direction, 'rtl');
-      expect(p.background, 'dark');
-    });
+    test(
+      'legacy direction/background getters keep working untouched',
+      () async {
+        await ReaderPrefs.init();
+        final p = ReaderPrefs();
+        await p.setDirection('rtl');
+        await p.setBackground('dark');
+        expect(p.direction, 'rtl');
+        expect(p.background, 'dark');
+      },
+    );
   });
 }
