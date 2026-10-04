@@ -32,6 +32,7 @@ import 'reader_comfort.dart';
 import 'reader_pull_chapter.dart';
 import 'tts_alignment.dart';
 import 'tts_highlight_box.dart';
+import 'tts_full_player.dart';
 import 'tts_player_bar.dart';
 import '../../l10n/l10n.dart';
 
@@ -40,6 +41,10 @@ import '../../l10n/l10n.dart';
 ///
 /// Nothing routes here yet; Task 11 wires the Detail screen to push it.
 class NovelReaderScreen extends StatefulWidget {
+  /// Called when the foreground narration notification is tapped while this
+  /// reader is already in the navigation stack.
+  static Future<bool> Function()? ttsNotificationHandler;
+
   const NovelReaderScreen({
     super.key,
     required this.sourceId,
@@ -51,6 +56,7 @@ class NovelReaderScreen extends StatefulWidget {
     this.malId,
     this.resolveChapters = false,
     this.peek = false,
+    this.restoreTtsPosition = false,
   });
 
   final String sourceId;
@@ -78,6 +84,10 @@ class NovelReaderScreen extends StatefulWidget {
   /// `_maybeResolveChapters`. Default false: every other caller (Detail
   /// screen) already passes the full list, so this is a no-op for them.
   final bool resolveChapters;
+
+  /// Opened from the read-aloud notification. The saved sentence is restored
+  /// and followed without starting narration again.
+  final bool restoreTtsPosition;
 
   @override
   State<NovelReaderScreen> createState() => _NovelReaderScreenState();
@@ -141,6 +151,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   TtsCubit? _tts;
   TtsChapterSource? _ttsChapters;
   StreamSubscription<TtsState>? _ttsSubscription;
+  final GlobalKey _readerHitTestKey = GlobalKey();
 
   /// The chapter segmented against the text this screen actually renders, or
   /// null when it could not be segmented.
@@ -198,6 +209,9 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// is tapped, and deliberately not derived from the engine being available:
   /// a feature nobody asked for should not sit permanently on the page.
   bool _ttsPanelOpen = false;
+  bool _ttsRestoreFollowing = false;
+  bool _manualTtsFollowNeeded = false;
+  bool _ttsPositionRestored = false;
 
   /// Cumulative y of every block, measured once per chapter so the follow can
   /// reach a block the sliver list has never built. Null until first measured.
@@ -214,6 +228,8 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// Paged mode as of the last build, so the follow knows not to fight the page
   /// turn that already does this job.
   bool _isPaginated = false;
+  late final Future<bool> Function() _ttsNotificationHandler =
+      _onTtsNotificationOpened;
 
   void _startTts() {
     setState(() {
@@ -234,11 +250,56 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     unawaited(_tts?.stop() ?? Future<void>.value());
   }
 
+  Future<bool> _onTtsNotificationOpened() async {
+    final tts = _tts;
+    if (tts == null || tts.state.bookId != widget.showId) return false;
+    final chapterId = tts.state.chapterId;
+    if (chapterId.isNotEmpty && chapterId != _chapter.url) {
+      var target = _chapters.indexWhere((chapter) => chapter.url == chapterId);
+      if (target < 0) {
+        target = _chapters.indexWhere((chapter) => chapter.id == chapterId);
+      }
+      if (target >= 0) {
+        _ttsAutoAdvancing = true;
+        try {
+          await _changeChapter(target);
+        } finally {
+          _ttsAutoAdvancing = false;
+        }
+      } else {
+        setState(() {
+          _chapters = [
+            Episode(id: chapterId, title: 'Chapter', url: chapterId),
+          ];
+          _index = 0;
+        });
+        await _load();
+      }
+    }
+    if (!mounted) return false;
+    setState(() {
+      _ttsPanelOpen = true;
+      _chromeVisible = true;
+      _ttsRestoreFollowing = true;
+      _manualTtsFollowNeeded = false;
+    });
+    final readerRoute = ModalRoute.of(context);
+    if (readerRoute != null) {
+      Navigator.of(context).popUntil((route) => identical(route, readerRoute));
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _followRestoredSentence(tts.state);
+    });
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _index = widget.startIndex;
+    _ttsPanelOpen = widget.restoreTtsPosition;
+    _chromeVisible = widget.restoreTtsPosition;
     _scrollController = ScrollController()..addListener(_onScroll);
     _pageController = PageController();
     // Built here, NOT lazily: createTicker reads TickerMode off the
@@ -264,6 +325,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       // is not in the tree while it is off screen, so a block-triggered follow
       // could only ever fire once the scroll it wanted had already happened.
       _ttsSubscription = _tts!.stream.listen(_maybeFollowTtsScroll);
+      NovelReaderScreen.ttsNotificationHandler = _ttsNotificationHandler;
     }
     // Wakelock/brightness/orientation — see ReaderComfortMixin. The novel
     // reader never held a wakelock before this; it now does, same as manga.
@@ -288,6 +350,12 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     _tts?.detachChapterSource();
     _tts?.detachChapterNavigator();
     _ttsSubscription?.cancel();
+    if (identical(
+      NovelReaderScreen.ttsNotificationHandler,
+      _ttsNotificationHandler,
+    )) {
+      NovelReaderScreen.ttsNotificationHandler = null;
+    }
     _autoScroll.dispose();
     restoreReaderComfort();
     _scrollController.removeListener(_onScroll);
@@ -314,7 +382,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // reading to the end of a chapter, swiping the app away and coming back
     // tomorrow reopened it at the top, which is the whole complaint.
     if (state == AppLifecycleState.paused ||
-    state == AppLifecycleState.inactive) {
+        state == AppLifecycleState.inactive) {
       _flushProgress();
     }
   }
@@ -405,10 +473,29 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     final html = _html;
     if (html == null || _text == null || !mounted) return;
     final prefs = sl<ReaderPrefs>();
-    // Only silence the voice when a rule actually removes something. Turning
-    // the cleanup off restores text, which does not invalidate a running
-    // narration so much as leave it behind.
-    if (prefs.textFiltersEnabled) await _tts?.stop();
+    final tts = _tts;
+    final previousSentence = tts?.state.currentSentence?.text;
+    final previousIndex = tts?.state.currentIndex ?? 0;
+    // User-hidden sentences still apply when built-in cleanup is disabled.
+    // Stop before replacing the queue in either case: otherwise the platform
+    // can continue speaking stale sentence indices against the new chapter.
+    if (tts?.state.isActive ?? false) {
+      try {
+        await tts!.stop(clearPosition: false);
+      } catch (error) {
+        debugPrint('[TtsCubit] could not stop before text cleanup: $error');
+        if (mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Could not safely update text while read-aloud is active.',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    }
     if (!mounted) return;
 
     final cleaned = filterNovelHtml(_text!.html, prefs.textFilterEngine);
@@ -428,12 +515,27 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // it already has — the one that still contains the sentence just hidden.
     _ttsAligned = null;
     if (!_adoptAlignedChapter(cleaned, force: true)) {
-      _tts?.loadChapter(
+      tts?.loadChapter(
         bookId: widget.showId,
         chapterId: _chapter.url,
         html: cleaned,
         force: true,
       );
+    }
+    if (tts != null && tts.state.totalSentences > 0) {
+      var resumeIndex = previousIndex.clamp(0, tts.state.totalSentences - 1);
+      if (previousSentence != null) {
+        var nearestDistance = 1 << 30;
+        for (var i = 0; i < tts.state.sentences.length; i++) {
+          if (tts.state.sentences[i].text != previousSentence) continue;
+          final distance = (i - previousIndex).abs();
+          if (distance < nearestDistance) {
+            resumeIndex = i;
+            nearestDistance = distance;
+          }
+        }
+      }
+      await tts.seek(resumeIndex);
     }
     // The page the reader was on no longer exists if what was hidden was part of
     // it, so re-anchor to the top rather than leaving them somewhere other than
@@ -454,6 +556,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// stops moving, the user grabs the scrollbar themselves (don't yank
   /// them), or a ~3s ceiling either way.
   void _restoreScrollPosition() {
+    if (_ttsRestoreFollowing) return;
     final saved = sl<ReadStore>().get(
       widget.sourceId,
       widget.showId,
@@ -604,7 +707,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         total: 1000,
         updatedMs: DateTime.now().millisecondsSinceEpoch,
         type: ProviderType.novel,
-      )
+      ),
     );
     if (sl<ReadStore>().finished(widget.sourceId, widget.showId, ep.id)) {
       _maybeScrobble(ep);
@@ -780,6 +883,37 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         html: html,
       );
     }
+    _restoreTtsSentence();
+  }
+
+  void _restoreTtsSentence() {
+    if (!widget.restoreTtsPosition || _ttsPositionRestored) return;
+    final tts = _tts;
+    if (tts == null) return;
+    _ttsPositionRestored = true;
+    _ttsRestoreFollowing = true;
+
+    if (tts.state.chapterId == _chapter.url && tts.state.isActive) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _followRestoredSentence(tts.state);
+      });
+      return;
+    }
+
+    final point = sl<TtsPrefs>().savedPosition(widget.showId);
+    if (point == null || point.chapterId != _chapter.url) return;
+    unawaited(tts.seek(tts.resolveResumeIndex(point)));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _followRestoredSentence(tts.state);
+    });
+  }
+
+  void _followRestoredSentence(TtsState state) {
+    if (_isPaginated) {
+      _maybeFollowTts(state);
+    } else {
+      _maybeFollowTtsScroll(state);
+    }
   }
 
   /// Segments the chapter against its *rendered* text and hands the result to
@@ -865,7 +999,9 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// not enough to hide it: the rule is matched per line, so the block decides
   /// which line of a chapter the sentence is on and a bare text match could
   /// take out a paragraph that merely contains the same words somewhere else.
-  ({String text, int blockIndex, int start, int end})? _sentenceAt(Offset global) {
+  ({String text, int blockIndex, int start, int end})? _sentenceAt(
+    Offset global,
+  ) {
     final layout = _scrollLayout;
     final prefs = sl<ReaderPrefs>();
     if (layout == null || layout.blocks.isEmpty) return null;
@@ -876,6 +1012,8 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     int chapterOffset;
     if (_isPaginated) {
       if (_pages.isEmpty) return null;
+      final bodyPosition = _readerBodyPosition(global);
+      if (bodyPosition == null) return null;
       final painter = TextPainter(
         text: _pages[_pageIndex.clamp(0, _pages.length - 1)],
         textDirection: Directionality.of(context),
@@ -883,7 +1021,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, global.dy - 32),
+        Offset(
+          bodyPosition.dx - prefs.marginWidth,
+          pageTextYForReaderPosition(
+            bodyY: bodyPosition.dy,
+            safeAreaTop: MediaQuery.paddingOf(context).top,
+            contentTopPadding: _readerContentVerticalPadding,
+          ),
+        ),
       );
       painter.dispose();
       // The page is a contiguous slice of the chapter, so the page's own start
@@ -899,9 +1044,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     } else {
       final offsets = _blockOffsets;
       if (offsets == null || !_scrollController.hasClients) return null;
-      // 32 is the `SliverPadding` above the first block, and the body sits under
-      // the system bars only after `SafeArea` has taken them out.
-      final topInContent = global.dy + _scrollController.position.pixels;
+      final bodyPosition = _readerBodyPosition(global);
+      if (bodyPosition == null) return null;
+      final topInContent = scrollContentYForReaderPosition(
+        bodyY: bodyPosition.dy,
+        safeAreaTop: MediaQuery.paddingOf(context).top,
+        scrollOffset: _scrollController.position.pixels,
+      );
       int? block;
       var yInBlock = 0.0;
       for (var b = 0; b + 1 < offsets.length; b++) {
@@ -924,7 +1073,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, yInBlock),
+        Offset(bodyPosition.dx - prefs.marginWidth, yInBlock),
       );
       painter.dispose();
       chapterOffset = layout.blocks[block].start + position.offset;
@@ -946,6 +1095,12 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     );
   }
 
+  Offset? _readerBodyPosition(Offset globalPosition) {
+    final renderObject = _readerHitTestKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    return renderObject.globalToLocal(globalPosition);
+  }
+
   /// The segmentation the long press is measured against.
   ///
   /// Prefers the one read-aloud is already using — it is the same list the
@@ -964,7 +1119,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     return alignChapter(layout, narrationFilter: false).sentences;
   }
 
-/// Body text style for the page - the one thing every renderer, the block
+  /// Body text style for the page - the one thing every renderer, the block
   /// measurements and the long-press hit test have to agree on.
   ///
   /// A second copy of this is not a shortcut, it is a bug waiting: a long press
@@ -1025,46 +1180,48 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     _undoHideSnack(rule, hit.text);
   }
 
-/// Confirms the hide and offers the one-tap way back, because a rule that
-/// deletes prose has to be reversible from where it was made — a settings
-/// screen three taps away is not "undo" when the thing that went wrong is one
-/// sentence of the chapter you are reading.
-///
-/// The bar is taken down by [Timer] rather than left to the SnackBar's own
-/// duration. A SnackBar carrying a [SnackBarAction] is not auto-dismissed on
-/// this Flutter version — it sat there until the app was restarted, which is
-/// exactly what it is supposed to be telling you is reversible. An explicit
-/// `duration` does not help, and neither does `SnackBarBehavior.floating`;
-/// hiding it through the messenger is the only thing that does. Five seconds is
-/// long enough to hit Undo and short enough that it is not in the way.
-void _undoHideSnack(TextFilterRule rule, String sentence) {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) return;
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text('Hidden everywhere: ${_shorten(sentence)}'),
-      action: SnackBarAction(
-        label: 'Undo',
-        onPressed: () {
-          _undoSnackTimer?.cancel();
-          final prefs = sl<ReaderPrefs>();
-          unawaited(prefs.removeTextFilterRule(rule.id).then((_) {
-            if (mounted) unawaited(_reapplyTextFilters());
-          }));
-        },
+  /// Confirms the hide and offers the one-tap way back, because a rule that
+  /// deletes prose has to be reversible from where it was made — a settings
+  /// screen three taps away is not "undo" when the thing that went wrong is one
+  /// sentence of the chapter you are reading.
+  ///
+  /// The bar is taken down by [Timer] rather than left to the SnackBar's own
+  /// duration. A SnackBar carrying a [SnackBarAction] is not auto-dismissed on
+  /// this Flutter version — it sat there until the app was restarted, which is
+  /// exactly what it is supposed to be telling you is reversible. An explicit
+  /// `duration` does not help, and neither does `SnackBarBehavior.floating`;
+  /// hiding it through the messenger is the only thing that does. Five seconds is
+  /// long enough to hit Undo and short enough that it is not in the way.
+  void _undoHideSnack(TextFilterRule rule, String sentence) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Hidden everywhere: ${_shorten(sentence)}'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            _undoSnackTimer?.cancel();
+            final prefs = sl<ReaderPrefs>();
+            unawaited(
+              prefs.removeTextFilterRule(rule.id).then((_) {
+                if (mounted) unawaited(_reapplyTextFilters());
+              }),
+            );
+          },
+        ),
       ),
-    ),
-  );
-  _undoSnackTimer?.cancel();
-  _undoSnackTimer = Timer(_undoSnackVisibleFor, () {
-    _undoSnackTimer = null;
-    if (mounted) messenger.hideCurrentSnackBar();
-  });
-}
+    );
+    _undoSnackTimer?.cancel();
+    _undoSnackTimer = Timer(_undoSnackVisibleFor, () {
+      _undoSnackTimer = null;
+      if (mounted) messenger.hideCurrentSnackBar();
+    });
+  }
 
-/// How long the Undo bar stays before the reader takes it down itself.
-static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
+  /// How long the Undo bar stays before the reader takes it down itself.
+  static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
 
   static String _shorten(String text) =>
       text.length > 40 ? '${text.substring(0, 40)}…' : text;
@@ -1087,6 +1244,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
               // Touch pauses; lifting resumes after a grace. See the manga
               // reader — stopping outright on a drag made a nudge fatal.
               child: Listener(
+                key: _readerHitTestKey,
                 onPointerDown: (_) => _autoScroll.pauseForTouch(),
                 onPointerUp: (_) => _autoScroll.resumeAfterTouch(),
                 onPointerCancel: (_) => _autoScroll.resumeAfterTouch(),
@@ -1105,6 +1263,8 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                       if (n.dragDetails != null) {
                         _lastManualScroll =
                             DateTime.now().millisecondsSinceEpoch;
+                        _manualTtsFollowNeeded = true;
+                        _ttsRestoreFollowing = false;
                       }
                       return false;
                     },
@@ -1152,6 +1312,21 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                   child: TtsPlayerBar(
                     cubit: _tts!,
                     onOpenSettings: _openTtsSheet,
+                    onOpenPlayer: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => TtsFullPlayer(
+                            cubit: _tts!,
+                            bookTitle: widget.showTitle,
+                            chapterTitle: () =>
+                                _chapterLabel(_index) ??
+                                'Chapter ${_index + 1}',
+                            cover: widget.cover,
+                            onOpenSettings: _openTtsSheet,
+                          ),
+                        ),
+                      );
+                    },
                     onClose: () {
                       setState(() => _ttsPanelOpen = false);
                       _tts?.stop();
@@ -1159,6 +1334,53 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                   ),
                 ),
               ),
+            ),
+          if (_tts != null)
+            AnimatedBuilder(
+              animation: Listenable.merge([_scrollController, _pageController]),
+              builder: (context, _) {
+                final state = _tts!.state;
+                final target = _isPaginated
+                    ? _ttsPageTarget(state)
+                    : _ttsScrollTarget(state);
+                if (!_manualTtsFollowNeeded ||
+                    (!state.isActive && !_ttsRestoreFollowing) ||
+                    target == null ||
+                    (_isPaginated && target == _pageIndex)) {
+                  return const SizedBox.shrink();
+                }
+                return Positioned(
+                  right: 16,
+                  bottom: _ttsPanelOpen ? 250 : 24,
+                  child: Semantics(
+                    button: true,
+                    label: 'Follow the currently read sentence',
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        _manualTtsFollowNeeded = false;
+                        _ttsRestoreFollowing = true;
+                        _lastManualScroll = 0;
+                        if (_isPaginated) {
+                          _maybeFollowTts(state);
+                        } else {
+                          _maybeFollowTtsScroll(state);
+                        }
+                      },
+                      icon: const Icon(Icons.my_location_rounded, size: 18),
+                      label: const Text('Follow narration'),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: TtsHighlightText.fillColor,
+                        foregroundColor: TtsHighlightText.textColor,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           if (prefs.autoScrollButton)
             ReaderAutoScrollButton(
@@ -1192,7 +1414,8 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
   /// talking to a source directly: that is the layer that already handles plugin
   /// routing, headers and per-source quirks, and duplicating it here would mean
   /// two code paths that drift.
-  String? _chapterLabel(int? i) {    if (i == null || i < 0 || i >= _chapters.length) return null;
+  String? _chapterLabel(int? i) {
+    if (i == null || i < 0 || i >= _chapters.length) return null;
     final t = _chapters[i].title.trim();
     return t.isNotEmpty ? t : 'Chapter ${chapterNumberLabel(_chapters, i)}';
   }
@@ -1323,7 +1546,10 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
         // ends up marking a different, shorter stretch of words than the voice is
         // reading: a highlight that stops mid-sentence and looks broken.
         final view = state.currentSentence;
-        final speaking = state.isActive && view != null && view.isHighlightable;
+        final speaking =
+            (state.isActive || _ttsRestoreFollowing) &&
+            view != null &&
+            view.isHighlightable;
         return _scrollBlockText(
           blockIndex,
           base,
@@ -1386,36 +1612,25 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
   /// below it, and someone who wants to read along has nowhere to look. Holding
   /// it near the middle leaves the text above *and* below on screen, which is
   /// what makes reading along possible at all.
-  void _maybeFollowTtsScroll(TtsState state) {
-    if (!state.isSpeaking) return;
-    if (_isPaginated) return; // paged mode turns the page instead
-    if (!sl<ReaderPrefs>().novelFollowNarration) return;
+  double? _ttsScrollTarget(TtsState state) {
     final layout = _scrollLayout;
     final offsets = _blockOffsets;
     final width = _blockWidth;
     final base = _blockStyle;
     if (layout == null || offsets == null || width == null || base == null) {
-      return;
+      return null;
     }
     // The same sentence the panel is quoting, so the view follows the words the
     // voice is actually on rather than a second segmentation's idea of them.
     final view = state.currentSentence;
-    if (view == null || !view.isHighlightable) return;
+    if (view == null || !view.isHighlightable) return null;
     final block = view.blockIndex;
-    if (block < 0 || block + 1 >= offsets.length) return;
-    if (!_scrollController.hasClients) return;
+    if (block < 0 || block + 1 >= offsets.length) return null;
+    if (!_scrollController.hasClients) return null;
 
     final position = _scrollController.position;
-    if (!position.hasContentDimensions) return;
+    if (!position.hasContentDimensions) return null;
 
-    // Their scroll wins for a moment. Yanking the page back mid-drag is the
-    // fastest way to make an auto-follow feel broken; after the grace the
-    // sentence takes over again, so pausing it does not mean switching it off.
-    final sinceScroll =
-        DateTime.now().millisecondsSinceEpoch - _lastManualScroll;
-    if (sinceScroll < _ttsScrollGraceMs) return;
-
-    final viewport = position.viewportDimension;
     final yInBlock = _sentenceTopInBlock(
       layout: layout,
       base: base,
@@ -1425,21 +1640,41 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
       end: view.end,
     );
 
-    // Only the first line matters: a long sentence spanning six lines cannot
-    // be centred, and chasing its middle would scroll the page on every one of
-    // its sentences.
-    final target = ttsFollowScrollTarget(
+    return ttsFollowScrollTarget(
       blockOffset: offsets[block],
       sentenceOffset: yInBlock,
       contentTopInset: _readerContentVerticalPadding,
       scrollOffset: position.pixels,
-      viewportHeight: viewport,
+      viewportHeight: position.viewportDimension,
       anchorFraction: _ttsFollowAnchor,
       toleranceFraction: _ttsFollowTolerance,
       minScrollExtent: position.minScrollExtent,
       maxScrollExtent: position.maxScrollExtent,
     );
+  }
+
+  void _maybeFollowTtsScroll(TtsState state) {
+    if (!state.isSpeaking && !_ttsRestoreFollowing) return;
+    if (_isPaginated) return; // paged mode turns the page instead
+    if (!sl<ReaderPrefs>().novelFollowNarration && !_ttsRestoreFollowing) {
+      return;
+    }
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+
+    // Their scroll wins for a moment. Yanking the page back mid-drag is the
+    // fastest way to make an auto-follow feel broken; after the grace the
+    // sentence takes over again, so pausing it does not mean switching it off.
+    final sinceScroll =
+        DateTime.now().millisecondsSinceEpoch - _lastManualScroll;
+    if (sinceScroll < _ttsScrollGraceMs && !_ttsRestoreFollowing) return;
+
+    // Only the first line matters: a long sentence spanning six lines cannot
+    // be centred, and chasing its middle would scroll the page on every one of
+    // its sentences.
+    final target = _ttsScrollTarget(state);
     if (target == null) return;
+    _manualTtsFollowNeeded = false;
     // Animated, so a sentence that starts a couple of lines lower glides there
     // instead of teleporting the text out from under the reader's eye.
     // New sentences can retarget an in-flight animation.
@@ -1539,22 +1774,19 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
 
   /// The page text, with the spoken sentence boxed when [rangeStart] is set.
   ///
-  /// The box replaces the old colour wash in both reader modes rather than
-  /// sitting on top of it: a red-tinted sentence inside a blue outline reads as
-  /// two different highlights fighting each other. One marker, one look, and the
-  /// same colours whichever mode the reader is in.
+  /// The soft fill replaces the old colour wash in both reader modes rather
+  /// than layering two competing highlights over the spoken sentence.
   Widget _pageText(
     TextSpan page,
     ReaderPrefs prefs, {
     int? rangeStart,
     int? rangeEnd,
-  }) =>
-      TtsHighlightText(
-        span: page,
-        textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
-        rangeStart: rangeStart,
-        rangeEnd: rangeEnd,
-      );
+  }) => TtsHighlightText(
+    span: page,
+    textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+    rangeStart: rangeStart,
+    rangeEnd: rangeEnd,
+  );
 
   /// The slice of the page currently on screen that the spoken sentence covers.
   ///
@@ -1570,7 +1802,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
     int pageIndex,
     TtsState ttsState,
   ) {
-    if (!ttsState.isActive) return null;
+    if (!ttsState.isActive && !_ttsRestoreFollowing) return null;
     final view = ttsState.currentSentence;
     if (view == null || !view.isHighlightable) return null;
     return pageSliceFor(pages, pageIndex, view.start, view.end);
@@ -1594,20 +1826,22 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
   /// paging themselves (see [_ttsPageTurnGraceMs]) so it assists rather than
   /// takes over.
   void _maybeFollowTts(TtsState state) {
-    final aligned = _ttsAligned;
     final pages = _pages;
-    if (aligned == null || pages.isEmpty || !state.isSpeaking) return;
+    if (_ttsAligned == null ||
+        pages.isEmpty ||
+        (!state.isSpeaking && !_ttsRestoreFollowing)) {
+      return;
+    }
 
-    final range = aligned.rangeAt(state.currentIndex);
-    if (range == null) return;
-    final target = pageIndexForRange(pages, range.start, range.end);
+    final target = _ttsPageTarget(state);
     if (target == null || target == _pageIndex) return;
 
     final since = DateTime.now().millisecondsSinceEpoch - _lastManualPageTurn;
-    if (since < _ttsPageTurnGraceMs) return;
+    if (since < _ttsPageTurnGraceMs && !_ttsRestoreFollowing) return;
     if (_ttsTurningPage) return;
 
     _ttsTurningPage = true;
+    _manualTtsFollowNeeded = false;
     // Post-frame: this is called from a builder, and jumping the controller
     // mid-build is not allowed.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1616,6 +1850,14 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
       if (_pageController.page?.round() == target) return;
       _pageController.jumpToPage(target);
     });
+  }
+
+  int? _ttsPageTarget(TtsState state) {
+    final aligned = _ttsAligned;
+    if (aligned == null || _pages.isEmpty) return null;
+    final range = aligned.rangeAt(state.currentIndex);
+    if (range == null) return null;
+    return pageIndexForRange(_pages, range.start, range.end);
   }
 
   /// Read-aloud settings: voice, speed, pitch, sleep timer, background
@@ -1678,12 +1920,10 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                                 .toDouble(),
                             min: TtsSpeed.min,
                             max: TtsSpeed.max,
-                            // 0.1 steps across 0.5-3.0, so the slider can
-                            // reach every tenth the chip does and the two never
-                            // show a speed the other cannot.
+                            // Fine-grained 0.1 steps across 0.5-3.0; the player
+                            // chip offers the simpler 1x–3x preset cycle.
                             divisions: 25,
-                            onChanged: (v) =>
-                                apply(() => tts.setRate(v)),
+                            onChanged: (v) => apply(() => tts.setRate(v)),
                           ),
                         ),
                         readerSheetRow(
@@ -1700,8 +1940,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                             min: 0.5,
                             max: 2.0,
                             divisions: 15,
-                            onChanged: (v) =>
-                                apply(() => tts.setPitch(v)),
+                            onChanged: (v) => apply(() => tts.setPitch(v)),
                           ),
                         ),
                         readerSheetRow(
@@ -1723,8 +1962,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                             // gives a slider that rests between two labels while
                             // showing one of them, which reads as a control that
                             // is not quite doing what it says.
-                            divisions:
-                                TtsSentenceGap.max - TtsSentenceGap.min,
+                            divisions: TtsSentenceGap.max - TtsSentenceGap.min,
                             onChanged: (v) =>
                                 apply(() => tts.setSentenceGap(v.round())),
                           ),
@@ -1760,7 +1998,8 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                         readerSheetGroup([
                           readerSheetRow(
                             icon: Icons.restore_rounded,
-                            label: 'Resume from sentence '
+                            label:
+                                'Resume from sentence '
                                 '${tts.resolveResumeIndex(point) + 1}',
                             onTap: () {
                               final index = tts.resolveResumeIndex(point);
@@ -1907,7 +2146,8 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
     );
   }
 
-  Widget _buildError(_ReaderTheme theme) {    return Center(
+  Widget _buildError(_ReaderTheme theme) {
+    return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
@@ -2600,7 +2840,10 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                             ),
                           ),
                         ),
-                        Text(context.l10n.readerSettings, style: AppText.headline),
+                        Text(
+                          context.l10n.readerSettings,
+                          style: AppText.headline,
+                        ),
                         readerSheetSection('Text'),
                         readerSheetGroup([
                           readerSheetRow(
@@ -3280,10 +3523,7 @@ class _ReaderTtsChapterSource implements TtsChapterSource {
       chapter.url,
       sourceId: _reader.widget.sourceId,
     );
-    return filterNovelHtml(
-      text.html,
-      sl<ReaderPrefs>().textFilterEngine,
-    );
+    return filterNovelHtml(text.html, sl<ReaderPrefs>().textFilterEngine);
   }
 
   /// The chapter's own URL, so an auto-advanced resume point names a chapter the

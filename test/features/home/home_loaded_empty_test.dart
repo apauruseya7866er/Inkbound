@@ -262,10 +262,15 @@ void main() {
     );
 
     testWidgets(
-      'novel mode, nothing installed: shows the install-CTA empty state, '
+      'novel-only novel mode with Z Mode on and nothing installed: '
+      'shows the install-CTA empty state, '
       'the button fires onInstallSources',
       (tester) async {
         var installTapped = false;
+        await tester.runAsync(() async {
+          await ZModePrefs.setEnabled(true);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
         await pumpEmptyView(
           tester,
           mode: ContentMode.novel,

@@ -13,10 +13,7 @@ import 'novel_html.dart';
 /// mapping out of both is what stops a highlight from drifting onto the wrong
 /// words after an unrelated change to either side.
 class TtsAlignedChapter {
-  const TtsAlignedChapter({
-    required this.layout,
-    required this.sentences,
-  });
+  const TtsAlignedChapter({required this.layout, required this.sentences});
 
   final NovelTextLayout layout;
 
@@ -98,7 +95,10 @@ TtsAlignedChapter alignChapter(
         )) {
       continue;
     }
-    for (final s in SentenceParser.parseRaw(slice, narrationFilter: narrationFilter)) {
+    for (final s in SentenceParser.parseRaw(
+      slice,
+      narrationFilter: narrationFilter,
+    )) {
       out.add(
         TtsSentence(
           text: s.text,
@@ -160,6 +160,21 @@ TtsAlignedChapter alignChapter(
   );
 }
 
+/// Converts a body-local touch y-coordinate to the scroll content coordinate
+/// used by measured block offsets.
+double scrollContentYForReaderPosition({
+  required double bodyY,
+  required double safeAreaTop,
+  required double scrollOffset,
+}) => bodyY - safeAreaTop + scrollOffset;
+
+/// Converts a body-local touch y-coordinate to the page text's local y.
+double pageTextYForReaderPosition({
+  required double bodyY,
+  required double safeAreaTop,
+  required double contentTopPadding,
+}) => bodyY - safeAreaTop - contentTopPadding;
+
 /// The spans for one block of [layout], with an optional highlighted range.
 ///
 /// ### Why scroll mode builds its own spans instead of using `HtmlWidget`
@@ -209,8 +224,7 @@ List<InlineSpan> novelBlockSpans(
     // characters. That is what keeps the block's plain text equal to the block's
     // slice of the layout text, which is the invariant the offsets rest on.
     final from = block.start > tokenStart ? block.start - tokenStart : 0;
-    final to =
-        block.end < tokenEnd ? block.end - tokenStart : t.text.length;
+    final to = block.end < tokenEnd ? block.end - tokenStart : t.text.length;
     if (to <= from) continue;
     spans.add(
       TextSpan(
@@ -472,8 +486,7 @@ TextSpan _applyRange(
           text: text.substring(from, to),
           style: base == null ? highlight : base.merge(highlight),
         ),
-        if (to < text.length)
-          TextSpan(text: text.substring(to), style: base),
+        if (to < text.length) TextSpan(text: text.substring(to), style: base),
       ],
     );
   }

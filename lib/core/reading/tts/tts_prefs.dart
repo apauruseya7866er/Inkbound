@@ -79,18 +79,21 @@ class TtsPrefs {
   Future<void> setVoiceName(String? value) => _box.put('voiceName', value);
 
   /// Speech rate multiplier, [TtsSpeed.min]–[TtsSpeed.max].
-  double get rate => _clampRate((_box.get('rate', defaultValue: 1.0) as num).toDouble());
+  double get rate =>
+      _clampRate((_box.get('rate', defaultValue: 1.0) as num).toDouble());
 
   Future<void> setRate(double value) => _box.put('rate', _clampRate(value));
 
   /// Pitch multiplier, 0.5–2.0.
-  double get pitch => _clampPitch((_box.get('pitch', defaultValue: 1.0) as num).toDouble());
+  double get pitch =>
+      _clampPitch((_box.get('pitch', defaultValue: 1.0) as num).toDouble());
 
   Future<void> setPitch(double value) => _box.put('pitch', _clampPitch(value));
 
   /// Stop after this many minutes. 0 means no timer.
   int get sleepTimerMinutes {
-    final value = (_box.get('sleepTimerMinutes', defaultValue: 0) as num).toInt();
+    final value = (_box.get('sleepTimerMinutes', defaultValue: 0) as num)
+        .toInt();
     return value < 0 ? 0 : value;
   }
 
@@ -125,17 +128,28 @@ class TtsPrefs {
   Future<void> setBackgroundPlayback(bool value) =>
       _box.put('backgroundPlayback', value);
 
+  /// Most recently narrated book, used to restore the reader from its
+  /// foreground-service notification after an app process restart.
+  String? get lastBookId => _box.get('resume.lastBook') as String?;
+
   /// Saved position for [bookId], or null when there is nothing to resume.
   TtsResumePoint? resumePoint(String bookId) {
+    final point = savedPosition(bookId);
+    return point != null && point.isResumable ? point : null;
+  }
+
+  /// Saved position even when the sentence is zero. The foreground
+  /// notification needs the exact current sentence, while the in-reader
+  /// "resume" offer intentionally skips a chapter that has barely begun.
+  TtsResumePoint? savedPosition(String bookId) {
     final chapterId = _box.get('resume.chapter.$bookId') as String?;
     final index = (_box.get('resume.sentence.$bookId') as num?)?.toInt();
     if (chapterId == null || index == null) return null;
-    final point = TtsResumePoint(
+    return TtsResumePoint(
       chapterId: chapterId,
       sentenceIndex: index,
       fingerprint: _box.get('resume.fingerprint.$bookId') as String?,
     );
-    return point.isResumable ? point : null;
   }
 
   Future<void> setResumePoint(
@@ -150,6 +164,7 @@ class TtsPrefs {
     // cleared together when a point is being removed.
     await _box.put('resume.chapter.$bookId', chapterId);
     await _box.put('resume.sentence.$bookId', sentenceIndex);
+    await _box.put('resume.lastBook', bookId);
     // Stored under the same book key as the index it belongs to, and written in
     // the same call, so the two cannot describe different sentences.
     await _box.put('resume.fingerprint.$bookId', fingerprint);
@@ -157,6 +172,7 @@ class TtsPrefs {
 
   Future<void> clearResumePoint(String bookId) async {
     if (bookId.isEmpty) return;
+    if (lastBookId == bookId) await _box.delete('resume.lastBook');
     await _box.delete('resume.chapter.$bookId');
     await _box.delete('resume.sentence.$bookId');
     await _box.delete('resume.fingerprint.$bookId');
@@ -194,11 +210,17 @@ class TtsPrefs {
 class TtsSpeed {
   TtsSpeed._();
 
-  /// The preset speeds, slowest first. Tighter spacing at the bottom of the
-  /// range, where the difference between 1.7 and 1.8 is the difference between
-  /// "comfortable" and "too fast to follow a long sentence".
+  /// The preset speeds, slowest first. Steps rise by 0.3 from 1x through 2.8x;
+  /// the final 3x preset is included as the explicit upper endpoint.
   static const List<double> presets = <double>[
-    1.0, 1.2, 1.3, 1.5, 1.7, 1.8, 2.0, 2.1, 2.3, 2.5, 3.0,
+    1.0,
+    1.3,
+    1.6,
+    1.9,
+    2.2,
+    2.5,
+    2.8,
+    3.0,
   ];
 
   /// Slowest rate accepted. Below this even the best engine turns to mumbling.
@@ -209,9 +231,8 @@ class TtsSpeed {
 
   /// Slack for comparing doubles.
   ///
-  /// 1.2 is not storable as exactly 1.2, so cycling from a rate that *is* 1.2
-  /// would otherwise compare "greater than itself" as true and hand back 1.2
-  /// again — a button that appears to do nothing.
+  /// Decimal presets are not stored exactly, so comparing with a small
+  /// tolerance prevents cycling from returning the same value.
   static const double _epsilon = 1e-6;
 
   /// The next preset above [current], wrapping round to the slowest.
@@ -228,7 +249,7 @@ class TtsSpeed {
     return presets.first;
   }
 
-  /// How [rate] is written on screen: "1x", "1.2x", "3x".
+  /// How [rate] is written on screen: "1x", "1.3x", "3x".
   ///
   /// Trailing ".0" is dropped so the chip stays narrow, and the same formatter
   /// serves the settings sheet so the two places cannot print the same speed

@@ -24,7 +24,7 @@ class ReaderPrefs {
   // ── Novel ───────────────────────────────────────────────────────────────
   /// Reader text size in logical pixels.
   double get fontSize =>
-      (_box.get('fontSize', defaultValue: 16.0) as num).toDouble();
+      (_box.get('fontSize', defaultValue: 17.0) as num).toDouble();
   Future<void> setFontSize(double value) => _box.put('fontSize', value);
 
   /// Line-height multiplier for reader body text.
@@ -57,8 +57,7 @@ class ReaderPrefs {
 
   /// Whether to keep the screen awake while reading. Shared by both readers
   /// via `ReaderComfortMixin`.
-  bool get keepScreenOn =>
-      _box.get('keepScreenOn', defaultValue: true) as bool;
+  bool get keepScreenOn => _box.get('keepScreenOn', defaultValue: true) as bool;
   Future<void> setKeepScreenOn(bool value) => _box.put('keepScreenOn', value);
 
   /// Hide the status and navigation bars while reading. Shared by both
@@ -114,8 +113,7 @@ class ReaderPrefs {
   /// On by default: someone reading a webtoon in paged mode gets a bad time
   /// and no clue why. A per-series direction override still wins — an explicit
   /// choice shouldn't be second-guessed.
-  bool get autoWebtoon =>
-      _box.get('autoWebtoon', defaultValue: true) as bool;
+  bool get autoWebtoon => _box.get('autoWebtoon', defaultValue: true) as bool;
   Future<void> setAutoWebtoon(bool value) => _box.put('autoWebtoon', value);
 
   /// Novel page background, 0 (black) to 1 (the theme's own colour).
@@ -200,8 +198,7 @@ class ReaderPrefs {
     };
   }
 
-  Future<void> setReadingMode(String value) =>
-      _box.put('readingMode', value);
+  Future<void> setReadingMode(String value) => _box.put('readingMode', value);
 
   // ── Tap zones ───────────────────────────────────────────────────────────
   /// What tapping each part of the page does, per reading mode. Stored as JSON
@@ -269,10 +266,9 @@ class ReaderPrefs {
   /// Screen brightness override, 0..1, or -1 for "system" — i.e. no
   /// override, matching the player's own default and today's reader
   /// behavior (the reader has never touched brightness before this).
-  double get brightness =>
-      (_box.get('brightness', defaultValue: -1.0) as num)
-          .toDouble()
-          .clamp(-1.0, 1.0);
+  double get brightness => (_box.get('brightness', defaultValue: -1.0) as num)
+      .toDouble()
+      .clamp(-1.0, 1.0);
   Future<void> setBrightness(double value) =>
       _box.put('brightness', value.clamp(-1.0, 1.0));
 
@@ -285,7 +281,7 @@ class ReaderPrefs {
   // ── Novel (typography) ─────────────────────────────────────────────────
   /// Body font family: 'inter' | 'serif' | 'system'.
   String get fontFamily =>
-      _box.get('fontFamily', defaultValue: 'inter') as String;
+      _box.get('fontFamily', defaultValue: 'serif') as String;
   Future<void> setFontFamily(String value) => _box.put('fontFamily', value);
 
   /// Whether body text is justified instead of ragged-edge.
@@ -381,7 +377,8 @@ class ReaderPrefs {
     }
     final rules = textFilterRules;
     final existing = rules.where(
-      (r) => r.pattern == TextFilterRule.hiddenSentence(trimmed, id: '').pattern,
+      (r) =>
+          r.pattern == TextFilterRule.hiddenSentence(trimmed, id: '').pattern,
     );
     if (existing.isNotEmpty) return existing.first;
 

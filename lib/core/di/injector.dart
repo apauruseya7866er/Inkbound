@@ -1019,17 +1019,13 @@ await TorrentPrefs.init();
   // Home data cubit as a singleton so the splash can warm it (preload the
   // rows for the active source) while the intro animation plays — Home then
   // appears already populated instead of flashing skeletons.
-  sl.registerLazySingleton<HomeCubit>(
-    () {
-      final cubit = HomeCubit(sl<CatalogueRepository>());
-      // Novel-only home is built from the pinned sources, so a pin/unpin has to
-      // refresh it. Bound here because a cubit with no listener would keep
-      // showing the previous source's catalogue until something else happened to
-      // reload the page.
-      cubit.bindPinnedSources();
-      return cubit;
-    },
-  );
+  sl.registerLazySingleton<HomeCubit>(() {
+    final cubit = HomeCubit(sl<CatalogueRepository>());
+    // Novel-only Home is built from every installed novel source. Refresh when
+    // the LNReader install box changes so adding/removing a source updates Home.
+    cubit.bindInstalledNovelSources();
+    return cubit;
+  });
 
   sl<MetadataRepository>().onStreamHomeCached = (kind, rows) {
     if (!sl.isRegistered<HomeCubit>()) return;
