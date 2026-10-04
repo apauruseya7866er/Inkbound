@@ -321,8 +321,8 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
         return super.dispatchKeyEvent(event)
     }
 
-    // Native notification taps are forwarded to Dart: new-episode alerts open
-    // Detail, while the read-aloud notification restores the active sentence.
+    // A "new episode" notification tapped while the app is already running:
+    // forward its payload to Dart so it opens that show's Detail.
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         flutterFragment.onNewIntent(intent)
@@ -330,10 +330,6 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
         intent.getStringExtra("notif_payload")?.let { payload ->
             notifChannel?.invokeMethod("openShow", payload)
             intent.removeExtra("notif_payload")
-        }
-        if (intent.getBooleanExtra("tts_notification_open", false)) {
-            notifChannel?.invokeMethod("openTtsReader", null)
-            intent.removeExtra("tts_notification_open")
         }
     }
 
@@ -598,14 +594,6 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
                         val payload = intent?.getStringExtra("notif_payload")
                         intent?.removeExtra("notif_payload") // consume once
                         result.success(payload)
-                    }
-                    "getInitialTtsNotificationOpen" -> {
-                        val opened = intent?.getBooleanExtra(
-                            "tts_notification_open",
-                            false,
-                        ) ?: false
-                        intent?.removeExtra("tts_notification_open")
-                        result.success(opened)
                     }
                     else -> result.notImplemented()
                 }

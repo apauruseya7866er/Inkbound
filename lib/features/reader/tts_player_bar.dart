@@ -23,13 +23,11 @@ class TtsPlayerBar extends StatelessWidget {
     super.key,
     required this.cubit,
     required this.onOpenSettings,
-    required this.onOpenPlayer,
     required this.onClose,
   });
 
   final TtsCubit cubit;
   final VoidCallback onOpenSettings;
-  final VoidCallback onOpenPlayer;
 
   /// Stops narration and dismisses the panel.
   final VoidCallback onClose;
@@ -119,34 +117,20 @@ class TtsPlayerBar extends StatelessWidget {
           // The sentence itself, so the user can see what is being read and not
           // have to trust the audio. Clipped to one line: the panel sits over the
           // text, and a paragraph-length quote would bury the page.
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  speaking.isEmpty ? 'Not reading yet' : speaking,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: speaking.isEmpty ? Colors.white54 : Colors.white,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: 'Open audiobook player',
-                visualDensity: VisualDensity.compact,
-                onPressed: onOpenPlayer,
-                icon: const Icon(Icons.open_in_full_rounded, size: 17),
-                color: Colors.white70,
-              ),
-            ],
+          Text(
+            speaking.isEmpty ? 'Not reading yet' : speaking,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: speaking.isEmpty ? Colors.white54 : Colors.white,
+              fontSize: 13,
+            ),
           ),
           const SizedBox(height: 2),
           _SeekBar(
             total: total,
             position: current,
             onSeek: canSeek ? cubit.seek : null,
-            onOpenPlayer: onOpenPlayer,
           ),
           const SizedBox(height: 2),
           Row(
@@ -187,7 +171,9 @@ class TtsPlayerBar extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           _icon(
-            state.isSpeaking ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            state.isSpeaking
+                ? Icons.pause_rounded
+                : Icons.play_arrow_rounded,
             state.isSpeaking ? 'Pause reading aloud' : 'Read aloud',
             () => cubit.toggle(),
             enabled: state.available && state.totalSentences > 0,
@@ -309,13 +295,11 @@ class _SeekBar extends StatefulWidget {
     required this.total,
     required this.position,
     required this.onSeek,
-    required this.onOpenPlayer,
   });
 
   final int total;
   final int position;
   final ValueChanged<int>? onSeek;
-  final VoidCallback onOpenPlayer;
 
   @override
   State<_SeekBar> createState() => _SeekBarState();
@@ -341,107 +325,36 @@ class _SeekBarState extends State<_SeekBar> {
     widget.onSeek?.call(value.round());
   }
 
-  void _seekAt(double dx, double width) {
-    if (widget.onSeek == null || widget.total <= 1 || width <= 0) return;
-    final progress = ((dx - 8) / (width - 16)).clamp(0.0, 1.0);
-    setState(() => _dragging = (progress * (widget.total - 1)).round());
-  }
-
   @override
   Widget build(BuildContext context) {
     final total = widget.total;
-    final current = _dragging ?? widget.position;
-    return Semantics(
-      button: true,
-      slider: total > 1,
-      label: 'Audiobook progress',
-      value: total > 0 ? 'Sentence ${current + 1} of $total' : 'No sentences',
-      onTap: widget.onOpenPlayer,
-      onIncrease: widget.onSeek == null || total <= 1
-          ? null
-          : () => widget.onSeek!(current < total - 1 ? current + 1 : current),
-      increasedValue: total > 0 ? 'Sentence ${current + 2} of $total' : null,
-      onDecrease: widget.onSeek == null || total <= 1
-          ? null
-          : () => widget.onSeek!(current > 0 ? current - 1 : current),
-      decreasedValue: total > 0
-          ? 'Sentence ${current == 0 ? 1 : current} of $total'
-          : null,
-      child: Tooltip(
-        message: 'Tap to open the audiobook player; drag to seek',
-        child: SizedBox(
-          height: 30,
-          child: LayoutBuilder(
-            builder: (context, constraints) => GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              key: const ValueKey('compact-tts-progress'),
-              onTap: widget.onOpenPlayer,
-              onHorizontalDragStart: widget.onSeek == null
-                  ? null
-                  : (details) =>
-                        _seekAt(details.localPosition.dx, constraints.maxWidth),
-              onHorizontalDragUpdate: widget.onSeek == null
-                  ? null
-                  : (details) =>
-                        _seekAt(details.localPosition.dx, constraints.maxWidth),
-              onHorizontalDragEnd: widget.onSeek == null || total <= 1
-                  ? null
-                  : (_) => _commit((_dragging ?? widget.position).toDouble()),
-              child: CustomPaint(
-                size: Size(constraints.maxWidth, 30),
-                painter: _SeekTrackPainter(
-                  progress: total <= 1 ? 0 : current / (total - 1),
-                ),
-              ),
-            ),
-          ),
+    if (total <= 1) {
+      // Nothing to scrub between; a disabled slider would still take taps.
+      return const SizedBox(height: 20);
+    }
+    final max = (total - 1).toDouble();
+    final value =
+        (_dragging ?? widget.position).toDouble().clamp(0, max).toDouble();
+    return SizedBox(
+      height: 20,
+      child: SliderTheme(
+        data: SliderTheme.of(context).copyWith(
+          trackHeight: 3,
+          activeTrackColor: Colors.white,
+          inactiveTrackColor: Colors.white24,
+          thumbColor: Colors.white,
+          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        ),
+        child: Slider(
+          value: value,
+          max: max,
+          onChanged: widget.onSeek == null
+              ? null
+              : (v) => setState(() => _dragging = v.round()),
+          onChangeEnd: widget.onSeek == null ? null : _commit,
         ),
       ),
     );
   }
-}
-
-class _SeekTrackPainter extends CustomPainter {
-  const _SeekTrackPainter({required this.progress});
-
-  final double progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const inset = 8.0;
-    const trackHeight = 3.0;
-    const thumbRadius = 5.0;
-    final centerY = size.height / 2;
-    final width = size.width - inset * 2;
-    final activeWidth = width * progress.clamp(0.0, 1.0);
-    final inactive = Paint()
-      ..color = Colors.white24
-      ..strokeWidth = trackHeight
-      ..strokeCap = StrokeCap.round;
-    final active = Paint()
-      ..color = Colors.white
-      ..strokeWidth = trackHeight
-      ..strokeCap = StrokeCap.round;
-    canvas.drawLine(
-      Offset(inset, centerY),
-      Offset(size.width - inset, centerY),
-      inactive,
-    );
-    if (activeWidth > 0) {
-      canvas.drawLine(
-        Offset(inset, centerY),
-        Offset(inset + activeWidth, centerY),
-        active,
-      );
-    }
-    canvas.drawCircle(
-      Offset(inset + activeWidth, centerY),
-      thumbRadius,
-      Paint()..color = Colors.white,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_SeekTrackPainter oldDelegate) =>
-      oldDelegate.progress != progress;
 }

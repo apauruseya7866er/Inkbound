@@ -32,9 +32,8 @@ void main() {
       expect(decodeTextFilterRules(encoded).map((r) => r.id), ['a', 'b']);
       // One corrupt entry costs one rule, not the set.
       expect(
-        decodeTextFilterRules(
-          '[{"id":"a","pattern":"x"},7,{"pattern":"z"}]',
-        ).map((r) => r.id),
+        decodeTextFilterRules('[{"id":"a","pattern":"x"},7,{"pattern":"z"}]')
+            .map((r) => r.id),
         ['a'],
       );
       expect(decodeTextFilterRules('not json'), isEmpty);
@@ -52,10 +51,9 @@ void main() {
         // rule matches the sentence rather than a pattern shaped like it.
         expect(rule.pattern, r'(?<![\w])The End \(vol\. 3\)\. Thanks!(?![\w])');
         expect(
-          RegExp(
-            rule.pattern,
-            caseSensitive: false,
-          ).hasMatch('  The End (vol. 3). Thanks!  '),
+          RegExp(rule.pattern, caseSensitive: false).hasMatch(
+            '  The End (vol. 3). Thanks!  ',
+          ),
           isTrue,
         );
       });
@@ -70,9 +68,7 @@ void main() {
         );
         final re = RegExp(rule.pattern, caseSensitive: false, multiLine: true);
         expect(
-          re.hasMatch(
-            'If you like it, read at novelsb.com! New chapters daily.',
-          ),
+          re.hasMatch('If you like it, read at novelsb.com! New chapters daily.'),
           isTrue,
         );
       });
@@ -167,10 +163,7 @@ void main() {
       test('leaves the rest of the chapter alone', () {
         const chapter =
             'The fight ended.\nJoin our discord for more\nThe sun rose.';
-        expect(
-          engine.stripFiltered(chapter),
-          'The fight ended.\nThe sun rose.',
-        );
+        expect(engine.stripFiltered(chapter), 'The fight ended.\nThe sun rose.');
       });
 
       test('does not fire mid-line', () {
@@ -290,7 +283,8 @@ void main() {
     });
 
     group('built-in rules', () {
-      TextFilterEngine builtins() => TextFilterEngine(builtinTextFilterRules);
+      TextFilterEngine builtins() =>
+          TextFilterEngine(builtinTextFilterRules);
 
       // Each of these is a real injected line from a real source, which is the
       // only test data worth having: an ad that does not look like the ads in
@@ -298,13 +292,6 @@ void main() {
       const cases = <String, String>{
         'Discord invite': 'Join our discord for more chapters!',
         'Patreon': 'Please support me on Patreon',
-        'obfuscated Patreon footer':
-            'AN: Check out my P@treon For +40 extra Chapters.',
-        'creator Patreon support':
-            'Support the creator on Patreon for bonus chapters.',
-        'author Patreon support': 'Please support the author via Patreon!',
-        'my Patreon request': 'Donate to my Patreon for extra chapters.',
-        'support my writing': 'Please support my writing to help me continue.',
         'my patreon': 'My Patreon: patreon.com/someone',
         'Ko-fi line': 'ko-fi.com/someone',
         'donation plea': 'Please support me!',
@@ -380,15 +367,14 @@ void main() {
       test('the underline under a markdown heading goes, the title stays', () {
         // `Title\n=====` is a heading, and taking only the rule is correct:
         // the title is content.
-        const chapter =
-            'Chapter 12\n====================\nThe rain had not stopped.';
+        const chapter = 'Chapter 12\n====================\nThe rain had not stopped.';
         expect(
           builtins().stripFiltered(chapter),
           'Chapter 12\nThe rain had not stopped.',
         );
       });
 
-      test('the rule above an obfuscated Patreon ad is removed with it', () {
+      test('the rule above an ad is removed with it', () {
         const chapter =
             'This training was the same method Kitazawa used on Hinata.\n'
             '\n'
@@ -399,7 +385,8 @@ void main() {
         expect(out, isNot(contains('---')));
         expect(
           out,
-          'This training was the same method Kitazawa used on Hinata.',
+          'This training was the same method Kitazawa used on Hinata.\n'
+          'AN: Check out my P@treon For +40 extra Chapters.',
         );
       });
 
@@ -411,15 +398,6 @@ void main() {
         expect(
           builtins().stripFiltered('chat with us at discord.gg/abcd'),
           'chat with us at',
-        );
-      });
-
-      test('removes an appended Patreon request but keeps earlier prose', () {
-        expect(
-          builtins().stripFiltered(
-            'She closed the book. Support the creator on Patreon for bonus chapters.',
-          ),
-          'She closed the book.',
         );
       });
 

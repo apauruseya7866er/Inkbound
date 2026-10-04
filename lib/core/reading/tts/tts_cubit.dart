@@ -19,19 +19,21 @@ import 'tts_state.dart';
 /// controller — including event ordering and resume persistence — is testable
 /// against a fake on a machine with no speech engine.
 class TtsCubit extends Cubit<TtsState> {
-  TtsCubit({required TtsPlatform platform, required TtsPrefs prefs})
-    : _platform = platform,
-      _prefs = prefs,
-      super(
-        TtsState(
-          voiceName: prefs.voiceName,
-          rate: prefs.rate,
-          pitch: prefs.pitch,
-          sleepTimerMinutes: prefs.sleepTimerMinutes,
+  TtsCubit({
+    required TtsPlatform platform,
+    required TtsPrefs prefs,
+  }) : _platform = platform,
+       _prefs = prefs,
+       super(
+         TtsState(
+           voiceName: prefs.voiceName,
+           rate: prefs.rate,
+           pitch: prefs.pitch,
+           sleepTimerMinutes: prefs.sleepTimerMinutes,
           sentenceGap: prefs.sentenceGap,
-          backgroundPlayback: prefs.backgroundPlayback,
-        ),
-      ) {
+           backgroundPlayback: prefs.backgroundPlayback,
+         ),
+       ) {
     _subscription = _platform.events.listen(_onEvent, onError: _onStreamError);
     unawaited(_initialiseEngine());
   }
@@ -308,8 +310,9 @@ class TtsCubit extends Cubit<TtsState> {
     await _platform.stopService();
   }
 
-  String _notificationTitle() =>
-      _workTitle.isEmpty ? 'Reading aloud' : 'Reading $_workTitle';
+  String _notificationTitle() => _workTitle.isEmpty
+      ? 'Reading aloud'
+      : 'Reading $_workTitle';
 
   /// Pushes the sentence being read to the notification.
   ///
@@ -329,7 +332,11 @@ class TtsCubit extends Cubit<TtsState> {
   /// Speaks the loaded chapter from [from], defaulting to the current sentence.
   Future<void> play({int? from}) async {
     if (_loaded.isEmpty) {
-      emit(state.copyWith(errorMessage: 'Nothing to read in this chapter'));
+      emit(
+        state.copyWith(
+          errorMessage: 'Nothing to read in this chapter',
+        ),
+      );
       return;
     }
 
@@ -339,10 +346,7 @@ class TtsCubit extends Cubit<TtsState> {
       unawaited(_initialiseEngine());
     }
 
-    final startIndex = (from ?? state.currentIndex).clamp(
-      0,
-      _loaded.length - 1,
-    );
+    final startIndex = (from ?? state.currentIndex).clamp(0, _loaded.length - 1);
     emit(
       state.copyWith(
         status: TtsStatus.speaking,
@@ -421,24 +425,21 @@ class TtsCubit extends Cubit<TtsState> {
   /// no longer on screen — the position in the chapter being left is still
   /// somewhere the user may want to come back to, so it is kept.
   Future<void> stop({bool clearPosition = true}) async {
+    await _platform.stop();
     _cancelSleepTimer();
     emit(state.copyWith(status: TtsStatus.idle, currentIndex: 0));
     // The prefetched chapter belongs to the run being abandoned.
     _autoAdvance?.invalidate();
-    try {
-      await _platform.stop();
-    } finally {
-      await _tearDownService();
-      if (!clearPosition) {
-        await _flushPosition();
-      } else {
-        // The pending position is discarded, so cancel the timer before
-        // clearing the box: otherwise a queued write could land after the clear
-        // and resurrect the point the user just stopped.
-        _cancelPendingPosition();
-        await _prefs.clearResumePoint(state.bookId);
-      }
+    await _tearDownService();
+    if (!clearPosition) {
+      await _flushPosition();
+      return;
     }
+    // The pending position is discarded, so cancel the timer before clearing
+    // the box: otherwise a queued write could land after the clear and
+    // resurrect the point the user just stopped.
+    _cancelPendingPosition();
+    await _prefs.clearResumePoint(state.bookId);
   }
 
   /// Jumps to [index] and, if speech is running, restarts from there.
@@ -525,7 +526,6 @@ class TtsCubit extends Cubit<TtsState> {
     // the top of the chapter in the morning is the wrong default.
     if (state.isSpeaking) await pause();
   }
-
   void _cancelSleepTimer() {
     _sleepTimer?.cancel();
     _sleepTimer = null;
@@ -540,7 +540,9 @@ class TtsCubit extends Cubit<TtsState> {
   /// than the write that failed.
   void _fireAndForgetWrite(Future<void> write, String what) {
     unawaited(
-      write.catchError((Object e) => debugPrint('[TtsCubit] $what failed: $e')),
+      write.catchError(
+        (Object e) => debugPrint('[TtsCubit] $what failed: $e'),
+      ),
     );
   }
 
@@ -571,9 +573,7 @@ class TtsCubit extends Cubit<TtsState> {
         // A failed sentence is skipped by the engine, which keeps reading, so
         // this is a warning rather than a stop. Silence here would be a lie.
         debugPrint('[TtsCubit] sentence $index failed with code $code');
-        emit(
-          state.copyWith(errorMessage: 'Skipped a sentence it could not read'),
-        );
+        emit(state.copyWith(errorMessage: 'Skipped a sentence it could not read'));
 
       case TtsPaused(:final index):
         if (_loaded.isEmpty) return;
@@ -641,7 +641,9 @@ class TtsCubit extends Cubit<TtsState> {
                 _ => TtsStatus.idle,
               }
             : TtsStatus.unavailable,
-        errorMessage: ready ? null : 'No text-to-speech voice is installed',
+        errorMessage: ready
+            ? null
+            : 'No text-to-speech voice is installed',
         clearError: ready,
       ),
     );
@@ -860,8 +862,8 @@ class TtsCubit extends Cubit<TtsState> {
     return _prefs
         .setResumePoint(bookId, chapterId, index, fingerprint: fingerprint)
         .catchError((Object e) {
-          debugPrint('[TtsCubit] resume write failed: $e');
-        });
+      debugPrint('[TtsCubit] resume write failed: $e');
+    });
   }
 
   void _cancelPendingPosition() {

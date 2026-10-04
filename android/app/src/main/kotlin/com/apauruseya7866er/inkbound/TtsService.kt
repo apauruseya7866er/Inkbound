@@ -365,7 +365,6 @@ class TtsService : Service() {
     private fun contentIntent(): PendingIntent? {
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return null
         launch.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        launch.putExtra("tts_notification_open", true)
         return PendingIntent.getActivity(
             this,
             REQ_CONTENT,

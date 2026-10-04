@@ -85,7 +85,6 @@ void main() {
       final point = prefs.resumePoint('b1');
       expect(point?.chapterId, 'c1');
       expect(point?.sentenceIndex, 12);
-      expect(prefs.lastBookId, 'b1');
     });
 
     test('sentence zero is not offered as resumable', () async {
@@ -93,7 +92,6 @@ void main() {
       // A book stopped at the very start of a chapter has nothing to resume;
       // offering it makes the feature look broken.
       expect(prefs.resumePoint('b1'), isNull);
-      expect(prefs.savedPosition('b1')?.sentenceIndex, 0);
     });
 
     test('points are kept per book', () async {
@@ -114,16 +112,11 @@ void main() {
       await prefs.setResumePoint('b1', 'c1', 5);
       await prefs.clearResumePoint('b1');
       expect(prefs.resumePoint('b1'), isNull);
-      expect(prefs.lastBookId, isNull);
     });
 
     test('the fingerprint round-trips with the point', () async {
-      await prefs.setResumePoint(
-        'b1',
-        'c1',
-        12,
-        fingerprint: TtsResumePoint.fingerprintOf('He drew his blade.'),
-      );
+      await prefs.setResumePoint('b1', 'c1', 12,
+          fingerprint: TtsResumePoint.fingerprintOf('He drew his blade.'));
       expect(
         prefs.resumePoint('b1')?.fingerprint,
         TtsResumePoint.fingerprintOf('He drew his blade.'),
@@ -154,14 +147,12 @@ void main() {
       expect(prefs.resumePoint('b2'), isNotNull);
     });
 
-    test(
-      'an empty book id is ignored rather than creating a junk key',
-      () async {
-        await prefs.setResumePoint('', 'c1', 5);
-        await prefs.clearResumePoint('');
-        expect(prefs.resumePoint(''), isNull);
-      },
-    );
+    test('an empty book id is ignored rather than creating a junk key',
+        () async {
+      await prefs.setResumePoint('', 'c1', 5);
+      await prefs.clearResumePoint('');
+      expect(prefs.resumePoint(''), isNull);
+    });
 
     test('a chapter with no index reads as no point', () async {
       // Simulates a half-written pair, e.g. an interrupted first write.
@@ -172,7 +163,9 @@ void main() {
 
   group('speed presets', () {
     test('the list is the one that was asked for, slowest first', () {
-      expect(TtsSpeed.presets, [1.0, 1.3, 1.6, 1.9, 2.2, 2.5, 2.8, 3.0]);
+      expect(TtsSpeed.presets, [
+        1.0, 1.2, 1.3, 1.5, 1.7, 1.8, 2.0, 2.1, 2.3, 2.5, 3.0,
+      ]);
     });
 
     test('the list only grows', () {
@@ -195,10 +188,10 @@ void main() {
     });
 
     test('tapping walks up the list and wraps at the top', () {
-      expect(TtsSpeed.next(1.0), 1.3);
-      expect(TtsSpeed.next(1.3), 1.6);
-      expect(TtsSpeed.next(2.5), 2.8);
-      expect(TtsSpeed.next(2.8), 3.0);
+      expect(TtsSpeed.next(1.0), 1.2);
+      expect(TtsSpeed.next(1.2), 1.3);
+      expect(TtsSpeed.next(2.3), 2.5);
+      expect(TtsSpeed.next(2.5), 3.0);
       // Past the last preset there is nowhere to go but back to the start.
       expect(TtsSpeed.next(3.0), 1.0);
     });
@@ -215,7 +208,7 @@ void main() {
       // Set with the slider. "Faster" has to mean faster, or the button feels
       // broken at exactly the rates a person is likely to have chosen.
       expect(TtsSpeed.next(1.25), 1.3);
-      expect(TtsSpeed.next(1.44), 1.6);
+      expect(TtsSpeed.next(1.44), 1.5);
       expect(TtsSpeed.next(2.95), 3.0);
     });
 
@@ -225,8 +218,8 @@ void main() {
     });
 
     test('cycling from a stored preset does not return the same value', () {
-      // Preset values are not storable as their exact decimal representation,
-      // so a naive "greater than" would hand back the same value.
+      // 1.2 is not storable as exactly 1.2, so a naive "greater than" would
+      // hand back 1.2 and the button would appear to do nothing.
       for (final value in TtsSpeed.presets) {
         expect(
           TtsSpeed.next(value),
@@ -244,35 +237,31 @@ void main() {
 
     test('labels drop the trailing zero so the chip stays narrow', () {
       expect(TtsSpeed.label(1.0), '1x');
+      expect(TtsSpeed.label(1.2), '1.2x');
       expect(TtsSpeed.label(1.3), '1.3x');
       expect(TtsSpeed.label(2.0), '2x');
       expect(TtsSpeed.label(3.0), '3x');
-      // A slider position that is not a tenth, e.g. 1.3499.
-      expect(TtsSpeed.label(1.3499), '1.3x');
+      // A slider position that is not a tenth, e.g. 1.2499.
+      expect(TtsSpeed.label(1.2499), '1.2x');
     });
 
     test('every preset has a label that reads back as itself', () {
       for (final value in TtsSpeed.presets) {
         final text = TtsSpeed.label(value);
         expect(text, endsWith('x'));
-        expect(
-          double.parse(text.substring(0, text.length - 1)),
-          closeTo(value, 0.051),
-        );
+        expect(double.parse(text.substring(0, text.length - 1)),
+            closeTo(value, 0.051));
       }
     });
   });
 
   group('rate range', () {
-    test(
-      'a fast rate is kept, not clamped back to the old 2.0 ceiling',
-      () async {
-        await prefs.setRate(3.0);
-        expect(prefs.rate, 3.0);
-        await prefs.setRate(2.5);
-        expect(prefs.rate, 2.5);
-      },
-    );
+    test('a fast rate is kept, not clamped back to the old 2.0 ceiling', () async {
+      await prefs.setRate(3.0);
+      expect(prefs.rate, 3.0);
+      await prefs.setRate(2.5);
+      expect(prefs.rate, 2.5);
+    });
 
     test('rates beyond the ceiling are pulled back to it', () async {
       await prefs.setRate(9.0);

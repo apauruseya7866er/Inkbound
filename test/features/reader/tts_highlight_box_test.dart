@@ -4,10 +4,8 @@ import 'package:watch_app/features/reader/novel_html.dart';
 import 'package:watch_app/features/reader/tts_alignment.dart';
 import 'package:watch_app/features/reader/tts_highlight_box.dart';
 
-TextSpan _span(String text, {double size = 14}) => TextSpan(
-  text: text,
-  style: TextStyle(fontSize: size),
-);
+TextSpan _span(String text, {double size = 14}) =>
+    TextSpan(text: text, style: TextStyle(fontSize: size));
 
 void main() {
   group('ttsHighlightBoxes', () {
@@ -28,9 +26,8 @@ void main() {
         text: _span(text),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: 400);
-      final expected = painter.getBoxesForSelection(
-        const TextSelection(baseOffset: 3, extentOffset: 14),
-      );
+      final expected =
+          painter.getBoxesForSelection(const TextSelection(baseOffset: 3, extentOffset: 14));
       painter.dispose();
 
       expect(boxes.single.left, closeTo(expected.first.left, 0.01));
@@ -51,8 +48,8 @@ void main() {
       );
       expect(boxes.length, greaterThan(1));
 
-      // Stacked, not overlapping: the painter applies a separate soft fill to
-      // each line touched by the phrase.
+      // Stacked, not overlapping: a box per line is what gets unioned into the
+      // single outline around the phrase.
       for (var i = 1; i < boxes.length; i++) {
         expect(boxes[i].top, greaterThanOrEqualTo(boxes[i - 1].bottom - 0.01));
       }
@@ -121,8 +118,10 @@ void main() {
 
   group('ttsHighlightRect', () {
     // The exact boxes a real device produced for a sentence wrapping over three
-    // lines. Regression fixture for the union helper retained for geometry
-    // assertions; the painter now fills individual lines.
+    // lines. Regression fixture: the first version of the painter unioned them
+    // with `Rect.expandToInclude`, which mutates its receiver, and on device the
+    // outline came out around the first line only — the sentence looked half
+    // highlighted. The union is now computed with plain comparisons.
     final wrapped = <Rect>[
       const Rect.fromLTRB(79, 96, 286, 114),
       const Rect.fromLTRB(0, 119, 320, 137),
@@ -163,8 +162,10 @@ void main() {
 
   group('TtsHighlightText', () {
     Widget wrap(Widget child) => MaterialApp(
-      home: Scaffold(body: SizedBox(width: 300, child: child)),
-    );
+          home: Scaffold(
+            body: SizedBox(width: 300, child: child),
+          ),
+        );
 
     testWidgets('paints a box only when a range is given', (tester) async {
       // Scoped to the widget: MaterialApp and Scaffold bring their own
@@ -179,24 +180,20 @@ void main() {
           .painter;
 
       await tester.pumpWidget(
-        wrap(
-          TtsHighlightText(
-            span: _span('A sentence to be marked, and more text after it.'),
-            textAlign: TextAlign.start,
-          ),
-        ),
+        wrap(TtsHighlightText(
+          span: _span('A sentence to be marked, and more text after it.'),
+          textAlign: TextAlign.start,
+        )),
       );
       expect(painterUnderTest(), isNull);
 
       await tester.pumpWidget(
-        wrap(
-          TtsHighlightText(
-            span: _span('A sentence to be marked, and more text after it.'),
-            textAlign: TextAlign.start,
-            rangeStart: 2,
-            rangeEnd: 10,
-          ),
-        ),
+        wrap(TtsHighlightText(
+          span: _span('A sentence to be marked, and more text after it.'),
+          textAlign: TextAlign.start,
+          rangeStart: 2,
+          rangeEnd: 10,
+        )),
       );
       expect(painterUnderTest(), isNotNull);
     });
@@ -204,56 +201,19 @@ void main() {
     testWidgets('still renders the text itself', (tester) async {
       const text = 'The words have to survive the decoration.';
       await tester.pumpWidget(
-        wrap(
-          TtsHighlightText(
-            span: _span(text),
-            textAlign: TextAlign.start,
-            rangeStart: 4,
-            rangeEnd: 9,
-          ),
-        ),
+        wrap(TtsHighlightText(
+          span: _span(text),
+          textAlign: TextAlign.start,
+          rangeStart: 4,
+          rangeEnd: 9,
+        )),
       );
       expect(find.textContaining(text, findRichText: true), findsOneWidget);
     });
-
-    testWidgets(
-      'uses a soft lavender fill and dark text for the active range',
-      (tester) async {
-        const text = 'A sentence to highlight, and more text after it.';
-        await tester.pumpWidget(
-          wrap(
-            TtsHighlightText(
-              span: _span(text),
-              textAlign: TextAlign.start,
-              rangeStart: 2,
-              rangeEnd: 10,
-            ),
-          ),
-        );
-        final richText = tester.widget<RichText>(find.byType(RichText));
-        expect(richText.text.toPlainText(), text);
-        expect(TtsHighlightText.fillColor, const Color(0xFFDDE1FC));
-        expect(TtsHighlightText.textColor, const Color(0xFF292A45));
-
-        final highlighted = <TextSpan>[];
-        void visit(InlineSpan span) {
-          if (span is! TextSpan) return;
-          if (span.style?.color == TtsHighlightText.textColor) {
-            highlighted.add(span);
-          }
-          span.children?.forEach(visit);
-        }
-
-        visit(richText.text);
-        expect(highlighted, hasLength(1));
-        expect(highlighted.single.toPlainText(), 'sentence');
-      },
-    );
   });
 
   group('range helpers', () {
-    const html =
-        '<p>First block of the chapter.</p>'
+    const html = '<p>First block of the chapter.</p>'
         '<p>Second block here, with more words in it.</p>'
         '<p>Third and last block.</p>';
 

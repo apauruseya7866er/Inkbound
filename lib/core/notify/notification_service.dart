@@ -25,9 +25,8 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
   final Dio _dio = Dio();
   // Native (CS worker) notification taps come over this channel.
-  static const MethodChannel _notifChannel = MethodChannel(
-    'zangetsu/notifications',
-  );
+  static const MethodChannel _notifChannel =
+      MethodChannel('zangetsu/notifications');
   bool _inited = false;
 
   Future<void> init() async {
@@ -67,8 +66,6 @@ class NotificationService {
     _notifChannel.setMethodCallHandler((call) async {
       if (call.method == 'openShow') {
         await openShowFromNotification(call.arguments as String?);
-      } else if (call.method == 'openTtsReader') {
-        await openTtsReaderFromNotification();
       }
     });
     final d = await _plugin.getNotificationAppLaunchDetails();
@@ -80,12 +77,6 @@ class NotificationService {
         'getInitialNotification',
       );
       await openShowFromNotification(native);
-    } catch (_) {}
-    try {
-      final openTtsReader = await _notifChannel.invokeMethod<bool>(
-        'getInitialTtsNotificationOpen',
-      );
-      if (openTtsReader == true) await openTtsReaderFromNotification();
     } catch (_) {}
   }
 
@@ -207,9 +198,7 @@ class NotificationService {
       );
       final bytes = res.data;
       if (bytes == null || bytes.isEmpty) return null;
-      final file = File(
-        '${Directory.systemTemp.path}/notif_${url.hashCode}.img',
-      );
+      final file = File('${Directory.systemTemp.path}/notif_${url.hashCode}.img');
       await file.writeAsBytes(bytes);
       return FilePathAndroidBitmap(file.path);
     } catch (_) {

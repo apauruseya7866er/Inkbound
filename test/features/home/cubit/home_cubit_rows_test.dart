@@ -12,8 +12,6 @@ import 'package:watch_app/core/repository/catalogue_repository.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/di/injector.dart';
-import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
-import 'package:watch_app/core/lnreader/lnreader_manager.dart';
 import 'package:watch_app/core/ui/home_rows_prefs.dart';
 import 'package:watch_app/core/zmode/metadata_provider_prefs.dart';
 import 'package:watch_app/core/zmode/zmode_prefs.dart';
@@ -56,14 +54,12 @@ MediaItem _item(String t) => MediaItem(
 );
 
 class _StubRepo implements CatalogueRepository {
-  _StubRepo(this._sections, {this.homeForSource});
+  _StubRepo(this._sections);
 
   final List<HomeSection> _sections;
-  final List<HomeSection> Function(String? sourceId)? homeForSource;
 
   /// How many times the provider was actually asked for its home.
   int homeCount = 0;
-  final sourceIds = <String?>[];
 
   @override
   Future<List<HomeSection>> home({
@@ -71,8 +67,7 @@ class _StubRepo implements CatalogueRepository {
     String? sourceId,
   }) async {
     homeCount++;
-    sourceIds.add(sourceId);
-    return homeForSource?.call(sourceId) ?? _sections;
+    return _sections;
   }
 
   @override
@@ -144,38 +139,16 @@ TrackerListItem _entry(
 
 void main() {
   late Directory dir;
-  const sourceMeta = LnReaderPluginMeta(
-    id: 'test-source',
-    name: 'Test Source',
-    site: 'https://example.com',
-    lang: 'en',
-    version: '1.0.0',
-    url: 'https://example.com/source.js',
-    iconUrl: '',
-  );
 
   setUp(() async {
     dir = await Directory.systemTemp.createTemp('home_cubit_rows_test');
     Hive.init(dir.path);
     await ZModePrefs.init(); // on + novel (the only mode) → 'anilist::novel'
     await HomeRowsPrefs.init();
-    await Hive.openBox<Map>(LnReaderExtensionService.boxName);
-    await Hive.box<Map>(
-      LnReaderExtensionService.boxName,
-    ).put(sourceMeta.id, {...sourceMeta.toMap(), 'js': ''});
-    sl.registerSingleton<LnReaderManager>(
-      LnReaderManager(
-        service: LnReaderExtensionService(httpGet: (_) async => ''),
-        fetch: (_, _) async => throw StateError('unexpected network call'),
-      ),
-    );
   });
 
   tearDown(() async {
     HomeRowsPrefs.revision.value = 0;
-    if (sl.isRegistered<LnReaderManager>()) {
-      await sl.unregister<LnReaderManager>();
-    }
     await Hive.close();
     await dir.delete(recursive: true);
   });
@@ -193,8 +166,8 @@ void main() {
     expect(repo.homeCount, 1);
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue',
-      'section:Test Source · Trending',
-      'section:Test Source · Popular',
+      'section:Trending',
+      'section:Popular',
     ]);
 
     // What the editor does: save an arrangement, then let the revision bump
@@ -202,15 +175,15 @@ void main() {
     await HomeRowsPrefs.save('anilist::novel', [
       'tracker:watching',
       'local:continue',
-      '!section:Test Source · Trending',
-      'section:Test Source · Popular',
+      '!section:Trending',
+      'section:Popular',
     ]);
     cubit.relayout();
 
     expect(cubit.state.rows?.map((r) => r.id), [
       'tracker:watching',
       'local:continue',
-      'section:Test Source · Popular',
+      'section:Popular',
     ]);
     // The point of relayout: no second provider round trip, and the cached
     // library serves the tracker row rather than a second list read.
@@ -230,94 +203,6 @@ void main() {
     expect(repo.homeCount, 0);
   });
 
-  test('loads every installed novel source and each non-empty feed', () async {
-    const secondSource = LnReaderPluginMeta(
-      id: 'second-source',
-      name: 'Second Source',
-      site: 'https://second.example.com',
-      lang: 'en',
-      version: '1.0.0',
-      url: 'https://second.example.com/source.js',
-      iconUrl: '',
-    );
-    await Hive.box<Map>(
-      LnReaderExtensionService.boxName,
-    ).put(secondSource.id, {...secondSource.toMap(), 'js': ''});
-    final repo = _StubRepo(
-      const [],
-      homeForSource: (sourceId) => [
-        HomeSection(
-          title: 'Popular',
-          items: [_item('Popular')],
-          more: BrowseMore(sourceId: sourceId!, kind: 'popular'),
-        ),
-        HomeSection(
-          title: 'Latest',
-          items: [_item('Latest')],
-          more: BrowseMore(sourceId: sourceId, kind: 'latest'),
-        ),
-      ],
-    );
-    final cubit = HomeCubit(repo);
-    addTearDown(cubit.close);
-
-    await cubit.load();
-
-    expect(repo.sourceIds, ['lnr:second-source', 'lnr:test-source']);
-    expect(cubit.state.sections?.map((section) => section.title), [
-      'Second Source · Popular',
-      'Second Source · Latest',
-      'Test Source · Popular',
-      'Test Source · Latest',
-    ]);
-    expect(cubit.state.sections!.map((section) => section.more!.sourceId), [
-      'lnr:second-source',
-      'lnr:second-source',
-      'lnr:test-source',
-      'lnr:test-source',
-    ]);
-  });
-
-  test('no installed novel sources never fetch the AniList catalogue', () async {
-    await Hive.box<Map>(LnReaderExtensionService.boxName).clear();
-    final repo = _StubRepo([_zmSection('Trending')]);
-    final cubit = HomeCubit(repo);
-    addTearDown(cubit.close);
-
-    await cubit.load();
-
-    expect(repo.homeCount, 0);
-    expect(cubit.state.sections, isEmpty);
-    expect(cubit.state.heroItems, isEmpty);
-  });
-
-  test('refreshes Home when a novel source is installed', () async {
-    final repo = _StubRepo([_zmSection('Popular')]);
-    final cubit = HomeCubit(repo)..bindInstalledNovelSources();
-    addTearDown(cubit.close);
-
-    await cubit.load();
-    expect(repo.homeCount, 1);
-
-    await Hive.box<Map>(LnReaderExtensionService.boxName).put('new-source', {
-      'id': 'new-source',
-      'name': 'New Source',
-      'site': 'https://new.example.com',
-      'lang': 'en',
-      'version': '1.0.0',
-      'url': 'https://new.example.com/source.js',
-      'iconUrl': '',
-      'js': '',
-    });
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-
-    expect(repo.homeCount, 3);
-    expect(cubit.state.sections?.map((section) => section.title), [
-      'New Source · Popular',
-      'Test Source · Popular',
-    ]);
-  });
-
   test('DEFAULT: tracker data fetched but no tracker row renders', () async {
     final t = _FakeTracker(library: [_entry('One Piece', progress: 100)]);
     final cubit = cubitWith(t, sections: [_zmSection('Trending'), _zmSection('Popular')]);
@@ -328,8 +213,8 @@ void main() {
     expect(t.fetchCount, 1); // the library WAS read…
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue', // …but the default arrangement hides every tracker row
-      'section:Test Source · Trending',
-      'section:Test Source · Popular',
+      'section:Trending',
+      'section:Popular',
     ]);
     expect(cubit.state.rows!.any((r) => isTrackerRowId(r.id)), isFalse);
   });
@@ -347,8 +232,8 @@ void main() {
       'tracker:continue',
       'tracker:watching',
       'local:continue',
-      'section:Test Source · Trending',
-      'section:Test Source · Popular',
+      'section:Trending',
+      'section:Popular',
     ]);
     final cubit = cubitWith(t, sections: [_zmSection('Trending'), _zmSection('Popular')]);
     addTearDown(cubit.close);
@@ -359,8 +244,8 @@ void main() {
       'tracker:continue',
       'tracker:watching',
       'local:continue',
-      'section:Test Source · Trending',
-      'section:Test Source · Popular',
+      'section:Trending',
+      'section:Popular',
     ]);
     final continueRow = cubit.state.rows![0] as TrackerContinueHomeRow;
     expect(continueRow.trackerName, 'AniList');
@@ -383,7 +268,7 @@ void main() {
 
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     expect(cubit.state.sections?.length, 1); // the provider load itself lived
   });
@@ -396,7 +281,7 @@ void main() {
     await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     final cubit = cubitWith(t, sections: [_zmSection('Trending')]);
     addTearDown(cubit.close);
@@ -439,8 +324,8 @@ void main() {
     expect(t.fetchCount, 0); // no Z Mode kind → no tracker read at all
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue',
-      'section:Test Source · Latest', // Featured fed the banner and was dropped.
-      'section:Test Source · Popular',
+      'section:Latest', // Featured fed the banner and was dropped, as today
+      'section:Popular',
     ]);
   });
 
@@ -454,7 +339,7 @@ void main() {
     await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     final cubit = HomeCubit(
       _StubRepo([_zmSection('Trending')]),
@@ -490,7 +375,7 @@ void main() {
     await HomeRowsPrefs.save('mal::novel', [
       'tracker:continue',
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     final cubit = HomeCubit(
       _StubRepo([_zmSection('Trending')]),
@@ -518,7 +403,7 @@ void main() {
     await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     final cubit = HomeCubit(
       _StubRepo([_zmSection('Trending')]),
@@ -532,7 +417,7 @@ void main() {
     expect(cubit.state.rows!.any((r) => isTrackerRowId(r.id)), isFalse);
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
   });
 
@@ -541,7 +426,7 @@ void main() {
     await HomeRowsPrefs.save('anilist::novel', [
       'tracker:continue',
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
     final cubit = cubitWith(t, sections: [_zmSection('Trending')]);
     addTearDown(cubit.close);
@@ -555,7 +440,7 @@ void main() {
 
     expect(cubit.state.rows?.map((r) => r.id), [
       'local:continue',
-      'section:Test Source · Trending',
+      'section:Trending',
     ]);
   });
 }

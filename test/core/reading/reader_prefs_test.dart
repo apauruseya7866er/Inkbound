@@ -17,10 +17,7 @@ void main() {
   test('defaults', () async {
     await ReaderPrefs.init();
     final p = ReaderPrefs();
-    // 17px serif is the shipped default (reader_prefs.dart), not the previous
-    // 16px sans default.
-    expect(p.fontSize, 17.0);
-    expect(p.fontFamily, 'serif');
+    expect(p.fontSize, 16);
     expect(p.lineHeight, 1.6);
     expect(p.theme, 'dark');
     expect(p.marginWidth, 20);
