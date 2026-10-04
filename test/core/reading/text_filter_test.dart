@@ -292,6 +292,11 @@ void main() {
       const cases = <String, String>{
         'Discord invite': 'Join our discord for more chapters!',
         'Patreon': 'Please support me on Patreon',
+        'obfuscated Patreon footer': 'AN: Check out my P@treon For +40 extra Chapters.',
+        'creator Patreon support': 'Support the creator on Patreon for bonus chapters.',
+        'author Patreon support': 'Please support the author via Patreon!',
+        'my Patreon request': 'Donate to my Patreon for extra chapters.',
+        'support my writing': 'Please support my writing to help me continue.',
         'my patreon': 'My Patreon: patreon.com/someone',
         'Ko-fi line': 'ko-fi.com/someone',
         'donation plea': 'Please support me!',
@@ -383,10 +388,13 @@ void main() {
             'AN: Check out my P@treon For +40 extra Chapters.';
         final out = builtins().stripFiltered(chapter);
         expect(out, isNot(contains('---')));
+        // The obfuscated footer goes too, not just the rule above it. It used
+        // to survive, which is why it needed spelling out here: `P@treon` is
+        // the whole point of the obfuscation.
+        expect(out, isNot(contains('P@treon')));
         expect(
           out,
-          'This training was the same method Kitazawa used on Hinata.\n'
-          'AN: Check out my P@treon For +40 extra Chapters.',
+          'This training was the same method Kitazawa used on Hinata.',
         );
       });
 
@@ -414,6 +422,12 @@ void main() {
           'He followed me out the door.',
           'Mr. Smith translated it badly.',
           "The translator's note explained the change.",
+          // The targeted risk in broadening these rules: "support" next to a
+          // creator/author noun is ordinary prose, not a donation plea.
+          'She wanted to support the writer with a cup of tea.',
+          'He decided to tip the author after the chapter ended.',
+          'The creator of the series was never named.',
+          'Nobody wrote to the translator about the mistake.',
         ];
         final engine = builtins();
         for (final line in prose) {

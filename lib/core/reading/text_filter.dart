@@ -450,12 +450,22 @@ const List<TextFilterRule> builtinTextFilterRules = [
   TextFilterRule(
     id: 'builtin_patreon',
     pattern:
-        r'\bpatreon\.com\S*|^\s*my\s+patreon\b.*'
+        // `p(?:a|@)treon` because sources obfuscate the obvious spelling
+        // ("P@treon") specifically to survive a naive filter.
+        r'\bp(?:a|@)treon\.com\S*|^\s*my\s+p(?:a|@)treon\b.*'
         // The one call-to-action strong enough to match anywhere in a line
         // rather than at the start of it. Sources append it to the end of a
         // real paragraph often enough ("He smiled. Please support me on
         // Patreon!"), and this phrase is not something a novel says.
-        r'|\b(?:please\s+)?support\s+me\s+on\s+patreon\b.*',
+        //
+        // The plea is as often aimed at the creator as at the reader, so
+        // "support the author/creator" counts too - but it still has to carry a
+        // Patreon token, which is what keeps it from eating prose.
+        r'|\b(?:please\s+)?support\s+(?:me|us|the\s+(?:author|writer|creator|translator))'
+        r'\s+(?:on|via|through)\s+p(?:a|@)treon\b.*'
+        r'|^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:to\s+)?(?:my|our)\s+p(?:a|@)treon\b.*'
+        // The injected footer: "AN: Check out my P@treon for +40 chapters".
+        r'|^\s*an\s*[:：-]\s*(?:check\s+out\s+)?(?:my|our)\s+p(?:a|@)treon\b.*',
     label: 'Patreon mentions',
   ),
   TextFilterRule(
@@ -467,7 +477,14 @@ const List<TextFilterRule> builtinTextFilterRules = [
   TextFilterRule(
     id: 'builtin_support_me',
     pattern:
-        r'^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:me|us)\b.*|^\s*(?:ko-?fi|paypal\.me|cash\.app|buymeacoffee|ko-fi)\S*',
+        // Anchored at the line start on purpose. Widened from "me|us" to the
+        // people a plea is aimed at (author, creator, writer, translator) and to
+        // "my work/writing/novel", because "Please support the author!" is the
+        // commonest form and it is still a plea, not a sentence. Anchoring is
+        // what makes the widening safe: "She wanted to support the writer with
+        // a cup of tea" starts with a subject, so it can never match.
+        r'^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:me|us|the\s+(?:author|writer|creator|translator)|my\s+(?:work|writing|novel))\b.*'
+        r'|^\s*(?:ko-?fi|paypal\.me|cash\.app|buymeacoffee|ko-fi)\S*',
     label: 'Donation / support pleas',
   ),
   TextFilterRule(
