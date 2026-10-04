@@ -102,6 +102,36 @@ void main() {
       expect(box.values, contains('https://example.test/my-plugins.min.json'));
       expect(box.values, contains(LnReaderSeedRepo.indexUrl));
     });
+
+    test('seeds Inkbound\'s own plugin repo, not upstream\'s', () async {
+      expect(LnReaderSeedRepo.indexUrl, contains('apauruseya7866er/plugins'));
+      expect(LnReaderSeedRepo.indexUrl, isNot(contains('LNReader/')));
+    });
+
+    test('drops the superseded upstream repo so the catalogue is not duplicated', () async {
+      await Hive.openBox<String>(LnReaderSeedRepo.reposBoxName);
+      final box = Hive.box<String>(LnReaderSeedRepo.reposBoxName);
+      for (final url in LnReaderSeedRepo.supersededIndexUrls) {
+        await box.add(url);
+      }
+      await LnReaderSeedRepo.ensureSeeded();
+      for (final url in LnReaderSeedRepo.supersededIndexUrls) {
+        expect(box.values, isNot(contains(url)));
+      }
+      expect(box.values, contains(LnReaderSeedRepo.indexUrl));
+    });
+
+    test('dropping the superseded repo is idempotent', () async {
+      await LnReaderSeedRepo.ensureSeeded();
+      final again = await LnReaderSeedRepo.ensureSeeded();
+      expect(again, isFalse);
+      final box = Hive.box<String>(LnReaderSeedRepo.reposBoxName);
+      expect(box.values, contains(LnReaderSeedRepo.indexUrl));
+      expect(
+        box.values.where((u) => u == LnReaderSeedRepo.indexUrl).length,
+        1,
+      );
+    });
   });
 
   group('English install pass', () {

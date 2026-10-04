@@ -4,8 +4,13 @@ import 'package:hive/hive.dart';
 import '../hive/safe_box.dart';
 import 'lnreader_extension_service.dart';
 
-/// Seeds the official LNReader plugin repository, so a fresh install has novel
+/// Seeds Inkbound's LNReader plugin repository, so a fresh install has novel
 /// sources without the user pasting a repo URL.
+///
+/// This is our own fork of the LNReader plugin ecosystem, not upstream's index.
+/// It tracks upstream so its 292 sources stay available, but it is where our own
+/// fixes land — a scraper fixed here reaches users through this index and
+/// nobody else. Pointing this at upstream instead would mean our fixes never ship.
 ///
 /// The app was always built for this — [LnReaderExtensionService.fetchIndex]
 /// reads exactly the index shape LNReader publishes, and the Sources screen
@@ -13,12 +18,11 @@ import 'lnreader_extension_service.dart';
 /// anything putting a URL in the box, which left a novel-only build with an
 /// empty source list on first launch.
 ///
-/// Why the index rather than plugins shipped in the APK: LNReader's repo holds
-/// 284 maintained sources (157 English) and is where upstream scraper fixes
-/// land. Hand-written equivalents would be a strictly worse copy of ~3 of them,
-/// frozen at whatever markup I happened to observe, with no update path. This
-/// way a site that redesigns is fixed upstream and every user gets it on the
-/// next install pass.
+/// Why the index rather than plugins shipped in the APK: the repo holds 292
+/// maintained sources (162 English). Hand-written equivalents would be a strictly
+/// worse copy of ~3 of them, frozen at whatever markup I happened to observe,
+/// with no update path. This way a site that redesigns is fixed and every user
+/// gets it on the next install pass.
 ///
 /// The index is committed to the `plugins/v3.0.0` branch — `.dist` is
 /// gitignored on `master`, which is why it 404s there. `lang` arrives as a
@@ -26,11 +30,11 @@ import 'lnreader_extension_service.dart';
 class LnReaderSeedRepo {
   LnReaderSeedRepo._();
 
-  /// The published index. A branch, not a tag: the branch is what the upstream
+  /// The published index. A branch, not a tag: the branch is what the repo's
   /// build script commits its output to, and a tag would pin an index whose
   /// plugin URLs (which also live on the branch) stop being updated.
   static const String indexUrl =
-      'https://raw.githubusercontent.com/LNReader/lnreader-plugins'
+      'https://raw.githubusercontent.com/apauruseya7866er/plugins'
       '/plugins/v3.0.0/.dist/plugins.min.json';
 
   /// The only `lang` value installed by default. The app can hold any language;
@@ -44,15 +48,35 @@ class LnReaderSeedRepo {
   /// Progress marker for the resumable first-run install.
   static const String stateBoxName = 'lnreader_seed_state';
 
-  /// Adds [indexUrl] to the tracked repos if it isn't already there. Returns
-  /// true when it was added. Idempotent, and never throws — a failure here
-  /// must not stop boot, it just means the user adds a repo by hand as before.
+  /// Indexes we used to seed, now served by [indexUrl] instead.
+  ///
+  /// A tracked repo renders as its own section of the Repositories tab, so an
+  /// install seeded with the old URL would show the same catalogue twice — once
+  /// from a repo we no longer publish from, once from ours. Dropped on the way
+  /// past by [ensureSeeded]. Only URLs this app itself ever wrote belong here;
+  /// anything a user added by hand is left alone.
+  static const Set<String> supersededIndexUrls = {
+    'https://raw.githubusercontent.com/LNReader/lnreader-plugins'
+        '/plugins/v3.0.0/.dist/plugins.min.json',
+  };
+
+  /// Adds [indexUrl] to the tracked repos if it isn't already there, dropping any
+  /// [supersededIndexUrls] left from a previous version. Returns true when
+  /// [indexUrl] was added. Idempotent, and never throws — a failure here must not
+  /// stop boot, it just means the user adds a repo by hand as before.
   static Future<bool> ensureSeeded() async {
     try {
       if (!Hive.isBoxOpen(reposBoxName)) {
         await openBoxSafely<String>(reposBoxName);
       }
       final box = Hive.box<String>(reposBoxName);
+      for (final key in box.keys.toList()) {
+        final value = box.get(key);
+        if (value != null && supersededIndexUrls.contains(value)) {
+          await box.delete(key);
+          debugPrint('[lnreader] dropped superseded repo $value');
+        }
+      }
       if (box.values.contains(indexUrl)) return false;
       await box.add(indexUrl);
       debugPrint('[lnreader] seeded default plugin repo');
@@ -67,7 +91,7 @@ class LnReaderSeedRepo {
   /// or a newer version.
   ///
   /// Drives the "install them" offer on the Sources screen, so the screen can
-  /// say "157 available" without downloading anything just to count. Returns 0
+  /// say "162 available" without downloading anything just to count. Returns 0
   /// when the index cannot be reached, which is indistinguishable from
   /// "nothing to offer" — deliberate, because a count is not worth surfacing an
   /// error for and the install button simply stays absent.
@@ -108,12 +132,12 @@ class LnReaderSeedRepo {
   /// Returns the ids it wrote. Deliberately all-or-nothing per plugin and
   /// resumable across launches: it walks the index in order, skips what is
   /// already current, and stops at the first hard failure rather than retrying
-  /// 157 times against a network that is down. A run interrupted by the app
+  /// 162 times against a network that is down. A run interrupted by the app
   /// being killed simply resumes next time it is invoked, because "already
   /// installed" is read from the box rather than from in-memory progress.
   ///
   /// **Not** run at boot. Seeding the index is inline and free (the Sources
-  /// screen can list the catalogue immediately), but installing ~157 plugins is
+  /// screen can list the catalogue immediately), but installing ~162 plugins is
   /// ~2.3 MB of downloads and a couple of minutes of network on a fresh install,
   /// spent on sources the user may never open. It is offered from the Sources
   /// screen instead, which is also where the user can see what they are getting.
