@@ -44,6 +44,7 @@ import '../../core/download/chapter_downloader.dart';
 import '../../core/download/download_manager.dart';
 import '../../core/download/download_record.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/mode_policy.dart';
 import '../../core/mode/novel_only.dart';
 import '../../core/models/episode.dart';
 import '../../core/models/episode_title.dart';
@@ -94,6 +95,7 @@ import '../../core/tv/tv_list_focusable.dart';
 import '../../core/zmode/metadata_repository.dart';
 import '../../core/zmode/source_matcher.dart';
 import '../../core/ui/source_switcher.dart';
+import '../sources/providers_hub_screen.dart' as providers_hub;
 import '../sources/zangetsu_sources_screen.dart';
 import '../../core/zmode/match_store.dart';
 import '../../core/zmode/zmode_ids.dart';
@@ -346,32 +348,44 @@ class DetailScreen extends StatelessWidget {
 
   /// Opening transition: the page fades in while sliding up and scaling from
   /// 0.96 — a smooth "rise" into the detail rather than the platform push.
-  static Route<void> route(MediaItem item, {PreferredProvider? prefer}) =>
-      PageRouteBuilder<void>(
-        transitionDuration: const Duration(milliseconds: 340),
-        reverseTransitionDuration: const Duration(milliseconds: 260),
-        pageBuilder: (_, _, _) => DetailScreen(item: item, prefer: prefer),
-        transitionsBuilder: (_, animation, _, child) {
-          final curved = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return FadeTransition(
-            opacity: curved,
-            child: SlideTransition(
-              position: Tween(
-                begin: const Offset(0, 0.035),
-                end: Offset.zero,
-              ).animate(curved),
-              child: ScaleTransition(
-                scale: Tween(begin: 0.96, end: 1.0).animate(curved),
-                child: child,
-              ),
-            ),
-          );
-        },
+  ///
+  /// Central novel-only route guard. Every phone/TV entry point constructs its
+  /// Detail page through this factory, so a stale video or manga title cannot
+  /// bypass the hidden mode switchers by arriving from history, search, a
+  /// notification, or a share link. Blocked titles land on Providers, where a
+  /// supported novel source can be installed, instead of on an unusable page.
+  static Route<void> route(MediaItem item, {PreferredProvider? prefer}) {
+    if (!ModePolicy.isMediaItemRouteAllowed(item)) {
+      return MaterialPageRoute<void>(
+        builder: (_) => const providers_hub.ProvidersHubScreen(),
       );
+    }
+    return PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 340),
+      reverseTransitionDuration: const Duration(milliseconds: 260),
+      pageBuilder: (_, _, _) => DetailScreen(item: item, prefer: prefer),
+      transitionsBuilder: (_, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween(
+              begin: const Offset(0, 0.035),
+              end: Offset.zero,
+            ).animate(curved),
+            child: ScaleTransition(
+              scale: Tween(begin: 0.96, end: 1.0).animate(curved),
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

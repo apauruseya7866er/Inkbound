@@ -6,7 +6,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../core/di/injector.dart';
 import '../../core/lnreader/lnreader_extension_service.dart';
 import '../../core/mihon/mihon_manager.dart';
-import '../../core/mode/novel_only.dart';
+import '../../core/mode/mode_policy.dart';
+import '../../core/models/provider_info.dart';
 import '../../core/playback/pinned_sources.dart';
 import '../../core/prefs/source_lang_prefs.dart';
 import '../../core/provider/cloudstream_provider.dart';
@@ -153,9 +154,11 @@ class BrowseSourcesList extends StatelessWidget {
     // so `kind == null` (the all-sources view) lists novel sources only rather
     // than every ecosystem this fork no longer loads.
     final showStreaming =
-        !kNovelOnly && (kind == null || kind == SourceListKind.streaming);
+        ModePolicy.isProviderTypeAllowed(ProviderType.anime) &&
+        (kind == null || kind == SourceListKind.streaming);
     final showManga =
-        !kNovelOnly && (kind == null || kind == SourceListKind.manga);
+        ModePolicy.isProviderTypeAllowed(ProviderType.manga) &&
+        (kind == null || kind == SourceListKind.manga);
     final showNovel = kind == null || kind == SourceListKind.novel;
 
     // One list per tab, not one per manifest type. Streaming used to split

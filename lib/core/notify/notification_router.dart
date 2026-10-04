@@ -1,9 +1,7 @@
 import '../../features/detail/detail_screen.dart';
 import '../di/injector.dart';
 import '../models/media_item.dart';
-import '../mode/content_mode.dart';
-import '../mode/novel_only.dart';
-import '../models/provider_info.dart';
+import '../mode/mode_policy.dart';
 import '../ui/global_messenger.dart';
 import 'subscription_store.dart';
 
@@ -44,11 +42,7 @@ Future<void> openShowFromNotification(String? payload) async {
         // Streaming/Manga here, and the old fallback was anime. Both now open
         // as a novel — the Detail screen normalises the same way, so a stale
         // notification can't reach a video or page-image surface.
-        type: kNovelOnly || sub?.mode == ContentMode.novel
-            ? ProviderType.novel
-            : sub?.mode == ContentMode.manga
-            ? ProviderType.manga
-            : ProviderType.anime,
+        type: ModePolicy.notificationType(sub?.mode),
         sourceId: sourceId,
         cover: sub?.cover,
         coverHeaders: sub?.coverHeaders,

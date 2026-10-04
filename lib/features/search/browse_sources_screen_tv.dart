@@ -11,6 +11,7 @@ import '../../core/ui/source_switcher.dart';
 import '../../l10n/l10n.dart';
 import '../home/search_screen.dart';
 import '../sources/sources_search_field.dart';
+import 'browse_source_kinds.dart';
 import 'browse_source_screen_tv.dart';
 import 'browse_sources_list.dart';
 
@@ -27,13 +28,10 @@ class _BrowseSourcesScreenTvState extends State<BrowseSourcesScreenTv> {
   String _query = '';
   int _tabIndex = 0;
 
-  static const _kinds = SourceListKind.values;
+  static final List<SourceListKind> _kinds = BrowseSourceKinds.available();
 
-  ContentMode _modeOf(SourceListKind kind) => switch (kind) {
-    SourceListKind.streaming => ContentMode.anime,
-    SourceListKind.manga => ContentMode.manga,
-    SourceListKind.novel => ContentMode.novel,
-  };
+  ContentMode _modeOf(SourceListKind kind) =>
+      BrowseSourceKinds.contentModeOf(kind);
 
   @override
   void dispose() {
@@ -55,7 +53,7 @@ class _BrowseSourcesScreenTvState extends State<BrowseSourcesScreenTv> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final tabLabels = [l10n.modeStreaming, l10n.modeManga, l10n.modeNovel];
+    final tabLabels = BrowseSourceKinds.tabLabels(l10n);
 
     return Scaffold(
       backgroundColor: AppColors.bg,

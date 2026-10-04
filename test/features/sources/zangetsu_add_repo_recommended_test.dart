@@ -133,7 +133,7 @@ void main() {
   Future<void> openAddRepoDialog(WidgetTester tester) async {
     await tester.pumpWidget(const MaterialApp(home: ZangetsuSourcesScreen()));
     await tester.pump();
-    await tester.tap(find.text('Add Zangetsu repo'));
+    await tester.tap(find.text('Add Inkbound repo'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
   }

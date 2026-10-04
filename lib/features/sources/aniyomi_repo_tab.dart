@@ -4,12 +4,12 @@ import 'package:hive/hive.dart';
 
 import '../../core/aniyomi/aniyomi_extension_service.dart';
 import '../../core/ui/source_icon_tile.dart';
-import '../../core/aniyomi/aniyomi_provider.dart';
 import '../../core/aniyomi/aniyomi_repo.dart';
 import '../../core/aniyomi/aniyomi_update.dart';
 import '../../core/di/injector.dart';
 import '../../core/i18n/source_languages.dart';
 import '../../core/prefs/source_lang_prefs.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/provider/provider_manager.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -79,10 +79,7 @@ class _AniyomiAddRepoDialogState extends State<AniyomiAddRepoDialog> {
               ),
             ),
             const SizedBox(height: 10),
-            Text(
-              context.l10n.pasteRepoBaseUrlAniyomi,
-              style: AppText.caption,
-            ),
+            Text(context.l10n.pasteRepoBaseUrlAniyomi, style: AppText.caption),
           ],
         ),
       ),
@@ -229,8 +226,9 @@ class _AniyomiRepoSectionState extends State<_AniyomiRepoSection> {
 
   /// Null in widget tests that don't register it — the language filter is then
   /// off (every entry shows). Always registered in the app.
-  final AnimeLangPrefs? _langPrefs =
-      sl.isRegistered<AnimeLangPrefs>() ? sl<AnimeLangPrefs>() : null;
+  final AnimeLangPrefs? _langPrefs = sl.isRegistered<AnimeLangPrefs>()
+      ? sl<AnimeLangPrefs>()
+      : null;
 
   @override
   void initState() {
@@ -305,7 +303,8 @@ class _AniyomiRepoSectionState extends State<_AniyomiRepoSection> {
     final ok = await AppDialog.confirm(
       context,
       title: context.l10n.removeRepo,
-      message: context.l10n.alreadyInstalledExtensionsStay +
+      message:
+          context.l10n.alreadyInstalledExtensionsStay +
           context.l10n.youCanAddRepoBackLater,
       confirmLabel: context.l10n.removeDownloadTooltip,
       destructive: true,
@@ -331,8 +330,8 @@ class _AniyomiRepoSectionState extends State<_AniyomiRepoSection> {
               list.isEmpty
                   ? context.l10n.alreadyUpToDate
                   : list.length == 1
-                      ? context.l10n.oneUpdate
-                      : context.l10n.nUpdates(list.length),
+                  ? context.l10n.oneUpdate
+                  : context.l10n.nUpdates(list.length),
             ),
           ),
         );
@@ -389,7 +388,11 @@ class _AniyomiRepoSectionState extends State<_AniyomiRepoSection> {
     messenger
       ..clearSnackBars()
       ..showSnackBar(
-        SnackBar(content: Text(context.l10n.updatedSourcesCount(done, done == 1 ? '' : 's'))),
+        SnackBar(
+          content: Text(
+            context.l10n.updatedSourcesCount(done, done == 1 ? '' : 's'),
+          ),
+        ),
       );
   }
 
@@ -724,7 +727,9 @@ class _AniyomiExtensionRowState extends State<_AniyomiExtensionRow> {
       widget.onInstalled();
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(l10n.installedName(_entry.name))));
+        ..showSnackBar(
+          SnackBar(content: Text(l10n.installedName(_entry.name))),
+        );
     } catch (e) {
       messenger
         ..clearSnackBars()
@@ -755,31 +760,26 @@ class _AniyomiExtensionRowState extends State<_AniyomiExtensionRow> {
       widget.onUninstalled();
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.uninstalledName(_entry.name))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.uninstalledName(_entry.name))),
+        );
     } catch (e) {
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.uninstallFailed('$e'))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.uninstallFailed('$e'))),
+        );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _defaultUninstall() async {
-    // Remove from installed box.
-    try {
-      if (Hive.isBoxOpen(AniyomiExtensionService.installedBoxName)) {
-        await Hive.box<dynamic>(
-          AniyomiExtensionService.installedBoxName,
-        ).delete(_entry.pkg);
-      }
-    } catch (_) {}
-    // Remove from the manager so the source disappears from the picker.
-    if (GetIt.instance.isRegistered<AniyomiManager>()) {
-      GetIt.instance.get<AniyomiManager>().removeWhere(
-        (p) => p is AniyomiProvider && p.info.pkg == _entry.pkg,
-      );
-    }
+    // Delegates to the shared uninstaller. This path used to delete only the box
+    // entry and NOT the APK, so an extension removed from the Repositories tab
+    // came back on the next cold start (loadInstalled re-reads the directory)
+    // while the same removal from the Installed tab stuck.
+    await SourceUninstaller.uninstallAniyomiExtension(_entry.pkg);
   }
 
   @override

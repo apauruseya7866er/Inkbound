@@ -1,7 +1,6 @@
 // Aniyomi sources — phone UI.
 part of 'aniyomi_sources_screen.dart';
 
-
 // ---------------------------------------------------------------------------
 // Phone view
 // ---------------------------------------------------------------------------
@@ -43,15 +42,14 @@ class _AniScreenPhoneViewState extends State<_AniScreenPhoneView> {
             IconButton(
               tooltip: context.l10n.languages,
               icon: const Icon(Icons.language_rounded),
-              onPressed: () =>
-                  showSourceLanguageSheet(
-                    context,
-                    sl<AnimeLangPrefs>(),
-                    present: presentLangCodes(
-                      sl<AniyomiManager>().all,
-                      (p) => p is AniyomiProvider ? p.info.lang : '',
-                    ),
-                  ),
+              onPressed: () => showSourceLanguageSheet(
+                context,
+                sl<AnimeLangPrefs>(),
+                present: presentLangCodes(
+                  sl<AniyomiManager>().all,
+                  (p) => p is AniyomiProvider ? p.info.lang : '',
+                ),
+              ),
             ),
           ],
           bottom: TabBar(
@@ -141,12 +139,14 @@ class _AniyomiInstalledGroupState extends State<_AniyomiInstalledGroup> {
       listenable: Listenable.merge([sl<AniyomiManager>(), langPrefs]),
       builder: (context, _) {
         final query = widget.query;
-        var sources = sl<AniyomiManager>()
-            .all
-            .where((p) => sourceSearchMatches(
+        var sources = sl<AniyomiManager>().all
+            .where(
+              (p) => sourceSearchMatches(
                 query,
                 p.displayName,
-                p is AniyomiProvider ? p.info.lang : null))
+                p is AniyomiProvider ? p.info.lang : null,
+              ),
+            )
             .toList();
         // Same filter the picker and the browse list use. Without it, picking
         // English left this screen listing every language anyway.
@@ -321,37 +321,22 @@ class _AniSourceRowState extends State<_AniSourceRow> {
     );
     if (ok != true) return;
 
-    final aniProvider =
-        widget.source is AniyomiProvider ? widget.source as AniyomiProvider : null;
-    final pkg = aniProvider?.info.pkg;
-
-    const boxName = 'aniyomi_installed';
-    if (pkg != null && Hive.isBoxOpen(boxName)) {
-      final box = Hive.box<dynamic>(boxName);
-      final apkPath = box.get(pkg) as String?;
-      if (apkPath != null) {
-        try {
-          final f = File(apkPath);
-          if (await f.exists()) await f.delete();
-        } catch (_) {}
-      }
-      await box.delete(pkg);
-    }
-
-    if (pkg != null) {
-      sl<AniyomiManager>().removeWhere(
-        (p) => p is AniyomiProvider && p.info.pkg == pkg,
-      );
-    } else {
-      sl<AniyomiManager>().removeWhere(
-        (p) => p.sourceId == widget.source.sourceId,
-      );
-    }
+    // The delete lives in SourceUninstaller so this screen, the repositories
+    // tab and the Source health screen all remove a source the same way.
+    final res = await SourceUninstaller.uninstall(widget.source.sourceId);
 
     if (context.mounted) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.uninstalledName(name))));
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              res.ok
+                  ? context.l10n.uninstalledName(name)
+                  : context.l10n.uninstallFailed(res.failure!),
+            ),
+          ),
+        );
     }
   }
 
@@ -363,11 +348,15 @@ class _AniSourceRowState extends State<_AniSourceRow> {
       await apply(update);
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.updatedName(update.name))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.updatedName(update.name))),
+        );
     } catch (e) {
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.updateFailed('$e'))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.updateFailed('$e'))),
+        );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -377,8 +366,10 @@ class _AniSourceRowState extends State<_AniSourceRow> {
     // installFromRepo never throws — it returns an empty list on failure —
     // so a failed download must be surfaced here rather than silently
     // reported as a success that clears the update badge.
-    final providers = await AniyomiExtensionService()
-        .installFromRepo(update.entry, manager: sl<AniyomiManager>());
+    final providers = await AniyomiExtensionService().installFromRepo(
+      update.entry,
+      manager: sl<AniyomiManager>(),
+    );
     if (providers.isEmpty) throw Exception('Update failed to install');
     sl<AniyomiManager>().clearUpdatesForPkg(update.pkg);
   }
@@ -390,7 +381,8 @@ class _AniSourceRowState extends State<_AniSourceRow> {
     final lang = source is AniyomiProvider ? source.info.lang : '';
     final nameColor = active ? AppColors.accent : AppColors.textPrimary;
     final aniProvider = source is AniyomiProvider ? source : null;
-    final lookup = widget.updateLookupFn ??
+    final lookup =
+        widget.updateLookupFn ??
         (String pkg) => sl<AniyomiManager>().updateFor(pkg);
 
     Widget updateButton() {
@@ -435,7 +427,9 @@ class _AniSourceRowState extends State<_AniSourceRow> {
         ScaffoldMessenger.of(context)
           ..clearSnackBars()
           ..showSnackBar(
-            SnackBar(content: Text(context.l10n.activeSourceColon(source.displayName))),
+            SnackBar(
+              content: Text(context.l10n.activeSourceColon(source.displayName)),
+            ),
           );
       },
       child: Padding(
@@ -523,10 +517,7 @@ class _AniSourceRowState extends State<_AniSourceRow> {
               // grew an icon tile; 36 still clears the 36dp touch floor.
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints.tightFor(
-                width: 36,
-                height: 36,
-              ),
+              constraints: const BoxConstraints.tightFor(width: 36, height: 36),
             ),
           ],
         ),

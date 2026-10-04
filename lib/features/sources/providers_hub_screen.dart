@@ -7,7 +7,7 @@ import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
 import '../../core/lnreader/lnreader_manager.dart';
 import '../../core/mihon/mihon_manager.dart';
-import '../../core/mode/novel_only.dart';
+import '../../core/mode/mode_policy.dart';
 import '../../core/models/provider_info.dart';
 import '../../core/provider/cloudstream_provider.dart';
 import '../../core/provider/provider_manager.dart';
@@ -107,7 +107,9 @@ class _HubPhoneView extends StatelessWidget {
     // section would otherwise show permanently empty ecosystems. Mihon and
     // CloudStream are additionally gated so a phone build that somehow still
     // holds the registrations can't reach them.
-    final showStreaming = !kNovelOnly;
+    final showStreaming = ModePolicy.isCapabilityAllowed(
+      NovelCapability.video,
+    );
     final csRow = showCs && showStreaming;
     final aniRow = showAniyomi && showStreaming;
     final mihonRow = showMihon && showStreaming;
@@ -134,14 +136,14 @@ class _HubPhoneView extends StatelessWidget {
     final mihonUpdates = mihonRow ? sl<MihonManager>().updateCount : 0;
     final totalUpdates = zUpdates + csUpdates + aniUpdates + mihonUpdates;
 
-    final total = kNovelOnly
+    final total = !showStreaming
         ? lnrCount
         : zangetsuCount +
               (csRow ? csInstalled : 0) +
               (aniRow ? aniCount : 0) +
               (mihonRow ? mihonCount : 0) +
               (showLnReader ? lnrCount : 0);
-    final ecoCount = kNovelOnly
+    final ecoCount = !showStreaming
         ? 1
         : 1 +
               (csRow ? 1 : 0) +
@@ -156,7 +158,7 @@ class _HubPhoneView extends StatelessWidget {
     // fallback — and "Active: allanime" in a novel-only app is a lie the user
     // can do nothing with. Report "none" instead.
     final activeName =
-        activeId.isEmpty || (kNovelOnly && !_isNovelSourceId(activeId))
+        activeId.isEmpty || (!showStreaming && !_isNovelSourceId(activeId))
         ? context.l10n.subtitleOutlineNone
         : _activeSourceLabel(activeId);
     final activeIsCs = activeId.startsWith('cs:');
@@ -191,7 +193,7 @@ class _HubPhoneView extends StatelessWidget {
             // ecosystem count (ecoCount itself is untouched, still just
             // Zangetsu/CS/Aniyomi/Mihon), just the header copy matching
             // what's on screen.
-            ecoCount: kNovelOnly ? ecoCount : ecoCount + 1,
+            ecoCount: !showStreaming ? ecoCount : ecoCount + 1,
             activeName: activeName,
             totalUpdates: totalUpdates,
           ),
@@ -255,7 +257,7 @@ class _HubPhoneView extends StatelessWidget {
             const SizedBox(height: 28),
             // Novel-only build: Mihon is the other row this header used to
             // have, so the label names the one ecosystem that is left.
-            _SectionLabel(kNovelOnly ? 'NOVEL' : 'MANGA & NOVEL'),
+            _SectionLabel(!showStreaming ? 'NOVEL' : 'MANGA & NOVEL'),
             const SizedBox(height: 12),
             if (mihonRow) ...[
               _EcoRow(
@@ -589,8 +591,12 @@ class _HubTvViewState extends State<_HubTvView> {
 
   Widget _body(BuildContext context) {
     final zangetsuCount = sl<ProviderRegistry>().getAll().length;
-    final showCs = Platform.isAndroid;
-    final showAniyomi = Platform.isAndroid;
+    // Phone and TV use the same novel-only video gate here. TV previously
+    // showed CloudStream/Aniyomi rows on Android even though this build never
+    // loads those ecosystems.
+    final showStreaming = ModePolicy.isCapabilityAllowed(NovelCapability.video);
+    final showCs = Platform.isAndroid && showStreaming;
+    final showAniyomi = Platform.isAndroid && showStreaming;
     var autofocusAssigned = false;
 
     Widget row({

@@ -151,11 +151,7 @@ class _AniScreenTvViewState extends State<_AniScreenTvView> {
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.add,
-                            color: AppColors.accent,
-                            size: 18,
-                          ),
+                          Icon(Icons.add, color: AppColors.accent, size: 18),
                           const SizedBox(width: 8),
                           Text(
                             context.l10n.addAniyomiRepo,
@@ -356,9 +352,9 @@ class _AniScreenTvSourceRowState extends State<_AniScreenTvSourceRow> {
 
   @override
   Widget build(BuildContext context) {
-  // Restored from main: the row and the gear are SIBLING focusables, so a
-  // remote can reach the gear on its own. The rewrite had nested the gear
-  // inside the row's focusable, which made it unreachable by D-pad.
+    // Restored from main: the row and the gear are SIBLING focusables, so a
+    // remote can reach the gear on its own. The rewrite had nested the gear
+    // inside the row's focusable, which made it unreachable by D-pad.
     final source = widget.source;
     final active = source.sourceId == widget.activeId;
     final lang = source is AniyomiProvider ? source.info.lang : '';
@@ -428,10 +424,7 @@ class _AniScreenTvSourceRowState extends State<_AniScreenTvSourceRow> {
                               ),
                               if (lang.isNotEmpty) ...[
                                 const SizedBox(height: 2),
-                                Text(
-                                  'aniyomi • $lang',
-                                  style: AppText.caption,
-                                ),
+                                Text('aniyomi • $lang', style: AppText.caption),
                               ],
                             ],
                           ),
@@ -785,20 +778,21 @@ class _AniScreenTvExtensionRowState extends State<_AniScreenTvExtensionRow> {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      if (Hive.isBoxOpen(AniyomiExtensionService.installedBoxName)) {
-        await Hive.box<dynamic>(
-          AniyomiExtensionService.installedBoxName,
-        ).delete(widget.entry.pkg);
-      }
-      sl<AniyomiManager>().removeWhere(
-        (p) => p is AniyomiProvider && p.info.pkg == widget.entry.pkg,
+      // Delegated: this path deleted only the box entry and NOT the APK, so on
+      // TV an extension removed here came back on the next cold start.
+      final res = await SourceUninstaller.uninstallAniyomiExtension(
+        widget.entry.pkg,
       );
       widget.onUninstalled();
       messenger
         ..clearSnackBars()
         ..showSnackBar(
           SnackBar(
-            content: Text(context.l10n.uninstalledName(widget.entry.name)),
+            content: Text(
+              res.ok
+                  ? context.l10n.uninstalledName(widget.entry.name)
+                  : context.l10n.uninstallFailed(res.failure!),
+            ),
           ),
         );
     } catch (e) {

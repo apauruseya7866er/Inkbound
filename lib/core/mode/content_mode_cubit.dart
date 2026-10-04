@@ -9,6 +9,7 @@ import '../di/injector.dart';
 import '../repository/source_repository.dart';
 import '../state/active_source_cubit.dart';
 import 'content_mode.dart';
+import 'mode_policy.dart';
 import 'novel_only.dart';
 
 /// App-wide content mode (anime | manga | novel), persisted across launches.
@@ -29,7 +30,7 @@ class ContentModeCubit extends Cubit<ContentMode> {
     // Novel-only build: the persisted mode is ignored and the app always boots
     // into the single exposed mode, so an install that previously sat on
     // Streaming/Manga can't come back up showing anime sources.
-    if (kNovelOnly) return kOnlyMode;
+    if (!ModePolicy.isModeAllowed(ContentMode.anime)) return kOnlyMode;
     final stored = box.get('mode') as String?;
     if (stored == null) return ContentMode.anime;
     try {
@@ -99,7 +100,7 @@ class ContentModeCubit extends Cubit<ContentMode> {
   Future<void> setMode(ContentMode m) async {
     // Novel-only build: reject any switch away from the exposed mode. The mode
     // bar is hidden too, but notifications / deep links can still reach here.
-    if (kNovelOnly && m != kOnlyMode) return;
+    if (!ModePolicy.isModeAllowed(m)) return;
     if (m == state) return;
     // Capture the outgoing mode/source BEFORE emitting or restoring anything
     // — read after a restore, this would park the newly-restored source

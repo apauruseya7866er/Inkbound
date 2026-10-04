@@ -5,6 +5,7 @@ import 'package:app_links/app_links.dart';
 import '../zmode/zmode_ids.dart';
 import '../../features/detail/detail_screen.dart';
 import '../di/injector.dart';
+import '../mode/mode_policy.dart';
 import '../models/media_item.dart';
 import '../platform/apple_tv.dart';
 import '../repository/source_repository.dart';
@@ -92,6 +93,16 @@ class OpenLinkService {
     if (!_sourceInstalled(item.sourceId)) {
       showGlobalSnack(
         "That title's source isn't installed. Add it in Settings › Providers.",
+      );
+      return;
+    }
+    // External links bypass every in-app mode switcher, so the novel-only
+    // policy is checked at this ingress point rather than in the UI that a
+    // link never visits. Streaming, movie, and manga titles cannot be opened
+    // in this build, even when their source happens to be installed.
+    if (!ModePolicy.isMediaItemRouteAllowed(item)) {
+      showGlobalSnack(
+        "That title isn't available in the novel-only build.",
       );
       return;
     }

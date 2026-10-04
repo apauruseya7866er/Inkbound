@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'manage_source_route.dart';
 import '../../core/ui/settings_widgets.dart';
 
 import '../../core/app_mode.dart';
@@ -10,11 +9,13 @@ import '../../core/di/injector.dart';
 import '../../core/playback/search_source_prefs.dart';
 import '../../core/models/media_item.dart';
 import '../../core/playback/source_health_store.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/repository/source_repository.dart';
 import '../search/bloc/search_bloc.dart' show SearchBloc;
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/tv/tv_list_focusable.dart';
+import '../../core/ui/app_dialog.dart';
 import '../../l10n/l10n.dart';
 
 /// "Test sources" — probes every enabled source concurrently and shows, per
@@ -111,6 +112,168 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
   /// it's several extra requests per source, so it's an explicit choice.
   bool _deep = false;
 
+  // ── removal ────────────────────────────────────────────────────────────────
+
+  /// Multi-select mode. On, rows become checkboxes and the only action is the
+  /// bulk delete — which is the point: a user clearing twenty rotted sources
+  /// should confirm once, not twenty times.
+  bool _selecting = false;
+
+  /// Source ids ticked for removal. Never contains an id that can't be
+  /// uninstalled ([SourceUninstaller.canUninstall]), so a Z-Mode row can never
+  /// be ticked and there is no way to confirm a batch the uninstaller refuses.
+  final Set<String> _selected = {};
+
+  /// A removal batch is in flight. Guards the actions so a second tap can't
+  /// start a second pass over the same ids mid-delete.
+  bool _removing = false;
+
+  bool get _isTv => sl.isRegistered<AppMode>() && sl<AppMode>().isTv;
+
+  /// Whether this row is one the user would want gone: not a clean pass.
+  ///
+  /// Anything other than "search answered with hits AND (if the deep check ran)
+  /// it opened something playable AND playback isn't failing" — so amber
+  /// "no results" and "timed out" count, not just red. A timed-out source is
+  /// slow rather than proven broken, which is why this is only what
+  /// [_selectAllProblems] ticks — nothing is removed without the user seeing
+  /// the list and confirming.
+  bool _isProblem(_ProbeResult r) {
+    if (r.running) return false;
+    if (r.outcome != SourceOutcome.ok) return true;
+    if (r.deepOk == false) return true;
+    if (_health.playbackFailures(r.id) >= SourceHealthStore.deadAfterTitles) {
+      return true;
+    }
+    return false;
+  }
+
+  void _toggleSelecting() {
+    setState(() {
+      _selecting = !_selecting;
+      // Leaving the selection behind would silently re-apply it the next time
+      // the mode is entered.
+      if (!_selecting) _selected.clear();
+    });
+  }
+
+  void _toggleSelected(String id) {
+    setState(() {
+      if (!_selected.remove(id)) _selected.add(id);
+    });
+  }
+
+  /// Ticks every row that isn't a clean pass, leaving healthy ones alone.
+  ///
+  /// The whole reason multi-select exists: the rows worth deleting are the ones
+  /// that need reading to find, and scrolling 160 sources ticking checkboxes is
+  /// how a user gives up and leaves them installed. Stays out of the way after
+  /// that — it only ticks, never removes.
+  void _selectAllProblems() {
+    setState(() {
+      for (final r in _results) {
+        if (_isProblem(r) && SourceUninstaller.canUninstall(r.id)) {
+          _selected.add(r.id);
+        }
+      }
+    });
+  }
+
+  /// Confirm-then-delete for a single row.
+  Future<void> _confirmUninstallOne(_ProbeResult r) async {
+    if (!SourceUninstaller.canUninstall(r.id)) return;
+    final l10n = context.l10n;
+    final ok = await AppDialog.confirm(
+      context,
+      title: l10n.uninstallNameQuestion(r.name),
+      message: l10n.thisRemovesTheSourceFromYourInstalledList,
+      confirmLabel: l10n.uninstall,
+      destructive: true,
+    );
+    if (ok != true) return;
+    await _removeSources([r.id]);
+  }
+
+  /// Confirm-then-delete for the whole selection. One confirmation for the
+  /// batch, naming how many are going — never a silent bulk delete.
+  Future<void> _confirmUninstallSelected() async {
+    final ids = [
+      for (final id in _selected)
+        if (SourceUninstaller.canUninstall(id)) id,
+    ];
+    if (ids.isEmpty) return;
+    final l10n = context.l10n;
+    final ok = await AppDialog.confirm(
+      context,
+      title: l10n.uninstallSelectedSourcesQuestion(ids.length),
+      message: l10n.uninstallSelectedSourcesMessage,
+      confirmLabel: l10n.uninstall,
+      destructive: true,
+    );
+    if (ok != true) return;
+    await _removeSources(ids);
+  }
+
+  /// Removes [ids], drops their rows, and reports what happened.
+  ///
+  /// Sequential, not parallel: each ecosystem's delete shares per-source state
+  /// — one Hive box, one manager, and for Mihon/Aniyomi a single APK behind
+  /// every language copy — so two at once is how an interleaved half-delete
+  /// happens. The batches are short and the work is local IO.
+  ///
+  /// A failure never stops the pass. One stubborn source must not strand the
+  /// other nineteen the user asked to remove, so each is attempted and the
+  /// successes are reported alongside the count that didn't go.
+  Future<void> _removeSources(List<String> ids) async {
+    if (ids.isEmpty || _removing) return;
+    final l10n = context.l10n;
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _removing = true);
+
+    final removed = <String>[];
+    var failed = 0;
+    for (final id in ids) {
+      final res = await SourceUninstaller.uninstall(id);
+      if (!res.ok) {
+        failed++;
+        continue;
+      }
+      removed.add(id);
+      // The recorded health now describes a source that no longer exists, and
+      // search skips sources the store calls dead — so leaving it behind would
+      // have a reinstalled source silently skipped on its first search.
+      await _health.clear(id);
+      // Same reasoning for a search exclusion: clear it, or the source comes
+      // back reinstalled and invisible to search with nothing explaining why.
+      await _searchPrefs.setIncluded(id, true);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      if (removed.isNotEmpty) {
+        _results = [
+          for (final r in _results)
+            if (!removed.contains(r.id)) r,
+        ];
+      }
+      _selected.removeAll(removed);
+      _removing = false;
+      // Nothing left to act on — don't strand the user in a mode with no
+      // selection and no rows to pick from.
+      if (_selected.isEmpty) _selecting = false;
+    });
+
+    final message = switch ((removed.length, failed)) {
+      (0, final f) => l10n.uninstallFailedCount(f),
+      (final n, 0) => l10n.uninstalledSourcesCount(n),
+      (final n, final f) =>
+        '${l10n.uninstalledSourcesCount(n)} · ${l10n.uninstallFailedCount(f)}',
+    };
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   @override
   void initState() {
     super.initState();
@@ -129,7 +292,9 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
     setState(() {
       _testing = true;
       _deep = deep;
-      _results = [for (final s in sources) _ProbeResult(id: s.id, name: s.name)];
+      _results = [
+        for (final s in sources) _ProbeResult(id: s.id, name: s.name),
+      ];
     });
 
     // Fixed-size worker pool over a shared cursor, so at most
@@ -243,9 +408,7 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
       }
     }
     if (!ok) {
-      note = opened
-          ? 'opens, but lists nothing to play'
-          : "can't open titles";
+      note = opened ? 'opens, but lists nothing to play' : "can't open titles";
     }
     if (!mounted || gen != _runGen) return;
     setState(() {
@@ -317,24 +480,52 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
     return Scaffold(
       backgroundColor: AppColors.bg,
       appBar: settingsAppBar(
-        context.l10n.sourceHealth,
+        // The title doubles as the selection counter, so the count is where the
+        // user is already looking instead of in a second place.
+        _selecting
+            ? context.l10n.sourcesSelectedCount(_selected.length)
+            : context.l10n.sourceHealth,
         actions: [
-          IconButton(
-            tooltip: 'Deep test (opens a title from each source)',
-            icon: const Icon(Icons.biotech_outlined),
-            color: _deep ? AppColors.accent : AppColors.textPrimary,
-            // Live even mid-run. The screen kicks off a test on open, and
-            // disabling this until that finished meant waiting out the whole
-            // list before you could ask for the deeper one. Safe now that a new
-            // run supersedes the old via [_runGen] instead of racing it.
-            onPressed: () => _runTests(deep: true),
-          ),
-          IconButton(
-            tooltip: context.l10n.reTest,
-            icon: const Icon(Icons.refresh_rounded),
-            color: AppColors.textPrimary,
-            onPressed: _testing ? null : () => _runTests(),
-          ),
+          if (_selecting)
+            // Deliberately no second "delete" icon here. The bulk control is the
+            // bottom bar, which carries the count; a duplicate in the app bar
+            // gives the same destructive action two homes and no way to tell
+            // which one the count refers to.
+            IconButton(
+              tooltip: context.l10n.selectAllProblems,
+              icon: const Icon(Icons.playlist_add_check_rounded),
+              color: AppColors.textPrimary,
+              onPressed: _results.isEmpty || _removing
+                  ? null
+                  : _selectAllProblems,
+            )
+          else ...[
+            IconButton(
+              tooltip: 'Deep test (opens a title from each source)',
+              icon: const Icon(Icons.biotech_outlined),
+              color: _deep ? AppColors.accent : AppColors.textPrimary,
+              // Live even mid-run. The screen kicks off a test on open, and
+              // disabling this until that finished meant waiting out the whole
+              // list before you could ask for the deeper one. Safe now that a new
+              // run supersedes the old via [_runGen] instead of racing it.
+              onPressed: () => _runTests(deep: true),
+            ),
+            IconButton(
+              tooltip: context.l10n.selectSourcesToRemove,
+              icon: const Icon(Icons.checklist_rounded),
+              color: AppColors.textPrimary,
+              // Available before the probes finish: the point of this mode is to
+              // clear out sources that are dead, and the run that tells you
+              // which those are is the thing making you wait.
+              onPressed: _results.isEmpty ? null : _toggleSelecting,
+            ),
+            IconButton(
+              tooltip: context.l10n.reTest,
+              icon: const Icon(Icons.refresh_rounded),
+              color: AppColors.textPrimary,
+              onPressed: _testing ? null : _runTests,
+            ),
+          ],
         ],
       ),
       body: _results.isEmpty
@@ -356,13 +547,15 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                     child: Text(
                       _testing
                           ? '${_deep ? 'Deep t' : 'T'}esting '
-                              '${_results.length} source'
-                              '${_results.length == 1 ? '' : 's'}…'
+                                '${_results.length} source'
+                                '${_results.length == 1 ? '' : 's'}…'
+                          : _selecting
+                          ? context.l10n.selectSourcesToRemoveHint
                           : '$working of $done returned results.'
-                              '${unusable > 0 ? ' $unusable opened nothing '
-                                  'playable.' : ''}'
-                              ' Amber answered but may give you nothing;'
-                              ' only red is treated as dead.',
+                                '${unusable > 0 ? ' $unusable opened nothing '
+                                          'playable.' : ''}'
+                                ' Amber answered but may give you nothing;'
+                                ' only red is treated as dead.',
                       style: AppText.caption,
                     ),
                   ),
@@ -384,19 +577,24 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                           _HealthRow(
                             result: _results[i],
                             present: _present,
-                            onDisable: _results[i].isCloudStream
-                                ? null
-                                : () => _disableForSearch(_results[i]),
-                            searchIncluded:
-                                _searchPrefs.isIncluded(_results[i].id),
+                            searchIncluded: _searchPrefs.isIncluded(
+                              _results[i].id,
+                            ),
                             playbackFails: _health.playbackFailures(
                               _results[i].id,
                             ),
-                            onManage: canManageSource(_results[i].id)
-                                ? () => openManageSource(
-                                    context,
-                                    _results[i].id,
-                                  )
+                            selecting: _selecting,
+                            selected: _selected.contains(_results[i].id),
+                            onToggleSelected: () =>
+                                _toggleSelected(_results[i].id),
+                            // Every row offers removal, not just the broken
+                            // ones: the user came here to clear out what isn't
+                            // working, and making them learn this screen is the
+                            // only place that can do it is a worse answer than
+                            // an undo isn't.
+                            onUninstall:
+                                SourceUninstaller.canUninstall(_results[i].id)
+                                ? () => _confirmUninstallOne(_results[i])
                                 : null,
                           ),
                         ],
@@ -406,53 +604,130 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                 ],
               ),
             ),
+      // Bulk action lives at the bottom, not in the app bar: it's the
+      // destructive, thumb-reachable control, and the bar above keeps it
+      // unambiguous that it applies to every ticked row. It stays put during the
+      // removal instead of vanishing — the one control the user just pressed
+      // should report its own progress, not disappear.
+      bottomNavigationBar: _selecting && (_selected.isNotEmpty || _removing)
+          ? SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: _isTv
+                    ? TvListFocusable(
+                        semanticLabel: context.l10n.uninstall,
+                        onTap: _confirmUninstallSelected,
+                        child: _BulkUninstallButton(
+                          count: _selected.length,
+                          removing: _removing,
+                        ),
+                      )
+                    : _BulkUninstallButton(
+                        count: _selected.length,
+                        removing: _removing,
+                        onPressed: _confirmUninstallSelected,
+                      ),
+              ),
+            )
+          : null,
     );
   }
+}
 
-  /// Inline action for a dead source: drop it from cross-source search (the same
-  /// search-only toggle the source picker uses). Reversible from search settings.
-  Future<void> _disableForSearch(_ProbeResult r) async {
-    await _searchPrefs.setIncluded(r.id, false);
-    if (!mounted) return;
-    setState(() {});
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(
-        SnackBar(content: Text('${r.name} removed from search')),
-      );
+/// Filled, full-width delete button for the bottom bar. Counts the selection so
+/// the button states its own blast radius — "Uninstall" alone on a screen of
+/// 160 rows is a claim about nothing.
+class _BulkUninstallButton extends StatelessWidget {
+  const _BulkUninstallButton({
+    required this.count,
+    required this.removing,
+    this.onPressed,
+  });
+
+  final int count;
+  final bool removing;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: FilledButton.icon(
+        // Disabled while a pass is in flight, so the control that started the
+        // batch can't be used to start a second one over the same ids.
+        onPressed: removing ? null : onPressed,
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.accent,
+          disabledBackgroundColor: AppColors.accent.withValues(alpha: 0.5),
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        icon: removing
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : const Icon(Icons.delete_outline_rounded, size: 20),
+        // Counts the selection, so the button states its own blast radius —
+        // "Uninstall" alone on a screen of 160 rows is a claim about nothing.
+        label: Text(
+          removing
+              ? context.l10n.removingSources
+              : context.l10n.uninstallSelectedCount(count),
+          style: AppText.body.copyWith(
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+          ),
+        ),
+      ),
+    );
   }
 }
 
 /// One source row: name + status pill (Working / Slow / Dead-reason) with the
-/// response time / result count, plus an inline "remove from search" action for
-/// a dead JS source.
+/// response time / result count, plus the removal control — a checkbox while
+/// selecting, otherwise a per-row uninstall button.
 class _HealthRow extends StatelessWidget {
   const _HealthRow({
     required this.result,
     required this.present,
     required this.searchIncluded,
-    this.onDisable,
+    required this.selecting,
+    required this.selected,
+    this.onToggleSelected,
+    this.onUninstall,
     this.playbackFails = 0,
-    this.onManage,
   });
 
   final _ProbeResult result;
   final ({Color color, IconData icon, String label}) Function(SourceOutcome)
-      present;
+  present;
   final bool searchIncluded;
-  final VoidCallback? onDisable;
+
+  /// Multi-select mode: show a checkbox and make the whole row the target,
+  /// instead of a per-row action. 160 rows of individually-confirmed deletions
+  /// is not a feature.
+  final bool selecting;
+  final bool selected;
+  final VoidCallback? onToggleSelected;
+
+  /// Removes THIS source, immediately, after its own confirmation. Null when the
+  /// source has nothing installed behind it (Z-Mode), so no dead control.
+  final VoidCallback? onUninstall;
 
   /// Distinct titles that recently failed to produce a playable link. This is
   /// the one thing the probe cannot see: a source whose search and episode
   /// lists are perfect, but whose embed host moved, so nothing plays.
   final int playbackFails;
 
-  /// Opens the Sources screen that owns this source, where uninstalling lives.
-  /// Null when the source has no such screen (Z-Mode).
-  final VoidCallback? onManage;
-
-  bool get _playbackDead =>
-      playbackFails >= SourceHealthStore.deadAfterTitles;
+  bool get _playbackDead => playbackFails >= SourceHealthStore.deadAfterTitles;
 
   String? get _meta {
     if (result.running) return null;
@@ -488,9 +763,7 @@ class _HealthRow extends StatelessWidget {
         icon: Icons.error_outline_rounded,
         label: context.l10n.notUsable,
       );
-    } else if (p != null &&
-        result.deepOk == null &&
-        o == SourceOutcome.ok) {
+    } else if (p != null && result.deepOk == null && o == SourceOutcome.ok) {
       // Only the SEARCH probe has run — the deep check is opt-in behind the
       // microscope because it runs the JS engine on the UI isolate. So all this
       // green actually proves is that search answered. Saying "Working" claims
@@ -499,10 +772,16 @@ class _HealthRow extends StatelessWidget {
       // did work. Upgrades to the full label once the deep check has run.
       p = (color: p.color, icon: p.icon, label: context.l10n.searchOk);
     }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+
+    final row = Padding(
+      padding: EdgeInsets.fromLTRB(selecting ? 4 : 16, 12, 8, 12),
       child: Row(
         children: [
+          if (selecting)
+            Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelected?.call(),
+            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -563,56 +842,30 @@ class _HealthRow extends StatelessWidget {
                 color: AppColors.accent,
               ),
             )
-          else if (_isDead && onDisable != null && searchIncluded)
-            (sl.isRegistered<AppMode>() && sl<AppMode>().isTv)
-                ? TvListFocusable(
-                    semanticLabel: 'Remove ${result.name}',
-                    onTap: onDisable!,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      child: Text(
-                        context.l10n.removeDownloadTooltip,
-                        style: AppText.body.copyWith(color: AppColors.accent),
-                      ),
-                    ),
-                  )
-                : TextButton(
-                    onPressed: onDisable,
-                    style: TextButton.styleFrom(
-                        foregroundColor: AppColors.accent),
-                    child: Text(context.l10n.navTabsRemove),
-                  )
-          // Anything dead that the branch above could not offer an action for.
-          // Two cases land here and both used to show NOTHING: a CloudStream
-          // source (no search-disable to offer, so a red "Dead" row sat there
-          // inert), and a source whose search is fine but whose playback is
-          // broken — the rot the probe never sees.
-          //
-          // Routes to the source's own screen rather than deleting here: there
-          // is one uninstall path in the app and it stays that way.
-          else if ((_isDead || _playbackDead) && onManage != null)
-            (sl.isRegistered<AppMode>() && sl<AppMode>().isTv)
-                ? TvListFocusable(
-                    semanticLabel: 'Manage ${result.name}',
-                    onTap: onManage!,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 8),
-                      child: Text(
-                        context.l10n.uninstall,
-                        style: AppText.body.copyWith(color: AppColors.accent),
-                      ),
-                    ),
-                  )
-                : TextButton(
-                    onPressed: onManage,
-                    style: TextButton.styleFrom(
-                        foregroundColor: AppColors.accent),
-                    child: Text(context.l10n.uninstall),
-                  ),
+          else if (onUninstall != null)
+            IconButton(
+              onPressed: onUninstall,
+              tooltip: context.l10n.uninstallSourceTooltip(result.name),
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                size: 20,
+                // Tinted by state so the control reads as "this one, right now"
+                // rather than a generic grey icon repeated down the list.
+                color: (_isDead || _playbackDead)
+                    ? AppColors.accent
+                    : AppColors.textTertiary,
+              ),
+            ),
         ],
       ),
+    );
+
+    if (!selecting) return row;
+    return InkWell(
+      onTap: onToggleSelected,
+      // The whole row is the checkbox target — a 24px checkbox is not a tap
+      // target for "select these nine".
+      child: row,
     );
   }
 }

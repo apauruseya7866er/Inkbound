@@ -155,7 +155,7 @@ void main() {
 
       // Local-only app: the header names the app and says the library lives on
       // this device.
-      expect(find.text('Zangetsu'), findsOneWidget);
+      expect(find.text('Inkbound'), findsOneWidget);
       expect(find.text('On this device'), findsOneWidget);
     },
   );

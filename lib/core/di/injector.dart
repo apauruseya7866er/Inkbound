@@ -75,8 +75,9 @@ import '../metadata/tmdb.dart';
 import 'package:watch_app/core/metadata/tmdb_fallback.dart';
 import '../metadata/title_logo_service.dart';
 import '../mode/content_mode_cubit.dart';
-import '../network/cloudflare_bypass_prefs.dart';
+import '../mode/mode_policy.dart';
 import '../mode/novel_only.dart';
+import '../models/provider_info.dart';
 import '../trailer/trailer_service.dart';
 import '../anilist/anilist_graphql.dart';
 import '../anilist/anilist_network_policy.dart';
@@ -100,6 +101,7 @@ import '../download/download_manager.dart';
 import '../download/download_prefs.dart';
 import '../download/download_service.dart';
 import '../torrent/torrent_download_service.dart';
+import '../network/cloudflare_bypass_prefs.dart';
 import '../torrent/torrent_prefs.dart';
 import '../torrent/torrent_service.dart';
 import '../notify/subscription_store.dart';
@@ -164,10 +166,7 @@ bool tvosProvidersReady = false;
 /// Accept-Encoding is intentionally left out: dart:io already sends `gzip` and
 /// auto-decompresses it, whereas declaring `deflate` here would hand back a
 /// body dart:io won't decode.
-///
-/// Public so the Cloudflare solve can forward the same profile - see
-/// [lnreaderSolveHeaders].
-const Map<String, String> lnreaderBrowserHeaders = {
+const Map<String, String> _lnreaderBrowserHeaders = {
   'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -176,20 +175,6 @@ const Map<String, String> lnreaderBrowserHeaders = {
   'Sec-Fetch-Mode': 'cors',
   'Connection': 'keep-alive',
   'Cache-Control': 'max-age=0',
-};
-
-/// The subset of [lnreaderBrowserHeaders] worth replaying into the Cloudflare
-/// solve WebView.
-///
-/// Drops `User-Agent` on purpose: the solve sets that through the WebView's own
-/// settings (the only way it sticks), and it has to be `NovelHttp.deviceUserAgent`
-/// rather than this Windows-Chrome string, because that is the UA the novel lane
-/// actually replays with. Also drops `Connection`/`Cache-Control`, which say
-/// nothing useful to a challenge and are hop-by-hop-ish noise.
-Map<String, String> get lnreaderSolveHeaders => {
-  for (final e in lnreaderBrowserHeaders.entries)
-    if (e.key != 'User-Agent' && e.key != 'Connection' && e.key != 'Cache-Control')
-      e.key: e.value,
 };
 
 /// Headers alone don't clear webnovel.com's Cloudflare bot-fight — confirmed
@@ -292,8 +277,8 @@ Future<void> initDependencies() async {
   await StreamingPrefs.init();
   await DownloadPrefs.init();
   sl.registerSingleton<DownloadPrefs>(DownloadPrefs());
-  await TorrentPrefs.init();
-  sl.registerSingleton<TorrentPrefs>(TorrentPrefs());
+await TorrentPrefs.init();
+    sl.registerSingleton<TorrentPrefs>(TorrentPrefs());
   await CloudflareBypassPrefs.init();
   sl.registerSingleton<CloudflareBypassPrefs>(CloudflareBypassPrefs());
   // Push the persisted bypass-proxy values into the native config the
@@ -531,7 +516,7 @@ Future<void> initDependencies() async {
       final pluginHeaders = init['headers'] is Map
           ? Map<String, dynamic>.from(init['headers'] as Map)
           : const <String, dynamic>{};
-      final mergedHeaders = {...lnreaderBrowserHeaders, ...pluginHeaders};
+      final mergedHeaders = {..._lnreaderBrowserHeaders, ...pluginHeaders};
       final method = (init['method'] as String?)?.toUpperCase() ?? 'GET';
 
       // Native HTTP first on mobile: headers alone don't get past
@@ -649,8 +634,12 @@ Future<void> initDependencies() async {
         // Novel-only build: null is the documented "this ecosystem is absent"
         // value (see SourcesBackup's ctor doc), so a restore can't reinstall
         // anime or manga extensions the app will never load.
-        aniyomi: kNovelOnly ? null : AniyomiExtensionService(),
-        mihon: kNovelOnly ? null : MihonExtensionService(),
+        aniyomi: ModePolicy.isProviderTypeAllowed(ProviderType.anime)
+            ? AniyomiExtensionService()
+            : null,
+        mihon: ModePolicy.isProviderTypeAllowed(ProviderType.manga)
+            ? MihonExtensionService()
+            : null,
         lnreader: lnrService),
     LibraryBackup(),
     SettingsBackup(),
@@ -763,7 +752,7 @@ Future<void> initDependencies() async {
     // single gate that makes the whole anime source path unreachable — the
     // classes above stay registered (and therefore compile, and stay
     // isRegistered-safe for every caller) but stay empty.
-    if (kNovelOnly) return;
+    if (!ModePolicy.isProviderTypeAllowed(ProviderType.anime)) return;
     try {
       if (!Hive.isBoxOpen(AniyomiExtensionService.installedBoxName)) {
         await openBoxSafely<dynamic>(AniyomiExtensionService.installedBoxName);
@@ -834,7 +823,7 @@ Future<void> initDependencies() async {
     // `mihon_installed` / `mihon_repos` box opens along with it is safe —
     // every reader in backup/sources_backup.dart is behind Hive.isBoxOpen, so
     // an unopened box reads as "nothing installed" rather than throwing.
-    if (kNovelOnly) return;
+    if (!ModePolicy.isProviderTypeAllowed(ProviderType.manga)) return;
     if (!Platform.isAndroid) return; // Mihon extensions are Android-only (DEX)
     try {
       if (!Hive.isBoxOpen(MihonExtensionService.installedBoxName)) {
@@ -907,6 +896,11 @@ Future<void> initDependencies() async {
   // Hive box and restores it on launch, validated against the providers that
   // actually loaded (so a removed/disabled source falls back to allanime).
   await ActiveSourceCubit.init();
+  final bootSourceIds = {
+    ...manager.installedIds,
+    ...csManager.all.map((p) => p.sourceId),
+    ...lnrManager.installedSources.map((s) => s.id),
+  };
   sl.registerSingleton<ActiveSourceCubit>(
     ActiveSourceCubit(
       box: Hive.box(ActiveSourceCubit.boxName),
@@ -916,11 +910,13 @@ Future<void> initDependencies() async {
       // `mihon:` active source is restored a moment later via reapplySaved
       // rather than being in this initial set. lnr had neither, so a saved
       // novel source fell back to allanime on every restart — include it here.
-      valid: {
-        ...manager.installedIds,
-        ...csManager.all.map((p) => p.sourceId),
-        ...lnrManager.installedSources.map((s) => s.id),
-      },
+      //
+      // Filtered through the mode policy so a non-novel boot ID cannot become
+      // the active source before ContentModeCubit has a chance to correct it.
+      valid: ModePolicy.filterAllowedSourceIds(
+        bootSourceIds,
+        manifestTypes: sl<ProviderRegistry>().typeMapOf(),
+      ),
     ),
   );
 
@@ -1051,7 +1047,7 @@ Future<void> initDependencies() async {
     // Novel-only build: as with Aniyomi and Mihon above, no CloudStream plugin
     // is ever loaded. `.cs3` plugins are a streaming source format, so this
     // skips a native plugin scan that has no novel to find.
-    if (kNovelOnly) return;
+    if (!ModePolicy.isProviderTypeAllowed(ProviderType.anime)) return;
     try {
       await csManager.loadInstalled();
       // Honor a saved `cs:` active source that wasn't loaded yet at boot

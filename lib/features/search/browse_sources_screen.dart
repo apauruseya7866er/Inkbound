@@ -4,11 +4,11 @@ import '../../core/app_mode.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/mode/content_mode.dart';
-import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../l10n/l10n.dart';
 import '../home/search_screen.dart';
+import 'browse_source_kinds.dart';
 import 'browse_source_screen.dart';
 import 'browse_sources_list.dart';
 
@@ -42,26 +42,16 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
   TabController get _tab =>
       _tabOrNull ??= TabController(length: _kinds.length, vsync: this);
 
+  /// The tab order, and the index every content-mode lookup below relies on.
+  /// Novel-only build: one tab (Novel) rather than three, so the search
+  /// button's forceMode can't hand Search a Streaming/Manga mode the rest of
+  /// the app no longer exposes.
+  static final List<SourceListKind> _kinds = BrowseSourceKinds.available();
+
   /// [SourceListKind] and [ContentMode] both split streaming/manga/novel the
   /// same way; this just names the mapping for [SearchScreen.forceMode].
-  ContentMode _modeOf(SourceListKind kind) => switch (kind) {
-    SourceListKind.streaming => ContentMode.anime,
-    SourceListKind.manga => ContentMode.manga,
-    SourceListKind.novel => ContentMode.novel,
-  };
-
-  /// The tab order, and the index every `_modeOf(SourceListKind.values[i])`
-  /// below relies on. Novel-only build: one tab (Novel) rather than three, so
-  /// the search button's forceMode can't hand Search a Streaming/Manga mode the
-  /// rest of the app no longer exposes.
-  static final List<SourceListKind> _kinds = [
-    for (final m in availableModes)
-      switch (m) {
-        ContentMode.anime => SourceListKind.streaming,
-        ContentMode.manga => SourceListKind.manga,
-        ContentMode.novel => SourceListKind.novel,
-      },
-  ];
+  ContentMode _modeOf(SourceListKind kind) =>
+      BrowseSourceKinds.contentModeOf(kind);
 
   @override
   void dispose() {
@@ -123,12 +113,8 @@ class _BrowseSourcesScreenState extends State<BrowseSourcesScreen>
                 tabs: [
                   // Novel-only build: only the modes this build exposes. See
                   // [_kinds].
-                  if (availableModes.contains(ContentMode.anime))
-                    Tab(text: context.l10n.modeStreaming),
-                  if (availableModes.contains(ContentMode.manga))
-                    Tab(text: context.l10n.modeManga),
-                  if (availableModes.contains(ContentMode.novel))
-                    Tab(text: context.l10n.modeNovel),
+                  for (final kind in _kinds)
+                    Tab(text: BrowseSourceKinds.tabLabel(context.l10n, kind)),
                 ],
               )
             : null,

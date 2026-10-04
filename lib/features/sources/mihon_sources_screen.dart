@@ -14,6 +14,7 @@ import '../../core/mihon/mihon_extension_service.dart';
 import '../../core/mihon/mihon_manager.dart';
 import '../../core/mihon/mihon_provider.dart';
 import '../../core/mihon/mihon_update.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/state/active_source_cubit.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -563,24 +564,19 @@ class _MihonSourceRowState extends State<_MihonSourceRow> {
     );
     if (ok != true) return;
 
-    final pkg = widget.source.pkg;
-
-    // Removes the box entry and the APK (see MihonExtensionService.uninstall
-    // for why the order matters). Returns a reason instead of swallowing it —
-    // the APK outliving the uninstall is what made sources reappear after a
-    // restart, silently.
-    final failure = await MihonExtensionService.uninstall(pkg);
-
-    sl<MihonManager>().removeWhere((p) => p.pkg == pkg);
+    // The delete itself lives in SourceUninstaller, shared with the source
+    // health screen: one place that knows every ecosystem's uninstall, so it
+    // cannot drift into "uninstalled from here, back again after a restart".
+    final res = await SourceUninstaller.uninstall(widget.source.sourceId);
 
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..clearSnackBars();
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          failure == null
+          res.ok
               ? context.l10n.uninstalledName(name)
-              : context.l10n.uninstallFailed(failure),
+              : context.l10n.uninstallFailed(res.failure!),
         ),
       ),
     );

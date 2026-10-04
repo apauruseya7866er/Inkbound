@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/di/injector.dart';
 import '../../core/mode/content_mode.dart';
+import '../../core/mode/mode_policy.dart';
 import '../../core/mode/novel_only.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -99,7 +100,7 @@ class ListsHubScreen extends StatelessWidget {
     // at the render site means the section header, the row count and the rows
     // all agree on the same answer.
     if (!kNovelOnly) return all;
-    return all.where((k) => modeAvailable(k)).toList();
+    return all.where(ModePolicy.isModeAllowed).toList();
   }
 
   static IconData _iconFor(ContentMode k) => switch (k) {

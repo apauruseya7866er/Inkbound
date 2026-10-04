@@ -15,6 +15,7 @@ import '../../core/app_mode.dart';
 import '../../core/di/injector.dart';
 import '../../core/i18n/source_languages.dart';
 import '../../core/prefs/source_lang_prefs.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/provider/base_provider.dart';
 import '../../core/provider/provider_manager.dart';
 import '../../core/repository/source_actions.dart' as source_actions;
@@ -26,7 +27,8 @@ import '../../core/tv/tv_focusable.dart';
 import '../../core/tv/tv_list_focusable.dart';
 import '../../core/tv/tv_text_field.dart';
 import '../../core/ui/states.dart';
-import 'aniyomi_repo_tab.dart' show kAniyomiReposBoxName, AniyomiAddRepoDialog, AniyomiRepoTab;
+import 'aniyomi_repo_tab.dart'
+    show kAniyomiReposBoxName, AniyomiAddRepoDialog, AniyomiRepoTab;
 import 'source_language_sheet.dart';
 import 'sources_search_field.dart';
 import '../../core/ui/app_dialog.dart';
@@ -86,7 +88,9 @@ class _AniyomiSourcesScreenState extends State<AniyomiSourcesScreen> {
   Future<void> _removeAniyomiRepo(String url) async {
     if (!Hive.isBoxOpen(kAniyomiReposBoxName)) return;
     final box = Hive.box<String>(kAniyomiReposBoxName);
-    final key = box.toMap().entries
+    final key = box
+        .toMap()
+        .entries
         .where((e) => e.value == url)
         .map((e) => e.key)
         .firstOrNull;

@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import '../mode/mode_policy.dart';
 import '../models/provider_info.dart';
 
 /// Resolves a YouTube trailer id for a title from a metadata provider.
@@ -32,6 +33,11 @@ class TrailerService {
     required ProviderType type,
     String? year,
   }) async {
+    // Service-level novel-only gate: callers already hide trailer UI for
+    // reading types, but metadata-backed anime/movie titles can still reach
+    // this lookup. Refusing here keeps the trailer ecosystem dormant without
+    // requiring every UI call site to check the build mode.
+    if (!ModePolicy.isCapabilityAllowed(NovelCapability.video)) return null;
     switch (type) {
       case ProviderType.anime:
         return _anilistTrailer(title: title, englishTitle: englishTitle);
@@ -65,6 +71,7 @@ class TrailerService {
   /// them fresh each time you want to play (the hero / fullscreen do exactly
   /// that), never persist them.
   Future<String?> streamUrl(String youtubeId, {bool low = false}) async {
+    if (!ModePolicy.isCapabilityAllowed(NovelCapability.video)) return null;
     final yt = YoutubeExplode();
     try {
       final manifest = await yt.videos.streamsClient.getManifest(youtubeId);
@@ -91,6 +98,7 @@ class TrailerService {
   /// back to [streamUrl] (the light muxed 360p). Same short-lived-URL rule:
   /// resolve fresh, never persist.
   Future<({String video, String audio})?> streamUrlHd(String youtubeId) async {
+    if (!ModePolicy.isCapabilityAllowed(NovelCapability.video)) return null;
     final yt = YoutubeExplode();
     try {
       final manifest = await yt.videos.streamsClient.getManifest(youtubeId);

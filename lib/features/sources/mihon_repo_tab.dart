@@ -10,6 +10,7 @@ import '../../core/mihon/mihon_extension_service.dart';
 import '../../core/mihon/mihon_manager.dart';
 import '../../core/mihon/mihon_repo.dart';
 import '../../core/mihon/mihon_update.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/prefs/source_lang_prefs.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
@@ -86,10 +87,7 @@ class _MihonAddRepoDialogState extends State<MihonAddRepoDialog> {
               ),
             ),
             const SizedBox(height: 10),
-            Text(
-              context.l10n.pasteRepoBaseUrlMihon,
-              style: AppText.caption,
-            ),
+            Text(context.l10n.pasteRepoBaseUrlMihon, style: AppText.caption),
           ],
         ),
       ),
@@ -238,8 +236,9 @@ class _MihonRepoSectionState extends State<_MihonRepoSection> {
   /// Null in widget tests that don't register it — the language filter is then
   /// simply off (every entry shows), so those tests keep asserting on the full
   /// list. In the app it's always registered.
-  final MangaLangPrefs? _langPrefs =
-      sl.isRegistered<MangaLangPrefs>() ? sl<MangaLangPrefs>() : null;
+  final MangaLangPrefs? _langPrefs = sl.isRegistered<MangaLangPrefs>()
+      ? sl<MangaLangPrefs>()
+      : null;
 
   /// Null when [MihonManager] isn't DI-registered (e.g. a widget test that
   /// builds this section directly without going through the app's injector).
@@ -320,7 +319,8 @@ class _MihonRepoSectionState extends State<_MihonRepoSection> {
     final ok = await AppDialog.confirm(
       context,
       title: context.l10n.removeRepo,
-      message: context.l10n.alreadyInstalledExtensionsStay +
+      message:
+          context.l10n.alreadyInstalledExtensionsStay +
           context.l10n.youCanAddRepoBackLater,
       confirmLabel: context.l10n.removeDownloadTooltip,
       destructive: true,
@@ -346,8 +346,8 @@ class _MihonRepoSectionState extends State<_MihonRepoSection> {
               list.isEmpty
                   ? context.l10n.alreadyUpToDate
                   : list.length == 1
-                      ? context.l10n.oneUpdate
-                      : context.l10n.nUpdates(list.length),
+                  ? context.l10n.oneUpdate
+                  : context.l10n.nUpdates(list.length),
             ),
           ),
         );
@@ -404,7 +404,11 @@ class _MihonRepoSectionState extends State<_MihonRepoSection> {
     messenger
       ..clearSnackBars()
       ..showSnackBar(
-        SnackBar(content: Text(context.l10n.updatedSourcesCount(done, done == 1 ? '' : 's'))),
+        SnackBar(
+          content: Text(
+            context.l10n.updatedSourcesCount(done, done == 1 ? '' : 's'),
+          ),
+        ),
       );
   }
 
@@ -684,7 +688,8 @@ class _MihonRepoSectionState extends State<_MihonRepoSection> {
                 installed: _isInstalled(entry.pkg),
                 installFn: widget.installFn,
                 uninstallFn: widget.uninstallFn,
-                onInstalled: () => setState(() => _installedPkgs.add(entry.pkg)),
+                onInstalled: () =>
+                    setState(() => _installedPkgs.add(entry.pkg)),
                 onUninstalled: () =>
                     setState(() => _installedPkgs.remove(entry.pkg)),
               ),
@@ -764,7 +769,9 @@ class _MihonExtensionRowState extends State<_MihonExtensionRow> {
       widget.onInstalled();
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(l10n.installedName(_entry.name))));
+        ..showSnackBar(
+          SnackBar(content: Text(l10n.installedName(_entry.name))),
+        );
     } catch (e) {
       messenger
         ..clearSnackBars()
@@ -795,34 +802,32 @@ class _MihonExtensionRowState extends State<_MihonExtensionRow> {
       widget.onUninstalled();
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.uninstalledName(_entry.name))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.uninstalledName(_entry.name))),
+        );
     } catch (e) {
       messenger
         ..clearSnackBars()
-        ..showSnackBar(SnackBar(content: Text(context.l10n.uninstallFailed('$e'))));
+        ..showSnackBar(
+          SnackBar(content: Text(context.l10n.uninstallFailed('$e'))),
+        );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _defaultUninstall() async {
+    // Delegates to the shared uninstaller — same code the Source health screen
+    // runs, so an extension removed from either screen leaves the same
+    // (nonexistent) state behind.
+    //
     // Same helper as the source tile: box entry AND the APK. The APK is what
     // actually resurrects the source — `loadInstalled` re-reads the directory
     // on every cold start — so deleting only the box entry left the extension
     // to come back on the next launch.
-    final failure = await MihonExtensionService.uninstall(_entry.pkg);
-    // Remove from the manager so the source disappears from the picker.
-    // Unlike AniyomiManager (whose store is Map<String, BaseProvider> and so
-    // needs an `is AniyomiProvider` narrowing check), MihonManager._sources is
-    // already typed Map<String, MihonProvider> — removeWhere's predicate
-    // takes a MihonProvider directly, so no type check is needed here.
-    if (GetIt.instance.isRegistered<MihonManager>()) {
-      GetIt.instance.get<MihonManager>().removeWhere(
-        (p) => p.pkg == _entry.pkg,
-      );
-    }
-    if (failure != null) {
-      debugPrint('[mihon] repo-tab uninstall ${_entry.pkg}: $failure');
+    final res = await SourceUninstaller.uninstallMihonExtension(_entry.pkg);
+    if (res.failure != null) {
+      debugPrint('[mihon] repo-tab uninstall ${_entry.pkg}: ${res.failure}');
     }
   }
 

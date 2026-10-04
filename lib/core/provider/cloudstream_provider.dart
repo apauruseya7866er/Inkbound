@@ -177,8 +177,7 @@ class CloudStreamProvider implements BaseProvider {
   /// ambiguous — we send `"<fileId><name>"` and the host matches BOTH,
   /// landing on the exact source. Sources with no file id (unique `cs:<name>`
   /// sources) fall back to the bare name, which the host still accepts.
-  String get hostKey =>
-      (sourcePlugin != null && sourcePlugin!.isNotEmpty)
+  String get hostKey => (sourcePlugin != null && sourcePlugin!.isNotEmpty)
       ? '${sourcePlugin!}$keySep$name'
       : name;
 
@@ -460,10 +459,10 @@ class CloudStreamProvider implements BaseProvider {
       final sep = key.indexOf('|');
       if (sep <= 0) continue;
       try {
-        await _csChannel.invokeMethod(
-          'cancelLinks',
-          {'name': key.substring(0, sep), 'data': key.substring(sep + 1)},
-        );
+        await _csChannel.invokeMethod('cancelLinks', {
+          'name': key.substring(0, sep),
+          'data': key.substring(sep + 1),
+        });
       } catch (_) {
         // Best-effort: a failed cancel just lets that hunt run its cap out.
       }
@@ -958,12 +957,12 @@ class CloudStreamManager extends ChangeNotifier {
   BaseProvider? resolveCompatible(String sourceId) {
     final exact = _providers[sourceId];
     if (exact != null) return exact;
-    final wanted = _identity(sourceId);
+    final wanted = identityOf(sourceId);
     if (wanted.isEmpty) return null;
     CloudStreamProvider? fallback;
     for (final p in _providers.values) {
       final ids = <String>{
-        _identity(p.sourceId),
+        identityOf(p.sourceId),
         if (p.sourcePlugin != null && p.sourcePlugin!.isNotEmpty)
           p.sourcePlugin!.split('@').first.toLowerCase(),
         p.name.toLowerCase(),
@@ -977,7 +976,10 @@ class CloudStreamManager extends ChangeNotifier {
 
   /// Repo/version-agnostic identity token of a `cs:` source id — the
   /// internalName (first `@`-segment of the plugin id) or the bare name.
-  static String _identity(String sourceId) {
+  ///
+  /// Public because [SourceUninstaller] is handed a source id and has to reduce
+  /// it to the internalName the native uninstall call is keyed on.
+  static String identityOf(String sourceId) {
     final body = sourceId.startsWith('cs:') ? sourceId.substring(3) : sourceId;
     final at = body.indexOf('@');
     return (at >= 0 ? body.substring(0, at) : body).toLowerCase();
@@ -1258,6 +1260,97 @@ class CloudStreamManager extends ChangeNotifier {
       debugPrint('[cloudstream] installPlugin failed: $e');
       rethrow;
     }
+  }
+
+  /// Uninstalls the installed plugin whose internalName is [internalName],
+  /// resolving which repo it came from so the native call stays repo-scoped.
+  ///
+  /// [uninstallPlugin] needs a catalog entry and a repo url, and a caller holding
+  /// only a `cs:` source id has neither: the id's `@version@repoTag` suffix
+  /// identifies the install, but not the repo *url* the tag was derived from, and
+  /// the catalog is per-repo and lazily fetched. Both are recoverable here, and
+  /// the CS sources screen already holds a `CsPluginMeta` because it renders the
+  /// catalog — a caller that doesn't (the Source health screen deleting a dead
+  /// source) would otherwise have no way in.
+  ///
+  /// Best-effort: a source with no installed plugin, or one whose repo catalog
+  /// can no longer be fetched, resolves to no match and returns without throwing
+  /// rather than reporting a failure for something that is already gone.
+  Future<void> uninstallPluginByName(String internalName) async {
+    if (internalName.isEmpty) return;
+    final wanted = internalName.toLowerCase();
+
+    // Which install are we removing? Prefer an enabled one so a duplicate
+    // name across repos takes the copy the user is actually seeing.
+    CloudStreamProvider? target;
+    CloudStreamProvider? disabledMatch;
+    for (final p in _providers.values) {
+      final names = <String>{
+        identityOf(p.sourceId),
+        if (p.sourcePlugin != null && p.sourcePlugin!.isNotEmpty)
+          p.sourcePlugin!.split('@').first.toLowerCase(),
+        p.name.toLowerCase(),
+      };
+      if (!names.contains(wanted)) continue;
+      if (isEnabled(p.sourceId)) {
+        target = p;
+        break;
+      }
+      disabledMatch ??= p;
+    }
+    target ??= disabledMatch;
+    if (target == null) return;
+
+    // `sourcePlugin` is `internalName@version@repoTag`; the tag is the hash of
+    // the repo url, so it's what identifies WHICH repo this install belongs to.
+    final segments = (target.sourcePlugin ?? '').split('@');
+    final tag = segments.length >= 3 ? segments[2] : '';
+
+    String? repoUrl;
+    Map<String, dynamic>? repo;
+    for (final r in _repos) {
+      final url = (r['url'] ?? '').toString();
+      if (tag.isEmpty || _csRepoTag(url) == tag) {
+        repoUrl = url;
+        repo = r;
+        break;
+      }
+    }
+
+    // The catalog is only in memory once a repo has been opened. Fetch it if
+    // this repo's hasn't been — the entry carries the .cs3 URL the native call
+    // needs, and without it there is nothing to uninstall.
+    if (repo != null &&
+        _catalogOf(repo).isEmpty &&
+        (repoUrl ?? '').isNotEmpty) {
+      await ensureCatalog(repoUrl!);
+      repo = _repos.firstWhere(
+        (r) => (r['url'] ?? '').toString() == repoUrl,
+        orElse: () => repo!,
+      );
+    }
+
+    CsPluginMeta? meta;
+    if (repo != null) {
+      for (final m in _catalogOf(repo)) {
+        if (m.internalName.toLowerCase() == wanted) {
+          meta = m;
+          break;
+        }
+      }
+    }
+
+    // Last resort: rebuild enough of an entry from the installed provider. The
+    // native side keys the delete on internalName + repoUrl, so a missing
+    // download URL doesn't stop it.
+    meta ??= CsPluginMeta(
+      internalName: internalName,
+      name: target.name,
+      url: '',
+      version: int.tryParse(segments.length >= 2 ? segments[1] : '') ?? 1,
+    );
+
+    await uninstallPlugin(meta, repoUrl: repoUrl ?? '');
   }
 
   /// Uninstalls one plugin and its sources — repo-scoped via [repoUrl], so a

@@ -7,13 +7,15 @@ import 'package:watch_app/core/hive/safe_box.dart';
 import '../../core/di/injector.dart';
 import '../../core/ui/source_icon_tile.dart';
 import '../../core/lnreader/lnreader_extension_service.dart';
-import '../../core/lnreader/lnreader_manager.dart';
 import '../../core/lnreader/novel_lang_prefs.dart';
 import '../../core/lnreader/seed_repo.dart';
+import '../../core/playback/source_health_store.dart';
+import '../../core/playback/source_uninstaller.dart';
 import '../../core/repository/source_actions.dart' as source_actions;
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../core/ui/app_dialog.dart';
+import 'source_health_screen.dart';
 import '../../core/ui/states.dart';
 import 'sources_search_field.dart';
 import '../../l10n/l10n.dart';
@@ -253,10 +255,7 @@ class _LnReaderSourcesScreenState extends State<LnReaderSourcesScreen> {
               '$failed could not be downloaded — tap to retry.'
         : 'Installed ${written.length} sources.';
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        duration: const Duration(seconds: 5),
-      ),
+      SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
     );
 
     // Re-read rather than assuming success: a partial run leaves the offer up
@@ -1007,6 +1006,11 @@ class _LnReaderSourceRowState extends State<_LnReaderSourceRow> {
 
   Future<void> _install() async {
     final messenger = ScaffoldMessenger.of(context);
+    // Resolved before the await: reading context.l10n across an async gap can
+    // touch a deactivated element.
+    final name = widget.meta.name;
+    final installed = context.l10n.installedName(name);
+    final installFailed = context.l10n.installFailed;
     setState(() => _busy = true);
     try {
       // Installs (and any later re-install) key by plugin id alone, same as
@@ -1017,15 +1021,11 @@ class _LnReaderSourceRowState extends State<_LnReaderSourceRow> {
       widget.onChanged();
       messenger
         ..clearSnackBars()
-        ..showSnackBar(
-          SnackBar(content: Text(context.l10n.installedName(widget.meta.name))),
-        );
+        ..showSnackBar(SnackBar(content: Text(installed)));
     } catch (e) {
       messenger
         ..clearSnackBars()
-        ..showSnackBar(
-          SnackBar(content: Text(context.l10n.installFailed('$e'))),
-        );
+        ..showSnackBar(SnackBar(content: Text(installFailed('$e'))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1041,21 +1041,26 @@ class _LnReaderSourceRowState extends State<_LnReaderSourceRow> {
   // uninstalls turn out to be a common misfire.
   Future<void> _remove() async {
     final messenger = ScaffoldMessenger.of(context);
+    // Resolved before the await, same reason as _install().
+    final name = widget.meta.name;
+    final removedName = context.l10n.removedName(name);
+    final removeFailed = context.l10n.removeFailed;
     setState(() => _busy = true);
     try {
-      await sl<LnReaderManager>().uninstall(widget.meta.id);
+      // Routed through the shared uninstaller so an `lnr:` plugin removed here
+      // and one removed from the Source health screen leave the same state
+      // (storage entry, cached provider, runtime JS all dropped).
+      final res = await SourceUninstaller.uninstall(_sourceId);
       widget.onChanged();
       messenger
         ..clearSnackBars()
         ..showSnackBar(
-          SnackBar(content: Text(context.l10n.removedName(widget.meta.name))),
+          SnackBar(content: Text(res.ok ? removedName : removeFailed(res.failure!))),
         );
     } catch (e) {
       messenger
         ..clearSnackBars()
-        ..showSnackBar(
-          SnackBar(content: Text(context.l10n.removeFailed('$e'))),
-        );
+        ..showSnackBar(SnackBar(content: Text(removeFailed('$e'))));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -1134,18 +1139,30 @@ class _LnReaderSourceRowState extends State<_LnReaderSourceRow> {
             )
           else if (widget.installed)
             // A repo's catalog: an installed source shows an context.l10n.uninstall text
-            // button, matching Mihon's repo tab (`_MihonExtensionRow`).
-            OutlinedButton(
-              onPressed: _remove,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.textSecondary,
-                minimumSize: const Size(100, 36),
-                side: const BorderSide(color: AppColors.hairline),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+            // button, matching Mihon's repo tab (`_MihonExtensionRow`), with its
+            // live health beside it so a reader can see a source is broken
+            // *before* deciding to remove it.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SourceHealthChip(
+                  sourceId: _sourceId,
+                  sourceName: meta.name,
                 ),
-              ),
-              child: Text(context.l10n.uninstall),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: _remove,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    minimumSize: const Size(100, 36),
+                    side: const BorderSide(color: AppColors.hairline),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: Text(context.l10n.uninstall),
+                ),
+              ],
             )
           else
             // Mirrors Mihon's catalog Install control exactly
@@ -1164,6 +1181,89 @@ class _LnReaderSourceRowState extends State<_LnReaderSourceRow> {
               child: Text(context.l10n.install),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// A source's last-known health, shown next to the uninstall control.
+///
+/// Reads [SourceHealthStore] — the same store the search screen writes and the
+/// Source health screen reads — so all three agree. It deliberately shows
+/// *unknown* rather than "working" for a source with no record yet: a fresh
+/// install has never been probed, and claiming it is healthy would make the
+/// indicator decorative.
+///
+/// A dead mark is only shown while it is fresh ([SourceHealthStore.recheckWindow]);
+/// past that the source is retried, so an old failure is reported as unknown
+/// rather than as a permanent verdict.
+class _SourceHealthChip extends StatelessWidget {
+  const _SourceHealthChip({required this.sourceId, required this.sourceName});
+
+  final String sourceId;
+  final String sourceName;
+
+  static const _green = Color(0xFF2E7D32);
+  static const _amber = Color(0xFFB26A00);
+
+  @override
+  Widget build(BuildContext context) {
+    final store =
+        sl.isRegistered<SourceHealthStore>() ? sl<SourceHealthStore>() : null;
+    // Never probed, or no store at all: nothing to claim, so show nothing.
+    if (store == null || store.recordOf(sourceId) == null) {
+      return const SizedBox.shrink();
+    }
+    final status = store.statusOf(sourceId);
+
+    final (Color color, IconData icon, String label) = switch (status) {
+      SourceHealth.ok => (
+        _green,
+        Icons.check_circle_rounded,
+        context.l10n.working,
+      ),
+      SourceHealth.slow => (
+        _amber,
+        Icons.hourglass_bottom_rounded,
+        context.l10n.slow,
+      ),
+      // Only reachable while fresh; see the class doc.
+      SourceHealth.dead => (
+        Theme.of(context).colorScheme.error,
+        Icons.cancel_rounded,
+        context.l10n.dead,
+      ),
+    };
+
+    return Tooltip(
+      message: '$sourceName — $label',
+      child: Semantics(
+        label: '$sourceName: $label',
+        button: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const SourceHealthScreen()),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, size: 16, color: color),
+                const SizedBox(width: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
