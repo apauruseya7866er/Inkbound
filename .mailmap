@@ -1,0 +1,25 @@
+# Canonical identity for people who appear under more than one email address.
+#
+# GitHub keys contributor attribution on the author email, so one person who has
+# committed from two addresses is counted as two contributors. This file tells
+# git - and GitHub - that those addresses are the same person.
+#
+# Format: <proper-name> <proper-email> <commit-email>...
+#
+# Canonical addresses are the account-bound GitHub noreply addresses where one
+# exists, because a noreply address can only ever belong to the account it was
+# issued for. A personal gmail address can be reassigned or reused by its owner,
+# which would silently move commits onto whoever claims it later.
+#
+# Not mapped on purpose:
+#   nathenbrewer@gmail.com and leo.camus23@gmail.com already cover both of that
+#   person's display names, and GitHub matches on the email, so they already
+#   collapse to a single contributor without help.
+
+# Upstream author, whose commits span a personal address, a ChatGPT-assistant
+# address, and their verified GitHub noreply.
+Krishna Vishwakarma <88382789+Spyou@users.noreply.github.com> krishnavishwakarma2525@gmail.com
+Krishna Vishwakarma <88382789+Spyou@users.noreply.github.com> chatgptkrylor@gmail.com
+
+# Same person, two addresses.
+Debjit <38371196+xayron@users.noreply.github.com> zxyron0@gmail.com
