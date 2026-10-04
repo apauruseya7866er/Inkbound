@@ -32,6 +32,7 @@ import 'reader_comfort.dart';
 import 'reader_pull_chapter.dart';
 import 'tts_alignment.dart';
 import 'tts_highlight_box.dart';
+import 'tts_full_player.dart';
 import 'tts_player_bar.dart';
 import '../../l10n/l10n.dart';
 
@@ -1256,6 +1257,21 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                   child: TtsPlayerBar(
                     cubit: _tts!,
                     onOpenSettings: _openTtsSheet,
+                    onOpenPlayer: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => TtsFullPlayer(
+                            cubit: _tts!,
+                            bookTitle: widget.showTitle,
+                            chapterTitle: () =>
+                                _chapterLabel(_index) ??
+                                'Chapter ${_index + 1}',
+                            cover: widget.cover,
+                            onOpenSettings: _openTtsSheet,
+                          ),
+                        ),
+                      );
+                    },
                     onClose: () {
                       setState(() => _ttsPanelOpen = false);
                       _tts?.stop();
