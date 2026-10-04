@@ -697,7 +697,59 @@ void main() {
       }
     });
   });
+
+  group('ttsFollowScrollTarget', () {
+    test('uses the scrolled screen position and the content top inset', () {
+      final target = ttsFollowScrollTarget(
+        blockOffset: 700,
+        sentenceOffset: 24,
+        contentTopInset: 32,
+        scrollOffset: 550,
+        viewportHeight: 600,
+        anchorFraction: 0.45,
+        toleranceFraction: 0.05,
+        minScrollExtent: 0,
+        maxScrollExtent: 2000,
+      );
+
+      // The sentence is at y=256 on screen, so it should move to y=270.
+      expect(target, 486);
+    });
+
+    test('does not move while the sentence is already near the anchor', () {
+      final target = ttsFollowScrollTarget(
+        blockOffset: 700,
+        sentenceOffset: 40,
+        contentTopInset: 32,
+        scrollOffset: 500,
+        viewportHeight: 600,
+        anchorFraction: 0.45,
+        toleranceFraction: 0.05,
+        minScrollExtent: 0,
+        maxScrollExtent: 2000,
+      );
+
+      expect(target, isNull);
+    });
+
+    test('clamps at the scroll boundaries', () {
+      final target = ttsFollowScrollTarget(
+        blockOffset: 10,
+        sentenceOffset: 0,
+        contentTopInset: 32,
+        scrollOffset: 0,
+        viewportHeight: 600,
+        anchorFraction: 0.45,
+        toleranceFraction: 0.05,
+        minScrollExtent: 0,
+        maxScrollExtent: 2000,
+      );
+
+      expect(target, 0);
+    });
+  });
 }
+
 
 /// Which page an offset falls on, derived independently of
 /// [pageIndexForRange].
@@ -750,4 +802,3 @@ void _walk(
     }
   }
 }
-
