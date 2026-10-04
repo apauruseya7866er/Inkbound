@@ -9,6 +9,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../core/app_mode.dart';
 import '../../core/aniyomi/aniyomi_image_provider.dart';
 import '../../core/di/injector.dart';
+import '../../core/lnreader/lnreader_manager.dart';
 import '../../core/metadata/streaming_service.dart';
 import '../../core/zmode/tmdb_catalogue.dart';
 import '../../core/platform/apple_tv.dart';
@@ -1744,16 +1745,14 @@ class _HomeViewState extends State<_HomeView>
                           child: HomeLoadedEmptyView(
                             offline: state.offline,
                             mode: sl<ContentModeCubit>().state,
-                            // Name whatever ACTUALLY answered: in Z Mode the
-                            // rows come from AniList/MAL/TMDB/Simkl, not the
-                            // active source, so blaming the source was simply
-                            // pointing at the wrong thing. The router hands
-                            // back the right name in either mode.
-                            sourceName: _repo.displayName(_repo.sourceId),
-                            // A metadata catalogue, not an installed source —
-                            // the "switch source at the top" advice does not
-                            // apply to it.
+                            // Novel-only Home queried installed LNReader
+                            // sources directly, not the metadata catalogue
+                            // that the repository's active source ID names.
+                            sourceName: kNovelOnly
+                                ? 'Novel source'
+                                : _repo.displayName(_repo.sourceId),
                             isMetadataProvider:
+                                !kNovelOnly &&
                                 _repo.sourceId == ZmodeIds.sourceId,
                             rateLimitedSeconds: state.rateLimitedSeconds,
                             onRetry: () =>
@@ -1936,7 +1935,14 @@ class HomeLoadedEmptyView extends StatelessWidget {
     // streaming extensions are only needed at play time, so an empty home
     // here means the catalogue fetch failed, not "nothing installed". His
     // guard, kept on top of this screen.
-    if (!ZModePrefs.enabled && !hasSourcesFor(mode)) {
+    final novelOnlyHome = kNovelOnly && mode == ContentMode.novel;
+    final hasNovelSources =
+        sl.isRegistered<LnReaderManager>() &&
+        sl<LnReaderManager>().installedSources.isNotEmpty;
+    final noSources = novelOnlyHome
+        ? !hasNovelSources
+        : !ZModePrefs.enabled && !hasSourcesFor(mode);
+    if (noSources) {
       return _NoSourcesGuide(mode: mode, onBrowse: onInstallSources);
     }
     return _SourceUnavailable(

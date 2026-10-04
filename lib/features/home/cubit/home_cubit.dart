@@ -4,12 +4,14 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart' show debugPrint, ValueNotifier;
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:get_it/get_it.dart';
+import 'package:hive/hive.dart';
 
 import '../../../core/anilist/anilist_network_policy.dart';
 import '../../../core/app_mode.dart';
 import '../../../core/di/injector.dart';
 import '../../../core/error/exceptions.dart';
 import '../../../core/error/network_failure.dart';
+import '../../../core/lnreader/lnreader_extension_service.dart';
 import '../../../core/lnreader/lnreader_manager.dart';
 import '../../../core/lnreader/novel_cloudflare.dart';
 import '../../../core/models/home_row.dart';
@@ -19,7 +21,6 @@ import '../../../core/mode/content_mode.dart';
 import '../../../core/mode/content_mode_cubit.dart';
 import '../../../core/mode/novel_only.dart';
 import '../../../core/platform/apple_tv.dart';
-import '../../../core/playback/pinned_sources.dart';
 import '../../../core/repository/catalogue_repository.dart';
 import '../../../core/repository/source_repository.dart';
 import '../../../core/tracker/tracker.dart';
@@ -185,83 +186,83 @@ class HomeCubit extends Cubit<HomeState> {
   /// The Z Mode browse kind for this load, or null when the home is
   /// source-backed. Read per load (not cached) because mode and stream kind
   /// change under the cubit without a new registration.
-  /// Home rows built from the user's pinned novel sources.
-  ///
-  /// Returns null when this build or this state has nothing pinned, which is the
-  /// signal to fall back to the ordinary catalogue rather than show an empty
-  /// home — a fresh install has no pins and must not come up blank.
-  ///
-  /// Each pinned source contributes one row, titled with the source's own name
-  /// rather than the provider's section title. Two sources both calling their
-  /// feed "Popular" would otherwise render as two identically-titled rows with
-  /// no way to tell whose content is whose.
-  Future<List<HomeSection>?> _pinnedNovelSections() async {
-    if (!kNovelOnly) return null;
-
-    // No `isRegistered` guard: PinnedSources is a static utility initialised at
-    // boot, not a get_it registration, so a registration check here is always
-    // false and silently disables the whole feature.
-    final pinnedIds = PinnedSources.notifier.value
-        .where((id) => id.startsWith('lnr:'))
-        .toList(growable: false);
-    if (pinnedIds.isEmpty) return null;
-    if (!_sl.isRegistered<SourceRepository>()) return null;
-
-    final repo = _sl.isRegistered<SourceRepository>() ? _sl<SourceRepository>() : null;
-    if (repo == null) return null;
-    final manager = _sl.isRegistered<LnReaderManager>() ? _sl<LnReaderManager>() : null;
-
+  /// Home rows built from every installed novel source. A fresh install with
+  /// no sources stays empty so Home can point the reader to source setup rather
+  /// than silently showing titles from the unrelated AniList catalogue.
+  Future<List<HomeSection>> _installedNovelSections(
+    List<({String id, String name})> sources,
+  ) async {
+    if (sources.isEmpty) return const [];
     final out = <HomeSection>[];
+    final nameCounts = <String, int>{};
+    for (final source in sources) {
+      final name = source.name.trim().isEmpty ? source.id : source.name.trim();
+      nameCounts.update(name, (count) => count + 1, ifAbsent: () => 1);
+    }
     // Sequential rather than parallel: each source spins up a JS plugin runtime
     // on first use, and a dozen of those at once is a stall, not a speed-up.
-    for (final id in pinnedIds) {
-      final pluginId = id.substring(4);
-      final name = manager?.metaFor(pluginId)?.name ?? id;
+    for (final source in sources) {
+      final baseName = source.name.trim().isEmpty
+          ? source.id
+          : source.name.trim();
+      final name = nameCounts[baseName]! > 1
+          ? '$baseName (${source.id.substring(4)})'
+          : baseName;
       try {
-        final sections = await repo
-            .home(sourceId: id)
+        final sections = await _repo
+            .home(sourceId: source.id)
             .timeout(const Duration(seconds: 25));
-        final first = sections.where((s) => s.items.isNotEmpty).firstOrNull;
-        if (first == null) {
-          // Said out loud rather than dropped in silence. A pinned source that
-          // quietly stops appearing on Home is indistinguishable from one that
-          // was never pinned, which is the version of this that cost an
-          // afternoon: eight pinned, two rows, no clue why.
-          debugPrint('[home] pinned source $id has no home content');
-          continue;
+        for (final section in sections) {
+          if (section.items.isEmpty) continue;
+          out.add(
+            HomeSection(
+              title: '$name · ${section.title}',
+              items: section.items,
+              more: section.more,
+            ),
+          );
         }
-        out.add(
-          HomeSection(
-            title: name,
-            items: first.items,
-            // Keep the provider's own paging kind so "See all" still pages the
-            // feed this row came from, not a generic one.
-            more: first.more,
-          ),
-        );
+        if (!sections.any((section) => section.items.isNotEmpty)) {
+          debugPrint(
+            '[home] installed source ${source.id} has no home content',
+          );
+        }
       } catch (e) {
         // One dead source must not empty the whole home page.
-        debugPrint('[home] pinned source $id failed: $e');
+        debugPrint('[home] installed source ${source.id} failed: $e');
       }
     }
     debugPrint(
-      '[home] pinned rows: ${out.length} from $pinnedIds sources '
-      '(${pinnedIds.length - out.length} produced nothing)',
+      '[home] installed novel sources: ${sources.length}, '
+      'home rows: ${out.length}',
     );
-    return out.isEmpty ? null : out;
+    return out;
   }
 
-  /// Recomputes rows when a source is pinned or unpinned.
-  ///
-  /// The pinned set is user input like any other: a long-press in the source
-  // picker changes what home should be showing, and nothing else would refresh it.
-  void bindPinnedSources() {
-    PinnedSources.notifier.addListener(_onPinnedChanged);
+  /// Recomputes Home when a novel source is installed or removed.
+  void bindInstalledNovelSources() {
+    if (!kNovelOnly ||
+        !_sl.isRegistered<LnReaderManager>() ||
+        !Hive.isBoxOpen(LnReaderExtensionService.boxName)) {
+      return;
+    }
+    _novelSourcesSubscription ??=
+        Hive.box<Map>(LnReaderExtensionService.boxName).watch().listen((_) {
+          _novelSourcesDebounce?.cancel();
+          _novelSourcesDebounce = Timer(const Duration(milliseconds: 400), () {
+            if (!isClosed) load(reset: true);
+          });
+        });
   }
 
-  void _onPinnedChanged() {
-    if (isClosed) return;
-    unawaited(load());
+  StreamSubscription<BoxEvent>? _novelSourcesSubscription;
+  Timer? _novelSourcesDebounce;
+
+  @override
+  Future<void> close() {
+    _novelSourcesDebounce?.cancel();
+    _novelSourcesSubscription?.cancel();
+    return super.close();
   }
 
   ZKind? get _browseKind {
@@ -306,7 +307,13 @@ class HomeCubit extends Cubit<HomeState> {
     if (reset) _trackerCache = null;
     final sourceId = _repo.sourceId;
     final kind = _browseKind;
-    final cacheKey = kind?.name ?? 'all';
+    final installedNovelSources =
+        kNovelOnly && _sl.isRegistered<LnReaderManager>()
+        ? _sl<LnReaderManager>().installedSources
+        : const <({String id, String name})>[];
+    final cacheKey = kNovelOnly
+        ? 'novel:${installedNovelSources.map((source) => source.id).join(',')}'
+        : kind?.name ?? 'all';
     // Cold start with a remembered home: paint it on the first frame and
     // refresh silently underneath. Same rows, same order — only the wait is
     // gone. A miss simply keeps the normal loading state.
@@ -362,14 +369,12 @@ class HomeCubit extends Cubit<HomeState> {
     var offline = false;
     int? limitedSeconds;
 
-    // Novel-only: the catalogue's own source rows are metadata titles from
-    // whatever [CatalogueRouter] resolves (Z Mode, which defaults on, hands them
-    // to AniList). Those are anime/manga catalogue art the user cannot read
-    // from, in an app that can only read novels. Pinned sources are the ones they
-    // chose, so their catalogues are what home shows.
-    final pinned = await _pinnedNovelSections();
-    if (pinned != null) {
-      sections = pinned;
+    // The novel-only app is source-first, not metadata-catalogue-first. AniList
+    // can return anime/manga titles that have no reading source in this app.
+    // Use every installed novel source instead, and keep an empty result empty
+    // so Home can guide new users to install a source.
+    if (kNovelOnly) {
+      sections = await _installedNovelSections(installedNovelSources);
     } else {
       try {
         final homeFuture = _repo.home();
