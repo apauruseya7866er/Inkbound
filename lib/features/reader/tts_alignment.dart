@@ -372,6 +372,34 @@ int? pageIndexForRange(List<TextSpan> pages, int start, int end) {
   return null;
 }
 
+/// The scroll offset that places a sentence's first line at the desired
+/// viewport anchor, or null when it is already close enough.
+///
+/// [contentTopInset] accounts for padding before the first block. Screen-space
+/// y is content-space y minus the current scroll offset; keeping that conversion
+/// here makes it harder for the reader's follow logic to accidentally invert
+/// the scroll direction.
+double? ttsFollowScrollTarget({
+  required double blockOffset,
+  required double sentenceOffset,
+  required double contentTopInset,
+  required double scrollOffset,
+  required double viewportHeight,
+  required double anchorFraction,
+  required double toleranceFraction,
+  required double minScrollExtent,
+  required double maxScrollExtent,
+}) {
+  if (viewportHeight <= 0) return null;
+  final contentY = contentTopInset + blockOffset + sentenceOffset;
+  final anchor = viewportHeight * anchorFraction;
+  final onScreen = contentY - scrollOffset;
+  if ((onScreen - anchor).abs() <= viewportHeight * toleranceFraction) {
+    return null;
+  }
+  return (contentY - anchor).clamp(minScrollExtent, maxScrollExtent).toDouble();
+}
+
 /// Repaints `[start, end)` (offsets into the chapter's text) across the page
 /// spans produced by `paginateSpans`.
 ///

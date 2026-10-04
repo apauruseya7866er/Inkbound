@@ -203,6 +203,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// reach a block the sliver list has never built. Null until first measured.
   List<double>? _blockOffsets;
   String? _blockMetricsKey;
+  static const double _readerContentVerticalPadding = 32;
 
   /// The width and style those offsets were measured at, so the follow can
   /// measure a sentence's position inside its block against exactly the same
@@ -1260,7 +1261,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
             SliverPadding(
               padding: EdgeInsets.symmetric(
                 horizontal: prefs.marginWidth,
-                vertical: 32,
+                vertical: _readerContentVerticalPadding,
               ),
               sliver: SliverList.builder(
                 itemCount: _scrollLayout?.blocks.length ?? 0,
@@ -1414,8 +1415,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
         DateTime.now().millisecondsSinceEpoch - _lastManualScroll;
     if (sinceScroll < _ttsScrollGraceMs) return;
 
-    final viewport = MediaQuery.sizeOf(context).height;
-    final anchor = viewport * _ttsFollowAnchor;
+    final viewport = position.viewportDimension;
     final yInBlock = _sentenceTopInBlock(
       layout: layout,
       base: base,
@@ -1425,20 +1425,24 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
       end: view.end,
     );
 
-    // Where the sentence's first line sits on screen right now, and how far that
-    // is from where we want it. Only the first line matters: a long sentence
-    // spanning six lines cannot be centred, and chasing its middle would scroll
-    // the page on every one of its sentences.
-    final onScreen = position.pixels + yInBlock;
-    if ((onScreen - anchor).abs() <= viewport * _ttsFollowTolerance) return;
-
-    final target = (offsets[block] + yInBlock - anchor).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
+    // Only the first line matters: a long sentence spanning six lines cannot
+    // be centred, and chasing its middle would scroll the page on every one of
+    // its sentences.
+    final target = ttsFollowScrollTarget(
+      blockOffset: offsets[block],
+      sentenceOffset: yInBlock,
+      contentTopInset: _readerContentVerticalPadding,
+      scrollOffset: position.pixels,
+      viewportHeight: viewport,
+      anchorFraction: _ttsFollowAnchor,
+      toleranceFraction: _ttsFollowTolerance,
+      minScrollExtent: position.minScrollExtent,
+      maxScrollExtent: position.maxScrollExtent,
     );
+    if (target == null) return;
     // Animated, so a sentence that starts a couple of lines lower glides there
     // instead of teleporting the text out from under the reader's eye.
-    if (position.isScrollingNotifier.value) return;
+    // New sentences can retarget an in-flight animation.
     position.animateTo(
       target,
       duration: const Duration(milliseconds: 220),
@@ -1483,7 +1487,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
   ///
   /// Just above the middle: that is where the eye rests while reading, and it
   /// leaves more of the *next* text visible below than a true centre would.
-  static const double _ttsFollowAnchor = 0.40;
+  static const double _ttsFollowAnchor = 0.45;
 
   /// How far the sentence may drift from [_ttsFollowAnchor] before the page
   /// moves, as a fraction of the viewport.
@@ -1491,7 +1495,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
   /// A dead zone on purpose. Without one, every sentence re-centres the page and
   /// a paragraph of short lines turns into constant scrolling; with it, the view
   /// moves in calm steps and stays put while the reading position is comfortable.
-  static const double _ttsFollowTolerance = 0.12;
+  static const double _ttsFollowTolerance = 0.05;
 
   /// How long the reader's own scroll suppresses the follow, in milliseconds.
   static const int _ttsScrollGraceMs = 4000;
@@ -1504,8 +1508,11 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
     if (layout == null || layout.blocks.isEmpty) return;
     final width = (MediaQuery.sizeOf(context).width - prefs.marginWidth * 2)
         .clamp(1.0, double.infinity);
-    final key = '${identityHashCode(layout)}|${base.fontSize}|${base.fontFamily}'
-        '|${base.height}|${base.letterSpacing}|${base.wordSpacing}'
+    final textScaler = MediaQuery.textScalerOf(context);
+    final textDirection = Directionality.of(context);
+    final key =
+        '${identityHashCode(layout)}|${base.hashCode}'
+        '|${textScaler.hashCode}|$textDirection'
         '|${width.toStringAsFixed(1)}|${prefs.paragraphSpacing}';
     if (key == _blockMetricsKey) return;
     _blockMetricsKey = key;
@@ -1519,9 +1526,15 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
       style: base,
       width: width,
       paragraphSpacing: prefs.paragraphSpacing,
-      textDirection: Directionality.of(context),
-      textScaler: MediaQuery.textScalerOf(context),
+      textDirection: textDirection,
+      textScaler: textScaler,
     );
+    // A sentence can start speaking before the first frame has produced
+    // metrics. Re-check once they exist so following does not depend on another
+    // TTS event arriving later.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _tts != null) _maybeFollowTtsScroll(_tts!.state);
+    });
   }
 
   /// The page text, with the spoken sentence boxed when [rangeStart] is set.
