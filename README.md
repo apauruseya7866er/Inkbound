@@ -268,6 +268,15 @@ Thank you to everyone who has contributed to Zangetsu over the years, and to
 everyone who has contributed here. The full roster is in
 [`CONTRIBUTORS.md`](CONTRIBUTORS.md).
 
+> **About the [contributors graph](https://github.com/apauruseya7866er/Inkbound/graphs/contributors):**
+> it lists everyone whose commits are reachable from `main`, which includes the
+> upstream Zangetsu history this fork was built from. Those names are inherited
+> authorship, not people contributing to Inkbound — 59 of the 2,347 commits here
+> are this fork's own work. The split is kept deliberately: rewriting history to
+> shrink the graph would break GPL-3.0 attribution and orphan every existing fork
+> and pull request. A [`.mailmap`](.mailmap) collapses the few people who appear
+> under more than one email address into a single entry.
+
 Source plugins come from the
 [LNReader](https://github.com/LNReader/lnreader-sources) ecosystem, which is why
 multi-source works as well as it does. Third-party notices are in
