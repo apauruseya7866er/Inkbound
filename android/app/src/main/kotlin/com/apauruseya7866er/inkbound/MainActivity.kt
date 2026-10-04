@@ -332,7 +332,7 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
             intent.removeExtra("notif_payload")
         }
         if (intent.getBooleanExtra("tts_notification_open", false)) {
-            notifChannel?.invokeMethod("openTtsReader")
+            notifChannel?.invokeMethod("openTtsReader", null)
             intent.removeExtra("tts_notification_open")
         }
     }
