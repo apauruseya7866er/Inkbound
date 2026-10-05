@@ -1,110 +1,57 @@
-# Contributing to Zangetsu
+# Contributing to Inkbound
 
-First off, thanks for considering contributing to Zangetsu! Whether it's a bug fix, a new feature, a new provider, or just fixing a typo — it's appreciated.
+Thanks for helping out. Contribution terms are in [CLA.md](CLA.md), and the AI usage policy applies to this codebase.
 
-## Before You Start
-
-- Check [open issues](../../issues) to see if what you want to work on is already being tracked.
-- For anything bigger than a small fix (new features, big refactors, new providers), open an issue first to discuss the approach before writing code — saves everyone time.
-- By submitting a pull request, you agree to our [Contributor License Agreement](CLA.md). Please give it a quick read.
-- Zangetsu is licensed under **GPLv3 with additional terms** (see [`LICENSE`](LICENSE)) — your contributions will be distributed under those same terms.
-- Using AI tools to help write your Contribution? That's allowed — read [`AI_POLICY.md`](AI_POLICY.md) first for disclosure and quality expectations.
-- Third-party code Zangetsu incorporates (and its licenses) is documented in [`NOTICE.md`](NOTICE.md) — worth a skim if you're touching provider/extractor code.
-
-## Repo Structure
-
-This repo is the main Zangetsu app (Flutter/Dart, with native `android/` and `ios/` platform folders). A few things worth knowing before you dive in:
-
-- `lib/` — the main Dart application code
-- `providers/` — provider integrations bundled with the app
-- `extractors/` — logic for extracting playable streams from sources
-- `js_harness/` — JavaScript module execution used by providers
-- `assets/` — icons, splash screens, and other static assets
-- `test/` — tests
-
-**Note:** additional/community content sources live in a separate repo, [zangetsu-providers](https://github.com/Spyou/zangetsu-providers). If your contribution is a new content source rather than a core app change, check there first — it may be the better place for it.
-
-## Setting Up Your Dev Environment
-
-1. Fork the repo and clone your fork:
-   ```bash
-   git clone https://github.com/Spyou/Zangetsu.git
-   cd Zangetsu
-   ```
-2. Make sure you have the **Flutter SDK** installed (check `pubspec.yaml` / `.metadata` for the version this project targets).
-3. Get dependencies:
-   ```bash
-   flutter pub get
-   ```
-4. Run the app on a connected device/emulator:
-   ```bash
-   flutter run
-   ```
-5. Create a new branch for your change:
-   ```bash
-   git checkout -b fix/short-description
-   ```
-
-## Making Changes
-
-- Keep pull requests focused — one fix or feature per PR is easier to review than a bundle of unrelated changes.
-- Match the existing code style already in the file you're editing.
-- Add or update tests under `test/` where it makes sense.
-- Update relevant documentation/comments if your change affects behavior.
-- **If your PR adds a new dependency, or incorporates code/assets derived from another project, update [`NOTICE.md`](NOTICE.md) in the same PR.** This isn't optional — PRs that introduce undocumented third-party code will be asked to add the attribution before merging.
-
-## Code Analysis
-
-This project uses `analysis_options.yaml` to enforce Dart/Flutter lint rules. Before opening a PR, run:
+## Before you open a pull request
 
 ```bash
-flutter analyze
+flutter pub get
+flutter analyze   # must report zero errors and zero warnings
+flutter test
 ```
 
-and fix anything flagged. If you're touching platform-specific code (`android/`, `ios/`), also make sure the native build still compiles cleanly.
+## What CI enforces
 
-## Commit Messages
+The analyzer is gated. `analysis_options.yaml` escalates the rules that are actually dangerous, and the workflow is configured to fail on any error or warning, not merely report it. Note that `--no-fatal-infos` only excuses **info**-level lints; a single warning fails the build.
 
-Write clear, descriptive commit messages. We loosely follow this format:
+Test fakes must really override. A past cleanup removed 41 stale `@override` annotations in test fakes that were falling through to `noSuchMethod`, so those tests passed without calling what they claimed to test. The related rule is escalated so it can't come back quietly.
+
+Signed releases come from tags. Pushing `v*` builds a signed APK on the releases page, and the release is refused if it turns out to be debug-signed.
+
+## The JavaScript runtime is required for most of the suite
+
+The scraper runtime is a native library, `quickjs_c_bridge`. Around 28 of the tests — everything under `test/core/lnreader/`, plus `js_engine_test.dart`, `js_reading_provider_names_test.dart` and `cf_solve_needed_test.dart` — execute real plugin JavaScript through it.
+
+If that library is not built for the current platform, those tests fail with:
 
 ```
-type: short summary
-
-Optional longer description if needed.
+Failed to load dynamic library 'quickjs_c_bridge.dll': The specified module could not be found.
 ```
 
-Where `type` is one of: `fix`, `feat`, `docs`, `refactor`, `chore`, `test`.
+That is a missing build artifact, not a broken test, and not something your change caused. **CI does not currently build this library**, so the Test job is red on `main` for this reason and will stay red until it does. Judge your change by whether it adds failures beyond that known set.
 
-Example: `fix: correct resume position not saving on episode change`
+## Testing on an emulator
 
-## Submitting a Pull Request
+Release builds package **arm64-v8a and armeabi-v7a only**. An x86_64 emulator cannot launch them — every native library in the APK is stripped, and the launch dies looking for `lib/x86_64/libflutter.so`. The x86_64 libraries are dead weight on real devices, so they are not shipped by default.
 
-1. Push your branch and open a PR against `main`.
-2. Fill out the PR template with what changed and why.
-3. Link any related issues (e.g. `Closes #42`).
-4. Make sure CI checks (build, analyze, tests) pass.
-5. Be responsive to review feedback — most PRs go through a round or two of comments before merging.
+To opt back in for a local emulator run, add this to `android/local.properties` (git-ignored, so it cannot reach CI or another developer):
 
-## Reporting Bugs
+```properties
+includeEmulatorAbis=true
+```
 
-Open an issue with:
-- What you expected to happen vs. what actually happened
-- Steps to reproduce
-- Device/OS and app version
-- Screenshots, logs, or a stack trace if relevant
+> **Remove that flag before you build anything you intend to publish.** It applies to *every* build type from this checkout, release included, and a forgotten flag ships ~24 MB of unusable emulator libraries to every user.
 
-## Adding or Fixing a Provider/Extractor
+Then `flutter run` or `flutter build apk --release` as usual.
 
-If you're contributing a provider or extractor:
-- Only submit sources you have the right to interact with — see Section 5 of the [CLA](CLA.md).
-- Keep provider logic isolated from core app logic where possible.
-- Test that search, browsing, and playback all work end-to-end before submitting.
-- Note any rate limits, region restrictions, or fragility (e.g. sources that change their site structure often) in your PR description.
+## Novel-only flag
 
-## Code of Conduct
+Anime and manga code is intentionally still compiled. Don't delete those enum cases or branches; gate behavior through `lib/core/mode/novel_only.dart`. See [FORK.md](FORK.md) for why.
 
-Be respectful. Disagreements about code are fine; personal attacks aren't. Maintainers reserve the right to close issues/PRs or block contributors who don't engage in good faith.
+## Broken sources
 
----
+Fixes for a broken scraper go to the [plugins repository](https://github.com/apauruseya786er/plugins) as a pull request, not here.
 
-Questions? Open an issue or start a discussion — happy to help you get oriented.
+## Adding tests
+
+Cover the behaviour you changed, not the implementation. The suite's value depends on it staying honest: a test that asserts a widget renders its text is what would have caught a reader that shipped a blank chapter while every other test passed.
