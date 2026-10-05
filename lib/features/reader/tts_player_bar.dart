@@ -23,11 +23,16 @@ class TtsPlayerBar extends StatelessWidget {
     super.key,
     required this.cubit,
     required this.onOpenSettings,
+    required this.onOpenPlayer,
     required this.onClose,
   });
 
   final TtsCubit cubit;
   final VoidCallback onOpenSettings;
+
+  /// Opens the audiobook sheet. Wired to a tap on the progress track's empty
+  /// space - the one gesture on this panel that was doing nothing before.
+  final VoidCallback onOpenPlayer;
 
   /// Stops narration and dismisses the panel.
   final VoidCallback onClose;
@@ -131,6 +136,7 @@ class TtsPlayerBar extends StatelessWidget {
             total: total,
             position: current,
             onSeek: canSeek ? cubit.seek : null,
+            onOpenPlayer: onOpenPlayer,
           ),
           const SizedBox(height: 2),
           Row(
@@ -273,19 +279,27 @@ class _SpeedChip extends StatelessWidget {
   }
 }
 
-/// A draggable sentence-position bar.
+/// A draggable sentence-position bar, and the way into the audiobook player.
 ///
-/// Uses [Slider] rather than a gesture-wrapped progress bar because it gets
-/// keyboard, TalkBack and thumb-drag behaviour for free.
+/// A tap on the track's empty space opens the player; a drag scrubs. Those are
+/// different gestures on the same widget, which is why this is a painted track
+/// rather than a [Slider]: a Slider claims the tap itself and jumps its thumb
+/// there, so the tap could never reach us.
+///
+/// ### What that costs, and what it buys back
+///
+/// [Slider] gave keyboard, TalkBack and thumb-drag behaviour for free, and a
+/// hand-rolled track has to state all three itself. So the semantics are
+/// explicit above the gesture detector: a labelled slider with a value, an
+/// increase and a decrease action, and the tap that opens the player.
 ///
 /// ### Why it commits on release, not on every drag update
 ///
-/// The obvious wiring — passing the seek straight to `Slider.onChanged` — fires
-/// once per pixel of travel, and every one of those calls restarts the engine.
-/// Dragging across a chapter then reads as a stutter that ends up back on the
-/// sentence you started from, because the thumb is driven by the position the
-/// drag is itself changing. So the drag moves a local value and only the
-/// release is committed.
+/// Committing per pixel of travel fires once per frame, and every one of those
+/// calls restarts the engine. Dragging across a chapter then reads as a
+/// stutter that ends up back on the sentence you started from, because the
+/// thumb is driven by the position the drag is itself changing. So the drag
+/// moves a local value and only the release is committed.
 ///
 /// Stateful for that local value. Stateless would mean re-deriving it from
 /// [position] on every rebuild, which is the position being overwritten by the
@@ -295,11 +309,15 @@ class _SeekBar extends StatefulWidget {
     required this.total,
     required this.position,
     required this.onSeek,
+    required this.onOpenPlayer,
   });
 
   final int total;
   final int position;
   final ValueChanged<int>? onSeek;
+
+  /// Fired on a tap rather than a drag.
+  final VoidCallback onOpenPlayer;
 
   @override
   State<_SeekBar> createState() => _SeekBarState();
@@ -309,6 +327,10 @@ class _SeekBarState extends State<_SeekBar> {
   /// The thumb position while the user is dragging it, which is ahead of the
   /// position speech has actually reached.
   int? _dragging;
+
+  /// True once the pointer has moved far enough to count as a scrub, so the
+  /// release of a drag does not ALSO fire the tap that opens the player.
+  bool _dragged = false;
 
   @override
   void didUpdateWidget(_SeekBar oldWidget) {
@@ -325,36 +347,140 @@ class _SeekBarState extends State<_SeekBar> {
     widget.onSeek?.call(value.round());
   }
 
+  /// The sentence under [dx], given the track's width.
+  double? _valueAt(double dx, double width) {
+    final total = widget.total;
+    if (total <= 1 || width <= 0) return null;
+    // 4px of inset at each end matches the painted track.
+    final usable = width - 8;
+    if (usable <= 0) return null;
+    final fraction = ((dx - 4) / usable).clamp(0.0, 1.0);
+    return fraction * (total - 1);
+  }
+
   @override
   Widget build(BuildContext context) {
     final total = widget.total;
-    if (total <= 1) {
-      // Nothing to scrub between; a disabled slider would still take taps.
-      return const SizedBox(height: 20);
-    }
-    final max = (total - 1).toDouble();
+    final seekable = widget.onSeek != null;
+
+    final max = total > 1 ? (total - 1).toDouble() : 1.0;
     final value =
         (_dragging ?? widget.position).toDouble().clamp(0, max).toDouble();
-    return SizedBox(
-      height: 20,
-      child: SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          trackHeight: 3,
-          activeTrackColor: Colors.white,
-          inactiveTrackColor: Colors.white24,
-          thumbColor: Colors.white,
-          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-        ),
-        child: Slider(
-          value: value,
-          max: max,
-          onChanged: widget.onSeek == null
-              ? null
-              : (v) => setState(() => _dragging = v.round()),
-          onChangeEnd: widget.onSeek == null ? null : _commit,
+    final fraction = total > 1 ? (value / max).clamp(0.0, 1.0) : 0.0;
+
+    final shown = value.round();
+    final atEnd = shown >= total - 1;
+    return Semantics(
+      slider: total > 1,
+      label: 'Audiobook progress',
+      value: seekable
+          ? 'Sentence ${shown + 1} of $total'
+          : 'No sentences',
+      onTap: widget.onOpenPlayer,
+      onIncrease: seekable && total > 1 && !atEnd
+          ? () => widget.onSeek!(shown + 1)
+          : null,
+      // Flutter requires a non-null increasedValue/decreasedValue wherever the
+      // matching action exists, or the semantics tree asserts.
+      increasedValue: seekable && total > 1
+          ? 'Sentence ${(shown + 1).clamp(0, total - 1) + 1} of $total'
+          : null,
+      onDecrease: seekable && total > 1 && shown > 0
+          ? () => widget.onSeek!(shown - 1)
+          : null,
+      decreasedValue: seekable && total > 1
+          ? 'Sentence ${(shown - 1).clamp(0, total - 1) + 1} of $total'
+          : null,
+      child: Tooltip(
+        message: 'Tap to open the audiobook player; drag to seek',
+        child: SizedBox(
+          height: 24,
+          child: LayoutBuilder(
+            builder: (context, c) => GestureDetector(
+              key: const ValueKey('compact-tts-progress'),
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                // A drag that ends here has already seeked; opening the player
+                // on top of that would be two answers to one gesture.
+                if (_dragged) {
+                  setState(() => _dragged = false);
+                  return;
+                }
+                widget.onOpenPlayer();
+              },
+              onHorizontalDragStart: seekable && total > 1
+                  ? (d) {
+                      setState(() => _dragged = true);
+                      final v = _valueAt(d.localPosition.dx, c.maxWidth);
+                      if (v != null) setState(() => _dragging = v.round());
+                    }
+                  : null,
+              onHorizontalDragUpdate: seekable && total > 1
+                  ? (d) {
+                      final v = _valueAt(d.localPosition.dx, c.maxWidth);
+                      if (v != null) setState(() => _dragging = v.round());
+                    }
+                  : null,
+              onHorizontalDragEnd: seekable && total > 1
+                  ? (_) {
+                      final d = _dragging;
+                      if (d != null) _commit(d.toDouble());
+                    }
+                  : null,
+              child: CustomPaint(
+                size: Size(c.maxWidth, 24),
+                painter: _SeekTrackPainter(progress: fraction),
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
+}
+
+/// The compact progress track: a 3px line with a 5px round thumb.
+class _SeekTrackPainter extends CustomPainter {
+  const _SeekTrackPainter({required this.progress});
+
+  final double progress;
+
+  static const double _inset = 4;
+  static const double _trackHeight = 3;
+  static const double _thumbRadius = 5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centreY = size.height / 2;
+    final width = size.width - _inset * 2;
+    if (width <= 0) return;
+    final activeWidth = width * progress.clamp(0.0, 1.0);
+
+    canvas.drawLine(
+      Offset(_inset, centreY),
+      Offset(size.width - _inset, centreY),
+      Paint()
+        ..color = Colors.white24
+        ..strokeWidth = _trackHeight
+        ..strokeCap = StrokeCap.round,
+    );
+    if (activeWidth > 0) {
+      canvas.drawLine(
+        Offset(_inset, centreY),
+        Offset(_inset + activeWidth, centreY),
+        Paint()
+          ..color = Colors.white
+          ..strokeWidth = _trackHeight
+          ..strokeCap = StrokeCap.round,
+      );
+    }
+    canvas.drawCircle(
+      Offset(_inset + activeWidth, centreY),
+      _thumbRadius,
+      Paint()..color = Colors.white,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_SeekTrackPainter old) => old.progress != progress;
 }

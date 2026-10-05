@@ -33,6 +33,7 @@ import 'reader_pull_chapter.dart';
 import 'tts_alignment.dart';
 import 'tts_highlight_box.dart';
 import 'tts_player_bar.dart';
+import 'tts_audiobook_sheet.dart';
 import '../../l10n/l10n.dart';
 
 /// Text reader for manga/novel chapters — the reading counterpart of the
@@ -1149,10 +1150,17 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                 child: AnimatedOpacity(
                   duration: const Duration(milliseconds: 200),
                   opacity: _chromeVisible ? 1 : 0,
-                  child: TtsPlayerBar(
-                    cubit: _tts!,
-                    onOpenSettings: _openTtsSheet,
-                    onClose: () {
+child: TtsPlayerBar(
+            cubit: _tts!,
+            onOpenSettings: _openTtsSheet,
+            onOpenPlayer: () => showTtsAudiobookSheet(
+              context,
+              cubit: _tts!,
+              bookTitle: widget.showTitle,
+              chapterTitle: () => _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+              cover: widget.cover,
+            ),
+            onClose: () {
                       setState(() => _ttsPanelOpen = false);
                       _tts?.stop();
                     },
