@@ -294,6 +294,51 @@ group('audiobook sheet', () {
       await cubit.close();
     });
 
+    testWidgets('the cover grows to fill the space it is given', (tester) async {
+      // The sheet hands the player body whatever the header, waveform,
+      // transport and quick actions leave over. Sized against the window instead
+      // of that, the cover capped out early and the slack showed as a gap above
+      // the waveform.
+      Future<double> sideOn(double height) async {
+        tester.view.physicalSize = Size(800, height);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+        final cubit = _FakeTtsCubit(total: 6);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: TtsAudiobookSheet(
+              cubit: cubit,
+              bookTitle: 'Book',
+              chapterTitle: () => 'Chapter 1',
+              canPreviousChapter: true,
+              canNextChapter: true,
+              onPreviousChapter: () {},
+              onNextChapter: () {},
+              cover: null,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final box = tester.renderObject<RenderBox>(
+          find.byKey(const ValueKey('audiobook-cover')),
+        );
+        final size = box.size;
+        await cubit.close();
+        return size.width;
+      }
+
+      final short = await sideOn(700);
+      final tall = await sideOn(1500);
+
+      expect(
+        tall,
+        greaterThan(short),
+        reason: 'a taller sheet must give the cover more room',
+      );
+      // Square, and never wider than the sheet.
+      expect(tall, lessThanOrEqualTo(800));
+    });
+
     testWidgets('the transport skips CHAPTER, not sentence', (tester) async {
       final cubit = _FakeTtsCubit(total: 6);
       final chapters = <int>[];

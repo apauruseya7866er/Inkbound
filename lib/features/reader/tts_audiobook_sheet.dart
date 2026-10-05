@@ -94,8 +94,9 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
             bloc: widget.cubit,
             builder: (context, state) {
               final total = state.totalSentences;
-              final current =
-                  total == 0 ? 0 : state.currentIndex.clamp(0, total - 1);
+              final current = total == 0
+                  ? 0
+                  : state.currentIndex.clamp(0, total - 1);
               return Stack(
                 fit: StackFit.expand,
                 children: [
@@ -269,72 +270,93 @@ class _PlayerBody extends StatelessWidget {
   final String chapterTitle;
   final String bookTitle;
 
+  /// Room the title block needs under the cover, so the cover never grows into
+  /// it and pushes the layout off the bottom of the sheet.
+  static const double _titlesReserve = 96;
+
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.sizeOf(context);
-    final side = math.min(
-      (size.width - 72).clamp(140.0, 380.0),
-      (size.height * 0.34).clamp(120.0, 320.0),
-    );
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      child: Column(
-        children: [
-          Container(
+    // Sized from the space this body is actually given, not from the window.
+    //
+    // The window is the wrong reference: the sheet hands this body whatever is
+    // left after the header, the waveform, the transport and the quick actions,
+    // so measuring against the screen capped the cover well below what was
+    // available and the slack surfaced as a gap above the waveform.
+    return LayoutBuilder(
+      builder: (context, c) {
+        final side = math
+            .min(c.maxWidth, (c.maxHeight - _titlesReserve) * 0.92)
+            .clamp(120.0, 480.0)
+            .toDouble();
+        final vertical = math.max(0.0, c.maxHeight - 16);
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          child: ConstrainedBox(
+            // Centres the artwork in whatever height there is, and still scrolls
+            // on a short screen rather than overflowing.
+            constraints: BoxConstraints(minHeight: vertical),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+Container(
+            key: const ValueKey('audiobook-cover'),
             width: side,
             height: side,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: AppColors.surface2,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: (cover == null || cover!.isEmpty)
-                ? const Icon(
-                    Icons.menu_book_rounded,
-                    size: 84,
-                    color: AppColors.textTertiary,
-                  )
-                : CachedNetworkImage(
-                    imageUrl: cover!,
-                    fit: BoxFit.cover,
-                    errorWidget: (_, _, _) => const Icon(
-                      Icons.menu_book_rounded,
-                      size: 84,
-                      color: AppColors.textTertiary,
-                    ),
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface2,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-          ),
-          const SizedBox(height: 20),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  chapterTitle,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
+                  child: (cover == null || cover!.isEmpty)
+                      ? const Icon(
+                          Icons.menu_book_rounded,
+                          size: 84,
+                          color: AppColors.textTertiary,
+                        )
+                      : CachedNetworkImage(
+                          imageUrl: cover!,
+                          fit: BoxFit.cover,
+                          errorWidget: (_, _, _) => const Icon(
+                            Icons.menu_book_rounded,
+                            size: 84,
+                            color: AppColors.textTertiary,
+                          ),
+                        ),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  bookTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 14,
+                const SizedBox(height: 20),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        chapterTitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        bookTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -408,10 +430,7 @@ class _LyricsBodyState extends State<_LyricsBody> {
     final viewport = MediaQuery.sizeOf(context).height;
     return ListView.builder(
       controller: _scroll,
-      padding: EdgeInsets.symmetric(
-        vertical: viewport * 0.20,
-        horizontal: 26,
-      ),
+      padding: EdgeInsets.symmetric(vertical: viewport * 0.20, horizontal: 26),
       itemCount: sentences.length,
       itemBuilder: (context, i) {
         final distance = (i - widget.current).abs();
@@ -549,15 +568,21 @@ class _WaveformProgressState extends State<_WaveformProgress> {
             },
             onHorizontalDragStart: total > 1
                 ? (d) {
-                    final index =
-                        _indexAt(d.localPosition.dx, c.maxWidth, total);
+                    final index = _indexAt(
+                      d.localPosition.dx,
+                      c.maxWidth,
+                      total,
+                    );
                     if (index != null) setState(() => _drag = index);
                   }
                 : null,
             onHorizontalDragUpdate: total > 1
                 ? (d) {
-                    final index =
-                        _indexAt(d.localPosition.dx, c.maxWidth, total);
+                    final index = _indexAt(
+                      d.localPosition.dx,
+                      c.maxWidth,
+                      total,
+                    );
                     if (index != null) setState(() => _drag = index);
                   }
                 : null,
@@ -739,9 +764,7 @@ class _TransportRow extends StatelessWidget {
             tooltip: state.isSpeaking ? 'Pause' : 'Play',
             onPressed: state.available && canStep ? cubit.toggle : null,
             icon: Icon(
-              state.isSpeaking
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded,
+              state.isSpeaking ? Icons.pause_rounded : Icons.play_arrow_rounded,
             ),
             iconSize: 44,
             color: AppColors.bg,
