@@ -48,7 +48,7 @@ be installed **over** the withdrawn build without uninstalling — Android only
 accepts a higher `versionCode`, and uninstalling would have wiped the reader's
 library and progress.
 
-## 3.0.5 — 2026-10-05 → WITHDRAWN
+## 3.0.5 — 2026-10-04 → WITHDRAWN
 
 **Shipped, then withdrawn.** Contained the novel-only Home page and a read-aloud
 polish pass (PR #2). It opened **every novel chapter as a blank page**.
