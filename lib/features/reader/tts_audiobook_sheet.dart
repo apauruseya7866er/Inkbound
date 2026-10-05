@@ -19,6 +19,10 @@ Future<void> showTtsAudiobookSheet(
   required TtsCubit cubit,
   required String bookTitle,
   required String Function() chapterTitle,
+  required bool canPreviousChapter,
+  required bool canNextChapter,
+  required VoidCallback onPreviousChapter,
+  required VoidCallback onNextChapter,
   String? cover,
 }) {
   return showModalBottomSheet<void>(
@@ -30,6 +34,10 @@ Future<void> showTtsAudiobookSheet(
       cubit: cubit,
       bookTitle: bookTitle,
       chapterTitle: chapterTitle,
+      canPreviousChapter: canPreviousChapter,
+      canNextChapter: canNextChapter,
+      onPreviousChapter: onPreviousChapter,
+      onNextChapter: onNextChapter,
       cover: cover,
     ),
   );
@@ -45,16 +53,25 @@ class TtsAudiobookSheet extends StatefulWidget {
     required this.cubit,
     required this.bookTitle,
     required this.chapterTitle,
+    required this.canPreviousChapter,
+    required this.canNextChapter,
+    required this.onPreviousChapter,
+    required this.onNextChapter,
     this.cover,
   });
 
   final TtsCubit cubit;
   final String bookTitle;
 
-  /// Called on every build, not captured once: auto-advance changes the chapter
+  /// Read on every build, not captured once: auto-advance changes the chapter
   /// while this is open and the title has to follow it.
   final String Function() chapterTitle;
   final String? cover;
+
+  final bool canPreviousChapter;
+  final bool canNextChapter;
+  final VoidCallback onPreviousChapter;
+  final VoidCallback onNextChapter;
 
   @override
   State<TtsAudiobookSheet> createState() => _TtsAudiobookSheetState();
@@ -129,6 +146,10 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
                           cubit: widget.cubit,
                           state: state,
                           current: current,
+                          canPreviousChapter: widget.canPreviousChapter,
+                          canNextChapter: widget.canNextChapter,
+                          onPreviousChapter: widget.onPreviousChapter,
+                          onNextChapter: widget.onNextChapter,
                           onShuffle: () {
                             if (total < 2) return;
                             final next = math.Random().nextInt(total);
@@ -638,12 +659,20 @@ class _TransportRow extends StatelessWidget {
     required this.cubit,
     required this.state,
     required this.current,
+    required this.canPreviousChapter,
+    required this.canNextChapter,
+    required this.onPreviousChapter,
+    required this.onNextChapter,
     required this.onShuffle,
   });
 
   final TtsCubit cubit;
   final TtsState state;
   final int current;
+  final bool canPreviousChapter;
+  final bool canNextChapter;
+  final VoidCallback onPreviousChapter;
+  final VoidCallback onNextChapter;
   final VoidCallback onShuffle;
 
   @override
@@ -661,10 +690,14 @@ class _TransportRow extends StatelessWidget {
             icon: const Icon(Icons.shuffle_rounded),
             color: AppColors.textSecondary,
           ),
+          // Chapter, not sentence. These are the transport's skip-track buttons
+          // and they sat either side of the play control doing exactly what
+          // -1 Sent / +1 Sent do, two controls for one job. Stepping a sentence
+          // is the quick row's; skipping a chapter is this row's.
           IconButton(
-            key: const ValueKey('audiobook-prev'),
-            tooltip: 'Previous sentence',
-            onPressed: canStep ? () => cubit.skip(-1) : null,
+            key: const ValueKey('audiobook-prev-chapter'),
+            tooltip: 'Previous chapter',
+            onPressed: canPreviousChapter ? onPreviousChapter : null,
             icon: const Icon(Icons.skip_previous_rounded),
             iconSize: 32,
             color: AppColors.textPrimary,
@@ -686,9 +719,9 @@ class _TransportRow extends StatelessWidget {
             ),
           ),
           IconButton(
-            key: const ValueKey('audiobook-next'),
-            tooltip: 'Next sentence',
-            onPressed: canStep ? () => cubit.skip(1) : null,
+            key: const ValueKey('audiobook-next-chapter'),
+            tooltip: 'Next chapter',
+            onPressed: canNextChapter ? onNextChapter : null,
             icon: const Icon(Icons.skip_next_rounded),
             iconSize: 32,
             color: AppColors.textPrimary,

@@ -203,6 +203,15 @@ class TtsPlayerBar extends StatelessWidget {
             enabled: canSeek,
           ),
           _icon(Icons.tune_rounded, 'Reading settings', onOpenSettings),
+          // The player is also reachable by tapping the progress track, but a
+          // 3px line is not something anyone goes looking for. This is the
+          // labelled way in, next to the two controls it sits between.
+          _icon(
+            Icons.open_in_full_rounded,
+            'Open audiobook player',
+            onOpenPlayer,
+            enabled: state.totalSentences > 0,
+          ),
           _icon(Icons.close_rounded, 'Stop reading aloud', onClose),
         ],
       ),

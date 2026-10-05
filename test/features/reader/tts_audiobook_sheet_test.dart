@@ -85,6 +85,22 @@ void main() {
       await cubit.close();
     });
 
+    testWidgets('the expand button next to settings opens the player too', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit();
+      var opened = 0;
+      await tester.pumpWidget(_bar(cubit, onOpenPlayer: () => opened++));
+
+      final button = find.byIcon(Icons.open_in_full_rounded);
+      expect(button, findsOneWidget);
+      await tester.tap(button);
+      await tester.pump();
+
+      expect(opened, 1);
+      await cubit.close();
+    });
+
     testWidgets('a drag scrubs instead of opening the player', (tester) async {
       final cubit = _FakeTtsCubit();
       var opened = 0;
@@ -114,12 +130,19 @@ group('audiobook sheet', () {
       // surface. A longer chapter only builds the lines near the viewport, and
       // a find that misses is then a fixture problem, not a real one.
       final cubit = _FakeTtsCubit(total: 6);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
       await tester.pumpWidget(
         MaterialApp(
           home: TtsAudiobookSheet(
             cubit: cubit,
             bookTitle: 'A Wizard of Earthsea',
             chapterTitle: () => 'Chapter 8',
+            canPreviousChapter: true,
+            canNextChapter: true,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
             cover: null,
           ),
         ),
@@ -155,12 +178,19 @@ group('audiobook sheet', () {
 
     testWidgets('tapping a lyric line seeks to that sentence', (tester) async {
       final cubit = _FakeTtsCubit(total: 6);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
       await tester.pumpWidget(
         MaterialApp(
           home: TtsAudiobookSheet(
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
             cover: null,
           ),
         ),
@@ -182,14 +212,88 @@ group('audiobook sheet', () {
       await cubit.close();
     });
 
-    testWidgets('the quick actions drive the cubit for real', (tester) async {
+    testWidgets('the transport skips CHAPTER, not sentence', (tester) async {
       final cubit = _FakeTtsCubit(total: 6);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
       await tester.pumpWidget(
         MaterialApp(
           home: TtsAudiobookSheet(
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-next-chapter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('audiobook-prev-chapter')));
+      await tester.pumpAndSettle();
+
+      // The two controls that used to duplicate -1 Sent / +1 Sent now move the
+      // chapter, and leave the sentence alone.
+      expect(chapters, [1, -1]);
+      expect(cubit.seeks, isEmpty);
+      await cubit.close();
+    });
+
+    testWidgets('chapter buttons disable at the ends of the book', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      final chapters = <int>[];
+      const canPrev = false;
+      const canNext = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final prev = tester.widget<IconButton>(
+        find.byKey(const ValueKey('audiobook-prev-chapter')),
+      );
+      final next = tester.widget<IconButton>(
+        find.byKey(const ValueKey('audiobook-next-chapter')),
+      );
+      expect(prev.onPressed, isNull, reason: 'first chapter has no previous');
+      expect(next.onPressed, isNotNull);
+      await cubit.close();
+    });
+
+    testWidgets('the quick actions drive the cubit for real', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
             cover: null,
           ),
         ),

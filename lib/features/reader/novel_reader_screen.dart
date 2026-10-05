@@ -665,6 +665,22 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// Where next/prev actually go — same multi-group rule the manga reader
   /// uses, so a source that lists several groups doesn't send the reader to
   /// the chapter it just finished under a different name.
+  /// Moves a chapter from the audiobook player, keeping narration running.
+  ///
+  /// `_changeChapter` stops the engine for the chapter being left, so a skip
+  /// while playing would otherwise land on the new chapter in silence. Resuming
+  /// only when it was already speaking keeps a paused player paused, and starts
+  /// the new chapter from its first sentence rather than from wherever the old
+  /// one happened to be.
+  void _skipChapter(int? target) {
+    if (target == null) return;
+    final resume = _tts?.state.isSpeaking ?? false;
+    unawaited(() async {
+      await _changeChapter(target);
+      if (resume && mounted) await _tts?.play();
+    }());
+  }
+
   int? get _nextIndex => adjacentChapterIndex(_chapters, _index, step: 1);
   int? get _prevIndex => adjacentChapterIndex(_chapters, _index, step: -1);
 
@@ -1157,7 +1173,12 @@ child: TtsPlayerBar(
               context,
               cubit: _tts!,
               bookTitle: widget.showTitle,
-              chapterTitle: () => _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+              chapterTitle: () =>
+                  _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+              canPreviousChapter: _prevIndex != null,
+              canNextChapter: _nextIndex != null,
+              onPreviousChapter: () => _skipChapter(_prevIndex),
+              onNextChapter: () => _skipChapter(_nextIndex),
               cover: widget.cover,
             ),
             onClose: () {
