@@ -131,8 +131,6 @@ group('audiobook sheet', () {
       // a find that misses is then a fixture problem, not a real one.
       final cubit = _FakeTtsCubit(total: 6);
       final chapters = <int>[];
-      const canPrev = true;
-      const canNext = true;
       await tester.pumpWidget(
         MaterialApp(
           home: TtsAudiobookSheet(
