@@ -212,6 +212,88 @@ group('audiobook sheet', () {
       await cubit.close();
     });
 
+    testWidgets('tapping the waveform seeks to the sentence under the finger', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 20);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final wave = find.byKey(const ValueKey('audiobook-waveform'));
+      expect(wave, findsOneWidget);
+      final box = tester.renderObject<RenderBox>(wave);
+      // Three quarters along a 20-sentence chapter.
+      final at = box.localToGlobal(Offset(box.size.width * 0.75, 22));
+
+      await tester.tapAt(at);
+      await tester.pumpAndSettle();
+
+      expect(
+        cubit.seeks,
+        isNotEmpty,
+        reason: 'a tap on the waveform must commit a seek',
+      );
+      final index = cubit.seeks.last;
+      expect(index, greaterThan(10), reason: 'three quarters in, not the start');
+      expect(index, lessThan(20), reason: 'and not clamped past the chapter');
+      await cubit.close();
+    });
+
+    testWidgets('dragging the waveform seeks once, on release', (tester) async {
+      final cubit = _FakeTtsCubit(total: 20);
+      final chapters = <int>[];
+      const canPrev = true;
+      const canNext = true;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: canPrev,
+            canNextChapter: canNext,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final box = tester.renderObject<RenderBox>(
+        find.byKey(const ValueKey('audiobook-waveform')),
+      );
+      final gesture = await tester.startGesture(
+        box.localToGlobal(Offset(box.size.width * 0.2, 22)),
+      );
+      await gesture.moveTo(box.localToGlobal(Offset(box.size.width * 0.6, 22)));
+      await tester.pump();
+      // Mid-drag: nothing committed yet, or the engine restarts per frame.
+      expect(cubit.seeks, isEmpty);
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(cubit.seeks, hasLength(1), reason: 'one seek, committed on release');
+      expect(cubit.seeks.last, greaterThan(6));
+      await cubit.close();
+    });
+
     testWidgets('the transport skips CHAPTER, not sentence', (tester) async {
       final cubit = _FakeTtsCubit(total: 6);
       final chapters = <int>[];

@@ -80,10 +80,6 @@ class TtsAudiobookSheet extends StatefulWidget {
 class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
   _SheetView _view = _SheetView.player;
 
-  /// Sentence index being dragged, or null when the cubit is the authority.
-  /// Kept separate so the thumb never fights a seek that is still in flight.
-  int? _scrub;
-
   @override
   Widget build(BuildContext context) {
     return FractionallySizedBox(
@@ -134,12 +130,6 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
                           cubit: widget.cubit,
                           state: state,
                           current: current,
-                          scrub: _scrub,
-                          onScrub: (v) => setState(() => _scrub = v),
-                          onScrubEnd: (v) {
-                            setState(() => _scrub = null);
-                            if (total > 1) widget.cubit.seek(v);
-                          },
                         ),
                         _CounterRow(state: state, current: current),
                         _TransportRow(
@@ -462,40 +452,66 @@ class _LyricsBodyState extends State<_LyricsBody> {
 /// of the chapter rather than decoration: it shows how much is left, and a tap
 /// or a drag seeks to the sentence under the finger. Deterministic rather than
 /// random, so it does not reshuffle itself on every rebuild.
-class _WaveformProgress extends StatelessWidget {
+/// The audiobook-style waveform, and the way to seek by position.
+///
+/// Bar heights come from each sentence's own character count, so this is a map
+/// of the chapter rather than decoration: it shows how much is left, and a tap
+/// or a drag seeks to the sentence under the finger.
+///
+/// ### Why the drag value is local to this widget
+///
+/// It used to be lifted into the sheet so the thumb could follow a drag, and a
+/// tap was written as "remember on tap-down, commit on tap-up". That is broken:
+/// a tap commits against the value captured when this widget was BUILT, and no
+/// rebuild happens between a tap-down and its tap-up, so the commit read null,
+/// the tap did nothing, and the value left behind in the parent was then
+/// committed by whatever the reader touched next - which is how a tap near the
+/// left could throw the narration to the end of the chapter.
+///
+/// Holding the drag here and committing a tap straight from the tap's own
+/// position removes the value that could go stale. There is nothing to leak.
+class _WaveformProgress extends StatefulWidget {
   const _WaveformProgress({
     required this.cubit,
     required this.state,
     required this.current,
-    required this.scrub,
-    required this.onScrub,
-    required this.onScrubEnd,
   });
 
   final TtsCubit cubit;
   final TtsState state;
   final int current;
-  final int? scrub;
-  final ValueChanged<int> onScrub;
-  final ValueChanged<int> onScrubEnd;
 
+  @override
+  State<_WaveformProgress> createState() => _WaveformProgressState();
+}
+
+class _WaveformProgressState extends State<_WaveformProgress> {
+  /// Sentence under the finger mid-drag, or null when the cubit is the
+  /// authority. Local so the thumb cannot be driven by a value from a previous
+  /// gesture.
+  int? _drag;
+
+  static const double _inset = 4;
   static const int _barGap = 2;
   static const int _maxBars = 86;
 
+  /// The sentence at [dx], or null when there is nothing to seek between.
+  int? _indexAt(double dx, double width, int total) {
+    if (total < 2) return null;
+    final usable = width - _inset * 2;
+    if (usable <= 0) return null;
+    final fraction = ((dx - _inset) / usable).clamp(0.0, 1.0);
+    return (fraction * (total - 1)).round();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     final total = state.totalSentences;
-    final progress = (scrub ??
-            (total < 2 ? 0.0 : (current / (total - 1)).clamp(0.0, 1.0)))
-        .toDouble();
-
-    void report(double dx, double width) {
-      if (total < 2) return;
-      final usable = width - 8;
-      if (usable <= 0) return;
-      final p = ((dx - 4) / usable).clamp(0.0, 1.0);
-      onScrub((p * (total - 1)).round());
-    }
+    final shown = _drag ?? widget.current;
+    final progress = total < 2
+        ? 0.0
+        : (shown / (total - 1)).clamp(0.0, 1.0).toDouble();
 
     final weights = <double>[];
     for (var i = 0; i < total; i++) {
@@ -505,18 +521,17 @@ class _WaveformProgress extends StatelessWidget {
     }
 
     final canStep = total > 1;
-    final shown = scrub ?? current;
     return Semantics(
       slider: canStep,
       label: 'Audiobook progress',
       value: canStep ? 'Sentence ${shown + 1} of $total' : 'No sentences',
-      onIncrease: canStep ? () => cubit.seek(shown + 1) : null,
+      onIncrease: canStep ? () => widget.cubit.seek(shown + 1) : null,
       // Required wherever the matching action exists, or the semantics tree
       // asserts on a node that can increase but reports no new value.
       increasedValue: canStep
           ? 'Sentence ${(shown + 1).clamp(0, total - 1) + 1} of $total'
           : null,
-      onDecrease: canStep ? () => cubit.seek(shown - 1) : null,
+      onDecrease: canStep ? () => widget.cubit.seek(shown - 1) : null,
       decreasedValue: canStep
           ? 'Sentence ${(shown - 1).clamp(0, total - 1) + 1} of $total'
           : null,
@@ -526,17 +541,34 @@ class _WaveformProgress extends StatelessWidget {
           builder: (context, c) => GestureDetector(
             key: const ValueKey('audiobook-waveform'),
             behavior: HitTestBehavior.opaque,
-            onTapDown: (d) => report(d.localPosition.dx, c.maxWidth),
+            // Committed from the tap's own position, on the way up. No remembered
+            // value, so no stale one.
             onTapUp: (d) {
-              if (scrub != null) onScrubEnd(scrub!);
+              final index = _indexAt(d.localPosition.dx, c.maxWidth, total);
+              if (index != null) widget.cubit.seek(index);
             },
-            onHorizontalDragStart: (d) =>
-                report(d.localPosition.dx, c.maxWidth),
-            onHorizontalDragUpdate: (d) =>
-                report(d.localPosition.dx, c.maxWidth),
-            onHorizontalDragEnd: (_) {
-              if (scrub != null) onScrubEnd(scrub!);
-            },
+            onHorizontalDragStart: total > 1
+                ? (d) {
+                    final index =
+                        _indexAt(d.localPosition.dx, c.maxWidth, total);
+                    if (index != null) setState(() => _drag = index);
+                  }
+                : null,
+            onHorizontalDragUpdate: total > 1
+                ? (d) {
+                    final index =
+                        _indexAt(d.localPosition.dx, c.maxWidth, total);
+                    if (index != null) setState(() => _drag = index);
+                  }
+                : null,
+            onHorizontalDragEnd: total > 1
+                ? (_) {
+                    final index = _drag;
+                    setState(() => _drag = null);
+                    if (index != null) widget.cubit.seek(index);
+                  }
+                : null,
+            onHorizontalDragCancel: () => setState(() => _drag = null),
             child: CustomPaint(
               size: Size(c.maxWidth, 44),
               painter: _WaveformPainter(
