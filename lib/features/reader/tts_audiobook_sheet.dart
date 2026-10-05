@@ -381,6 +381,24 @@ class _LyricsBodyState extends State<_LyricsBody> {
   final _keys = <int, GlobalKey>{};
   int _lastRevealed = -1;
 
+  // Shared by the real rows and by [_estimateExtent], so the estimate cannot
+  // drift away from the layout it is estimating.
+  static const double _rowPadding = 8;
+  static const double _gutter = 26;
+  static const double _fontIdle = 22;
+  static const double _fontActive = 26;
+  static const double _lineHeight = 1.3;
+
+  @override
+  void initState() {
+    super.initState();
+    // The transcript is built fresh every time the view is toggled on, and
+    // didUpdateWidget does not fire for a widget's own first build. Without this
+    // the view opened at the top of the chapter and the reader had to scroll to
+    // find the sentence being read.
+    _revealCurrent();
+  }
+
   @override
   void dispose() {
     _scroll.dispose();
@@ -393,26 +411,108 @@ class _LyricsBodyState extends State<_LyricsBody> {
     if (widget.current != _lastRevealed) _revealCurrent();
   }
 
-  /// Centres the spoken sentence.
-  ///
-  /// Silently does nothing when that line is not built yet: the transcript is
-  /// lazily built, so on the first sentence of a long chapter there is no
-  /// context to scroll, and forcing it would jump the reader somewhere random.
+
   void _revealCurrent() {
     final index = widget.current;
     if (index == _lastRevealed) return;
     _lastRevealed = index;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reveal(index));
+  }
+
+  /// Puts sentence [index] in the middle of the view.
+  ///
+  /// A lazily built list has no context for a line it has never laid out, so a
+  /// spoken sentence near the end of a long chapter cannot simply be measured -
+  /// there is nothing to measure. So this converges instead: jump to an
+  /// estimate, which builds the line, then correct using the average height of
+  /// the lines that are now genuinely on screen, and repeat.
+  ///
+  /// The correction matters. Estimating from character counts alone assumes a
+  /// font's average glyph width, and a wider font - a bold face, a large
+  /// system text scale, or the fixed-width test font - makes every guess short
+  /// and the target lands further and further below the viewport.
+  void _reveal(int index) {
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _step(index, 0));
+  }
+
+  void _step(int index, int attempt) {
+    if (!mounted || attempt > 5) return;
+
+    void settle() {
       if (!mounted) return;
       final ctx = _keys[index]?.currentContext;
-      if (ctx == null) return;
+      if (ctx == null) {
+        // Still not built. Clear the guard so the next sentence tries again
+        // rather than the view staying stuck where it is.
+        _lastRevealed = -1;
+        return;
+      }
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.5,
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic,
       );
-    });
+    }
+
+    final ctx = _keys[index]?.currentContext;
+    if (ctx != null) {
+      settle();
+      return;
+    }
+    if (!_scroll.hasClients) {
+      _lastRevealed = -1;
+      return;
+    }
+
+    final position = _scroll.position;
+    final average = _measuredAverageExtent() ?? _estimateExtent(index);
+    final top = widget.state.sentences.isEmpty
+        ? 0.0
+        : MediaQuery.sizeOf(context).height * 0.20;
+    final target = (top + average * index).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((target - position.pixels).abs() < 1) {
+      _lastRevealed = -1;
+      return;
+    }
+    _scroll.jumpTo(target);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _step(index, attempt + 1),
+    );
+  }
+
+  /// Average height of the transcript lines currently laid out, or null when
+  /// nothing has been built yet.
+  double? _measuredAverageExtent() {
+    var total = 0.0;
+    var count = 0;
+    for (final key in _keys.values) {
+      final ctx = key.currentContext;
+      if (ctx == null) continue;
+      final box = ctx.findRenderObject();
+      if (box is RenderBox && box.hasSize && box.size.height > 0) {
+        total += box.size.height;
+        count++;
+      }
+    }
+    return count == 0 ? null : total / count;
+  }
+
+  /// First-guess height of a transcript line, from its text.
+  ///
+  /// Only a starting point; [_measuredAverageExtent] replaces it as soon as any
+  /// real line has been laid out.
+  double _estimateExtent(int index) {
+    final sentences = widget.state.sentences;
+    final text = index < sentences.length ? sentences[index].text.trim() : '';
+    final width = MediaQuery.sizeOf(context).width - _gutter * 2;
+    final perLine = math.max(8.0, width / (_fontIdle * 0.52));
+    final lines = text.isEmpty ? 1 : (text.length / perLine).ceil();
+    return lines * _fontIdle * _lineHeight + _rowPadding * 2;
   }
 
   @override
@@ -430,7 +530,7 @@ class _LyricsBodyState extends State<_LyricsBody> {
     final viewport = MediaQuery.sizeOf(context).height;
     return ListView.builder(
       controller: _scroll,
-      padding: EdgeInsets.symmetric(vertical: viewport * 0.20, horizontal: 26),
+      padding: EdgeInsets.symmetric(vertical: viewport * 0.20, horizontal: _gutter),
       itemCount: sentences.length,
       itemBuilder: (context, i) {
         final distance = (i - widget.current).abs();
@@ -446,14 +546,14 @@ class _LyricsBodyState extends State<_LyricsBody> {
             behavior: HitTestBehavior.opaque,
             onTap: () => widget.cubit.seek(i),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 13),
+              padding: const EdgeInsets.symmetric(vertical: _rowPadding),
               child: Text(
                 sentences[i].text,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: AppColors.textPrimary.withValues(alpha: opacity),
-                  fontSize: active ? 26 : 22,
-                  height: 1.36,
+                  fontSize: active ? _fontActive : _fontIdle,
+                  height: _lineHeight,
                   fontWeight: active ? FontWeight.w700 : FontWeight.w400,
                 ),
               ),

@@ -19,7 +19,7 @@ List<TtsSentenceView> _sentences(int n) => List<TtsSentenceView>.generate(
 /// A cubit stand-in that records what the sheet asked it to do. The sheet only
 /// needs seek/skip/toggle/setRate/setSleepTimer and a TtsState to render.
 class _FakeTtsCubit extends Cubit<TtsState> implements TtsCubit {
-  _FakeTtsCubit({int total = 12})
+  _FakeTtsCubit({int total = 12, int current = 3})
     : super(
         TtsState(
           status: TtsStatus.speaking,
@@ -28,7 +28,7 @@ class _FakeTtsCubit extends Cubit<TtsState> implements TtsCubit {
           chapterId: 'chapter',
           totalSentences: total,
           sentences: _sentences(total),
-          currentIndex: 3,
+          currentIndex: current,
         ),
       );
 
@@ -166,8 +166,9 @@ group('audiobook sheet', () {
       // inside the lazily-built window whatever the surface size; the active
       // sentence may sit below it on a short test surface.
       expect(find.byIcon(Icons.list_rounded), findsOneWidget);
+      // The view opens on the spoken sentence (index 3), not at the top.
       expect(
-        find.text('Sentence number 0 of the chapter goes here.'),
+        find.text('Sentence number 3 of the chapter goes here.'),
         findsOneWidget,
       );
       // The transport is shared by both views - player and lyrics differ only
@@ -200,15 +201,14 @@ group('audiobook sheet', () {
       await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
       await tester.pumpAndSettle();
 
-      // Sentence 1 rather than a far one: it is inside the lazily-built window,
-      // and jumping backwards from the spoken sentence (index 3) is the case
-      // that matters.
-      final target = find.text('Sentence number 1 of the chapter goes here.');
+      // The spoken sentence is the one guaranteed to be on screen, since the
+      // view centres itself on it.
+      final target = find.text('Sentence number 3 of the chapter goes here.');
       expect(target, findsOneWidget);
       await tester.tap(target);
       await tester.pumpAndSettle();
 
-      expect(cubit.seeks, contains(1));
+      expect(cubit.seeks, contains(3));
       await cubit.close();
     });
 
@@ -291,6 +291,49 @@ group('audiobook sheet', () {
 
       expect(cubit.seeks, hasLength(1), reason: 'one seek, committed on release');
       expect(cubit.seeks.last, greaterThan(6));
+      await cubit.close();
+    });
+
+    testWidgets('lyrics opens already showing the sentence being read', (
+      tester,
+    ) async {
+      // Deep into a long chapter on purpose: the transcript is lazily built, so
+      // a spoken sentence near the end has no context until the list is scrolled
+      // there. Opening at the top and making the reader scroll to find the line
+      // is the bug this pins.
+      final cubit = _FakeTtsCubit(total: 120, current: 90);
+      final chapters = <int>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => 'Chapter 1',
+            canPreviousChapter: true,
+            canNextChapter: true,
+            onPreviousChapter: () => chapters.add(-1),
+            onNextChapter: () => chapters.add(1),
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+      // The scroll needs a frame to land and a second to measure.
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Sentence number 90 of the chapter goes here.'),
+        findsOneWidget,
+        reason: 'the spoken sentence must be on screen without scrolling',
+      );
+      expect(
+        find.text('Sentence number 0 of the chapter goes here.'),
+        findsNothing,
+        reason: 'and the view must not still be parked at the top',
+      );
       await cubit.close();
     });
 
