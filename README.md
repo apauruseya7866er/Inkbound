@@ -225,8 +225,13 @@ ecosystem, served through
 
 ## 📦 Getting the app
 
-**Signed APKs are on the [releases page](https://github.com/apauruseya7866er/Inkbound/releases).**
-Every `v*` tag produces one.
+**The signed APK is on the [releases page](https://github.com/apauruseya7866er/Inkbound/releases).**
+
+**v4.0.0 is the only published release.** Earlier builds were withdrawn once it
+shipped, so the releases page is deliberately a single entry rather than a list
+of near-identical versions. Their history is not lost — every version from
+3.0.0 onward, including one that was withdrawn for shipping a blank reader, is
+written up in **[CHANGELOG.md](CHANGELOG.md)**.
 
 > If you install a release build and later build from source without
 > `android/key.properties`, you get a **debug-signed** APK. Android will refuse
