@@ -461,11 +461,47 @@ const List<TextFilterRule> builtinTextFilterRules = [
         // The plea is as often aimed at the creator as at the reader, so
         // "support the author/creator" counts too - but it still has to carry a
         // Patreon token, which is what keeps it from eating prose.
-        r'|\b(?:please\s+)?support\s+(?:me|us|the\s+(?:author|writer|creator|translator))'
+        // `support(?:s|ing)?` because "Consider supporting me on Patreon" is a
+        // common shape and `support` alone does not match it.
+        r'|\b(?:please\s+)?support(?:s|ing)?\s+(?:me|us|the\s+(?:author|writer|creator|translator))'
         r'\s+(?:on|via|through)\s+p(?:a|@)treon\b.*'
         r'|^\s*(?:please\s+)?(?:support|donate|tip)\s+(?:to\s+)?(?:my|our)\s+p(?:a|@)treon\b.*'
         // The injected footer: "AN: Check out my P@treon for +40 chapters".
-        r'|^\s*an\s*[:：-]\s*(?:check\s+out\s+)?(?:my|our)\s+p(?:a|@)treon\b.*',
+        r'|^\s*an\s*[:：-]\s*(?:check\s+out\s+)?(?:my|our)\s+p(?:a|@)treon\b.*'
+        // Catch-all for the many other shapes a Patreon ad arrives in -
+        // "Enjoy more chapters on Patreon", "Subscribe on Patreon for early
+        // access", "Exclusive chapters on my Patreon".
+        //
+        // Two conditions, and both are needed. Patreon alone is not enough,
+        // because that would eat any sentence of prose that happens to name it
+        // ("He opened Patreon on his phone"). A marketing word alone is not
+        // enough either. Together they mean: a line that both names Patreon and
+        // is selling something.
+        //
+        // Two alternatives, and the split matters. Sources append the ad to the
+        // END of a real paragraph far more often than they give it its own
+        // line - "Stay bold. Please support me on Patreon." - and cutting the
+        // whole line there would take the prose with it. So:
+        //
+        //   * `^` handles a line that IS the ad. Guarded by a negative lookahead
+        //     for a sentence break, because if the line already contains one,
+        //     it is a paragraph and the other alternative is the right one.
+        //   * otherwise the cut starts after a sentence break, so it takes the
+        //     ad sentence and everything after it, and leaves the prose before
+        //     it - including the full stop that ended the previous sentence.
+        r'|^(?![^\n]*[.!?…]\s)(?=[^\n]*\bp(?:a|@)treon\b)'
+        r'(?=[^\n]*\b(?:check\s*out|enjoy|unreleased|early\s+access|bonus|extras?'
+        r'|more\s+chapters?|new\s+chapters?|per\s+week|support\w*|donat\w*'
+        r'|subscribe|sign\s*up|join|read|exclusive|only\s+(?:at|on)|links?'
+        r'|members?)\b)[^\n]*$'
+        r'|(?<=[.!?…]\s)(?=[^\n]*\bp(?:a|@)treon\b)'
+        r'(?=[^\n]*\b(?:check\s*out|enjoy|unreleased|early\s+access|bonus|extras?'
+        r'|more\s+chapters?|new\s+chapters?|per\s+week|support\w*|donat\w*'
+        r'|subscribe|sign\s*up|join|read|exclusive|only\s+(?:at|on)|links?'
+        r'|members?)\b)[^\n]*$'
+        // A bare "Patreon" or "Patreon:" on its own line, which is how a
+        // contact block usually introduces the link on the next one.
+        r'|^\s*p(?:a|@)treon\s*[:：]?\s*$',
     label: 'Patreon mentions',
   ),
   TextFilterRule(

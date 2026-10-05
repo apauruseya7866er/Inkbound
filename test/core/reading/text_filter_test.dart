@@ -297,6 +297,15 @@ void main() {
         'author Patreon support': 'Please support the author via Patreon!',
         'my Patreon request': 'Donate to my Patreon for extra chapters.',
         'support my writing': 'Please support my writing to help me continue.',
+        'check out my Patreon': 'Check out my Patreon for more chapters!',
+        'enjoy on Patreon': 'Enjoy more chapters on Patreon',
+        'read ahead on Patreon': 'Read ahead on Patreon!',
+        'supporting on Patreon': 'Consider supporting me on Patreon',
+        'daily on Patreon': 'New chapter every day on Patreon',
+        'exclusive on Patreon': 'Exclusive chapters on my Patreon',
+        'subscribe on Patreon': 'Subscribe on Patreon for early access',
+        'also on Patreon': 'Also on Patreon: new chapters every week',
+        'bare Patreon label': 'Patreon:',
         'my patreon': 'My Patreon: patreon.com/someone',
         'Ko-fi line': 'ko-fi.com/someone',
         'donation plea': 'Please support me!',
@@ -398,6 +407,41 @@ void main() {
         );
       });
 
+      test('a Patreon ad takes its whole line, not just the word', () {
+        // The failure mode this guards: a rule matching only the name leaves
+        // "Check out my" and "for more chapters!" behind, so the paragraph is
+        // still there, just mangled - which reads worse than no filter at all.
+        final engine = TextFilterEngine(builtinTextFilterRules);
+        expect(
+          engine.stripFiltered('Check out my Patreon for more chapters!'),
+          '',
+        );
+        expect(engine.stripFiltered('Subscribe on Patreon for early access'), '');
+        expect(engine.stripFiltered('Enjoy more chapters on Patreon'), '');
+      });
+
+      test('an ad appended to a paragraph takes only its own sentence', () {
+        // The other half of the rule above: sources bolt the ad onto the end of
+        // a real paragraph, and the paragraph must survive with its full stop.
+        final engine = TextFilterEngine(builtinTextFilterRules);
+        expect(
+          engine.stripFiltered(
+            'Stay bold. Please support me on Patreon.',
+          )!.trim(),
+          'Stay bold.',
+        );
+        expect(
+          engine.stripFiltered(
+            'She closed the book. Enjoy more chapters on Patreon',
+          )!.trim(),
+          'She closed the book.',
+        );
+        expect(
+          engine.stripFiltered('Want more? Join my Patreon')!.trim(),
+          'Want more?',
+        );
+      });
+
       test('removes a bare link without eating the sentence around it', () {
         // Deliberately conservative, and the reason is the false positive on the
         // other side: a line of prose that merely mentions a link is a line of
@@ -428,6 +472,10 @@ void main() {
           'He decided to tip the author after the chapter ended.',
           'The creator of the series was never named.',
           'Nobody wrote to the translator about the mistake.',
+          // Naming Patreon in a sentence is not an ad. The catch-all needs a
+          // marketing word as well as the name, and this is the case that keeps
+          // it honest.
+          'He opened Patreon on his phone.',
         ];
         final engine = builtins();
         for (final line in prose) {
