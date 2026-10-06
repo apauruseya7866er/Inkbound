@@ -13,10 +13,7 @@ import 'novel_html.dart';
 /// mapping out of both is what stops a highlight from drifting onto the wrong
 /// words after an unrelated change to either side.
 class TtsAlignedChapter {
-  const TtsAlignedChapter({
-    required this.layout,
-    required this.sentences,
-  });
+  const TtsAlignedChapter({required this.layout, required this.sentences});
 
   final NovelTextLayout layout;
 
@@ -98,7 +95,10 @@ TtsAlignedChapter alignChapter(
         )) {
       continue;
     }
-    for (final s in SentenceParser.parseRaw(slice, narrationFilter: narrationFilter)) {
+    for (final s in SentenceParser.parseRaw(
+      slice,
+      narrationFilter: narrationFilter,
+    )) {
       out.add(
         TtsSentence(
           text: s.text,
@@ -160,6 +160,32 @@ TtsAlignedChapter alignChapter(
   );
 }
 
+/// Converts a body-local touch y-coordinate to the scroll content coordinate
+/// used by the measured block offsets.
+///
+/// The reader's body sits inside a `SafeArea`, so a finger's y on screen and the
+/// scroll offset it belongs to are in two different coordinate spaces. Adding
+/// them without taking the inset out first lands the lookup a notch too low,
+/// which is why a long press could resolve to the wrong sentence — or to the
+/// gap between paragraphs, where nothing resolves at all.
+///
+/// Pure and exported so the arithmetic is testable without a widget tree.
+double scrollContentYForReaderPosition({
+  required double bodyY,
+  required double safeAreaTop,
+  required double scrollOffset,
+}) => bodyY - safeAreaTop + scrollOffset;
+
+/// Converts a body-local touch y-coordinate to the page text's local y.
+///
+/// The paged reader has one more thing between the body and the text: the
+/// [padding] above the first line of the page.
+double pageTextYForReaderPosition({
+  required double bodyY,
+  required double safeAreaTop,
+  required double contentTopPadding,
+}) => bodyY - safeAreaTop - contentTopPadding;
+
 /// The spans for one block of [layout], with an optional highlighted range.
 ///
 /// ### Why scroll mode builds its own spans instead of using `HtmlWidget`
@@ -209,8 +235,7 @@ List<InlineSpan> novelBlockSpans(
     // characters. That is what keeps the block's plain text equal to the block's
     // slice of the layout text, which is the invariant the offsets rest on.
     final from = block.start > tokenStart ? block.start - tokenStart : 0;
-    final to =
-        block.end < tokenEnd ? block.end - tokenStart : t.text.length;
+    final to = block.end < tokenEnd ? block.end - tokenStart : t.text.length;
     if (to <= from) continue;
     spans.add(
       TextSpan(
@@ -472,8 +497,7 @@ TextSpan _applyRange(
           text: text.substring(from, to),
           style: base == null ? highlight : base.merge(highlight),
         ),
-        if (to < text.length)
-          TextSpan(text: text.substring(to), style: base),
+        if (to < text.length) TextSpan(text: text.substring(to), style: base),
       ],
     );
   }

@@ -12,6 +12,45 @@ import 'package:watch_app/features/reader/tts_alignment.dart';
 /// visible and completely untouchable: the lookup returned nothing and the long
 /// press ended in silence, with no dialog to explain why.
 void main() {
+  group('long-press coordinate conversion', () {
+    // The reader body is inside a SafeArea, so a touch arrives in screen
+    // coordinates. Adding the scroll offset straight to a screen y skips the
+    // inset, so the lookup lands a notch low - on the wrong sentence, or in the
+    // gap between paragraphs where nothing resolves and the press is ignored.
+    test('scroll hit testing removes the safe-area offset', () {
+      expect(
+        scrollContentYForReaderPosition(
+          bodyY: 244,
+          safeAreaTop: 24,
+          scrollOffset: 300,
+        ),
+        520,
+      );
+    });
+
+    test('a zero inset reduces to the bare scroll offset', () {
+      expect(
+        scrollContentYForReaderPosition(
+          bodyY: 100,
+          safeAreaTop: 0,
+          scrollOffset: 40,
+        ),
+        140,
+      );
+    });
+
+    test('paged hit testing removes the safe-area inset and page padding', () {
+      expect(
+        pageTextYForReaderPosition(
+          bodyY: 244,
+          safeAreaTop: 24,
+          contentTopPadding: 32,
+        ),
+        188,
+      );
+    });
+  });
+
   group('a heading block, which read-aloud never speaks', () {
     // The chapter as it arrived: prose, then the injected line in a heading.
     const html =
@@ -36,14 +75,18 @@ void main() {
       expect(hit.blockIndex, 1);
     });
 
-    test('a press anywhere in that line finds it, not just the first character',
-        () {
-      for (final needle in ['P@treon', 'extra Chapters']) {
-        final at = layout.text.indexOf(needle);
-        expect(hideableRangeAt(layout, at, sentences)?.text,
-            'AN: Check out my P@treon For +40 extra Chapters.');
-      }
-    });
+    test(
+      'a press anywhere in that line finds it, not just the first character',
+      () {
+        for (final needle in ['P@treon', 'extra Chapters']) {
+          final at = layout.text.indexOf(needle);
+          expect(
+            hideableRangeAt(layout, at, sentences)?.text,
+            'AN: Check out my P@treon For +40 extra Chapters.',
+          );
+        }
+      },
+    );
 
     test('hiding it takes the line out and leaves the prose', () {
       final hit = hideableRangeAt(layout, adStart, sentences)!;
@@ -68,8 +111,7 @@ void main() {
 
     test('the second sentence is found on its own', () {
       final at = layout.text.indexOf('Then');
-      expect(hideableRangeAt(layout, at, sentences)!.text,
-          'Then he stopped.');
+      expect(hideableRangeAt(layout, at, sentences)!.text, 'Then he stopped.');
     });
   });
 
@@ -78,10 +120,7 @@ void main() {
     final layout = NovelTextLayout.fromHtml(html);
 
     test('an offset past the end finds nothing', () {
-      expect(
-        hideableRangeAt(layout, layout.length, const []),
-        isNull,
-      );
+      expect(hideableRangeAt(layout, layout.length, const []), isNull);
     });
 
     test('a negative offset finds nothing', () {

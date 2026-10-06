@@ -206,6 +206,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   String? _blockMetricsKey;
   static const double _readerContentVerticalPadding = 32;
 
+  /// Anchors the body's own coordinate space, so a long press can be converted
+  /// out of screen coordinates with the box Flutter actually laid out rather
+  /// than an assumed status-bar height.
+  final GlobalKey _readerHitTestKey = GlobalKey();
+
   /// The width and style those offsets were measured at, so the follow can
   /// measure a sentence's position inside its block against exactly the same
   /// layout the block was placed with.
@@ -315,7 +320,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // reading to the end of a chapter, swiping the app away and coming back
     // tomorrow reopened it at the top, which is the whole complaint.
     if (state == AppLifecycleState.paused ||
-    state == AppLifecycleState.inactive) {
+        state == AppLifecycleState.inactive) {
       _flushProgress();
     }
   }
@@ -605,7 +610,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         total: 1000,
         updatedMs: DateTime.now().millisecondsSinceEpoch,
         type: ProviderType.novel,
-      )
+      ),
     );
     if (sl<ReadStore>().finished(widget.sourceId, widget.showId, ep.id)) {
       _maybeScrobble(ep);
@@ -882,13 +887,33 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// not enough to hide it: the rule is matched per line, so the block decides
   /// which line of a chapter the sentence is on and a bare text match could
   /// take out a paragraph that merely contains the same words somewhere else.
-  ({String text, int blockIndex, int start, int end})? _sentenceAt(Offset global) {
+  /// The [global] position of a touch, in the body's own coordinate space.
+  ///
+  /// Null when the body has not been laid out, which is the one case where a
+  /// long press genuinely cannot be resolved.
+  Offset? _readerBodyPosition(Offset global) {
+    final renderObject = _readerHitTestKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return null;
+    return renderObject.globalToLocal(global);
+  }
+
+  ({String text, int blockIndex, int start, int end})? _sentenceAt(
+    Offset global,
+  ) {
     final layout = _scrollLayout;
     final prefs = sl<ReaderPrefs>();
     if (layout == null || layout.blocks.isEmpty) return null;
     final base = _baseTextStyle(prefs);
     final width = (MediaQuery.sizeOf(context).width - prefs.marginWidth * 2)
         .clamp(1.0, double.infinity);
+
+    // The body is inside a `SafeArea`, so the press arrives in screen
+    // coordinates and has to come back through the body's own frame. Deriving
+    // that from the rendered box rather than subtracting a guessed inset is
+    // what makes this correct on a device with a cutout, a gesture bar, or a
+    // system font scale.
+    final bodyPosition = _readerBodyPosition(global);
+    if (bodyPosition == null) return null;
 
     int chapterOffset;
     if (_isPaginated) {
@@ -900,7 +925,14 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, global.dy - 32),
+        Offset(
+          bodyPosition.dx - prefs.marginWidth,
+          pageTextYForReaderPosition(
+            bodyY: bodyPosition.dy,
+            safeAreaTop: MediaQuery.paddingOf(context).top,
+            contentTopPadding: _readerContentVerticalPadding,
+          ),
+        ),
       );
       painter.dispose();
       // The page is a contiguous slice of the chapter, so the page's own start
@@ -914,17 +946,26 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       }
       chapterOffset = pageStart + position.offset;
     } else {
+      if (!_scrollController.hasClients) return null;
+      // Measure now rather than giving up. A long press can beat the first
+      // post-frame pass, and the old behaviour was to return null - which reads
+      // to the reader as the app ignoring them. `_ensureBlockMetrics` is
+      // idempotent, so paying for it here only ever happens once per chapter
+      // per layout change.
+      if (_blockOffsets == null) _ensureBlockMetrics(prefs, base);
       final offsets = _blockOffsets;
-      if (offsets == null || !_scrollController.hasClients) return null;
-      // 32 is the `SliverPadding` above the first block, and the body sits under
-      // the system bars only after `SafeArea` has taken them out.
-      final topInContent = global.dy + _scrollController.position.pixels;
+      if (offsets == null) return null;
+      final topInContent = scrollContentYForReaderPosition(
+        bodyY: bodyPosition.dy,
+        safeAreaTop: MediaQuery.paddingOf(context).top,
+        scrollOffset: _scrollController.position.pixels,
+      );
       int? block;
       var yInBlock = 0.0;
       for (var b = 0; b + 1 < offsets.length; b++) {
-        final top = offsets[b] + 32;
+        final top = offsets[b] + _readerContentVerticalPadding;
         if (topInContent < top) break;
-        if (topInContent < offsets[b + 1] + 32) {
+        if (topInContent < offsets[b + 1] + _readerContentVerticalPadding) {
           block = b;
           yInBlock = topInContent - top;
           break;
@@ -941,7 +982,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
         textAlign: _textAlign,
       )..layout(maxWidth: width);
       final position = painter.getPositionForOffset(
-        Offset(global.dx - prefs.marginWidth, yInBlock),
+        Offset(bodyPosition.dx - prefs.marginWidth, yInBlock),
       );
       painter.dispose();
       chapterOffset = layout.blocks[block].start + position.offset;
@@ -981,7 +1022,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     return alignChapter(layout, narrationFilter: false).sentences;
   }
 
-/// Body text style for the page - the one thing every renderer, the block
+  /// Body text style for the page - the one thing every renderer, the block
   /// measurements and the long-press hit test have to agree on.
   ///
   /// A second copy of this is not a shortcut, it is a bug waiting: a long press
@@ -1042,46 +1083,48 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     _undoHideSnack(rule, hit.text);
   }
 
-/// Confirms the hide and offers the one-tap way back, because a rule that
-/// deletes prose has to be reversible from where it was made — a settings
-/// screen three taps away is not "undo" when the thing that went wrong is one
-/// sentence of the chapter you are reading.
-///
-/// The bar is taken down by [Timer] rather than left to the SnackBar's own
-/// duration. A SnackBar carrying a [SnackBarAction] is not auto-dismissed on
-/// this Flutter version — it sat there until the app was restarted, which is
-/// exactly what it is supposed to be telling you is reversible. An explicit
-/// `duration` does not help, and neither does `SnackBarBehavior.floating`;
-/// hiding it through the messenger is the only thing that does. Five seconds is
-/// long enough to hit Undo and short enough that it is not in the way.
-void _undoHideSnack(TextFilterRule rule, String sentence) {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  if (messenger == null) return;
-  messenger.hideCurrentSnackBar();
-  messenger.showSnackBar(
-    SnackBar(
-      content: Text('Hidden everywhere: ${_shorten(sentence)}'),
-      action: SnackBarAction(
-        label: 'Undo',
-        onPressed: () {
-          _undoSnackTimer?.cancel();
-          final prefs = sl<ReaderPrefs>();
-          unawaited(prefs.removeTextFilterRule(rule.id).then((_) {
-            if (mounted) unawaited(_reapplyTextFilters());
-          }));
-        },
+  /// Confirms the hide and offers the one-tap way back, because a rule that
+  /// deletes prose has to be reversible from where it was made — a settings
+  /// screen three taps away is not "undo" when the thing that went wrong is one
+  /// sentence of the chapter you are reading.
+  ///
+  /// The bar is taken down by [Timer] rather than left to the SnackBar's own
+  /// duration. A SnackBar carrying a [SnackBarAction] is not auto-dismissed on
+  /// this Flutter version — it sat there until the app was restarted, which is
+  /// exactly what it is supposed to be telling you is reversible. An explicit
+  /// `duration` does not help, and neither does `SnackBarBehavior.floating`;
+  /// hiding it through the messenger is the only thing that does. Five seconds is
+  /// long enough to hit Undo and short enough that it is not in the way.
+  void _undoHideSnack(TextFilterRule rule, String sentence) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Hidden everywhere: ${_shorten(sentence)}'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            _undoSnackTimer?.cancel();
+            final prefs = sl<ReaderPrefs>();
+            unawaited(
+              prefs.removeTextFilterRule(rule.id).then((_) {
+                if (mounted) unawaited(_reapplyTextFilters());
+              }),
+            );
+          },
+        ),
       ),
-    ),
-  );
-  _undoSnackTimer?.cancel();
-  _undoSnackTimer = Timer(_undoSnackVisibleFor, () {
-    _undoSnackTimer = null;
-    if (mounted) messenger.hideCurrentSnackBar();
-  });
-}
+    );
+    _undoSnackTimer?.cancel();
+    _undoSnackTimer = Timer(_undoSnackVisibleFor, () {
+      _undoSnackTimer = null;
+      if (mounted) messenger.hideCurrentSnackBar();
+    });
+  }
 
-/// How long the Undo bar stays before the reader takes it down itself.
-static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
+  /// How long the Undo bar stays before the reader takes it down itself.
+  static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
 
   static String _shorten(String text) =>
       text.length > 40 ? '${text.substring(0, 40)}…' : text;
@@ -1104,6 +1147,7 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
               // Touch pauses; lifting resumes after a grace. See the manga
               // reader — stopping outright on a drag made a nudge fatal.
               child: Listener(
+                key: _readerHitTestKey,
                 onPointerDown: (_) => _autoScroll.pauseForTouch(),
                 onPointerUp: (_) => _autoScroll.resumeAfterTouch(),
                 onPointerCancel: (_) => _autoScroll.resumeAfterTouch(),
@@ -1166,22 +1210,22 @@ static const Duration _undoSnackVisibleFor = Duration(seconds: 5);
                 child: AnimatedOpacity(
                   duration: const Duration(milliseconds: 200),
                   opacity: _chromeVisible ? 1 : 0,
-child: TtsPlayerBar(
-            cubit: _tts!,
-            onOpenSettings: _openTtsSheet,
-            onOpenPlayer: () => showTtsAudiobookSheet(
-              context,
-              cubit: _tts!,
-              bookTitle: widget.showTitle,
-              chapterTitle: () =>
-                  _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
-              canPreviousChapter: _prevIndex != null,
-              canNextChapter: _nextIndex != null,
-              onPreviousChapter: () => _skipChapter(_prevIndex),
-              onNextChapter: () => _skipChapter(_nextIndex),
-              cover: widget.cover,
-            ),
-            onClose: () {
+                  child: TtsPlayerBar(
+                    cubit: _tts!,
+                    onOpenSettings: _openTtsSheet,
+                    onOpenPlayer: () => showTtsAudiobookSheet(
+                      context,
+                      cubit: _tts!,
+                      bookTitle: widget.showTitle,
+                      chapterTitle: () =>
+                          _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+                      canPreviousChapter: _prevIndex != null,
+                      canNextChapter: _nextIndex != null,
+                      onPreviousChapter: () => _skipChapter(_prevIndex),
+                      onNextChapter: () => _skipChapter(_nextIndex),
+                      cover: widget.cover,
+                    ),
+                    onClose: () {
                       setState(() => _ttsPanelOpen = false);
                       _tts?.stop();
                     },
@@ -1221,7 +1265,8 @@ child: TtsPlayerBar(
   /// talking to a source directly: that is the layer that already handles plugin
   /// routing, headers and per-source quirks, and duplicating it here would mean
   /// two code paths that drift.
-  String? _chapterLabel(int? i) {    if (i == null || i < 0 || i >= _chapters.length) return null;
+  String? _chapterLabel(int? i) {
+    if (i == null || i < 0 || i >= _chapters.length) return null;
     final t = _chapters[i].title.trim();
     return t.isNotEmpty ? t : 'Chapter ${chapterNumberLabel(_chapters, i)}';
   }
@@ -1577,13 +1622,12 @@ child: TtsPlayerBar(
     ReaderPrefs prefs, {
     int? rangeStart,
     int? rangeEnd,
-  }) =>
-      TtsHighlightText(
-        span: page,
-        textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
-        rangeStart: rangeStart,
-        rangeEnd: rangeEnd,
-      );
+  }) => TtsHighlightText(
+    span: page,
+    textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+    rangeStart: rangeStart,
+    rangeEnd: rangeEnd,
+  );
 
   /// The slice of the page currently on screen that the spoken sentence covers.
   ///
@@ -1711,8 +1755,7 @@ child: TtsPlayerBar(
                             // reach every tenth the chip does and the two never
                             // show a speed the other cannot.
                             divisions: 25,
-                            onChanged: (v) =>
-                                apply(() => tts.setRate(v)),
+                            onChanged: (v) => apply(() => tts.setRate(v)),
                           ),
                         ),
                         readerSheetRow(
@@ -1729,8 +1772,7 @@ child: TtsPlayerBar(
                             min: 0.5,
                             max: 2.0,
                             divisions: 15,
-                            onChanged: (v) =>
-                                apply(() => tts.setPitch(v)),
+                            onChanged: (v) => apply(() => tts.setPitch(v)),
                           ),
                         ),
                         readerSheetRow(
@@ -1752,8 +1794,7 @@ child: TtsPlayerBar(
                             // gives a slider that rests between two labels while
                             // showing one of them, which reads as a control that
                             // is not quite doing what it says.
-                            divisions:
-                                TtsSentenceGap.max - TtsSentenceGap.min,
+                            divisions: TtsSentenceGap.max - TtsSentenceGap.min,
                             onChanged: (v) =>
                                 apply(() => tts.setSentenceGap(v.round())),
                           ),
@@ -1789,7 +1830,8 @@ child: TtsPlayerBar(
                         readerSheetGroup([
                           readerSheetRow(
                             icon: Icons.restore_rounded,
-                            label: 'Resume from sentence '
+                            label:
+                                'Resume from sentence '
                                 '${tts.resolveResumeIndex(point) + 1}',
                             onTap: () {
                               final index = tts.resolveResumeIndex(point);
@@ -1936,7 +1978,8 @@ child: TtsPlayerBar(
     );
   }
 
-  Widget _buildError(_ReaderTheme theme) {    return Center(
+  Widget _buildError(_ReaderTheme theme) {
+    return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 32),
         child: Column(
@@ -2629,7 +2672,10 @@ child: TtsPlayerBar(
                             ),
                           ),
                         ),
-                        Text(context.l10n.readerSettings, style: AppText.headline),
+                        Text(
+                          context.l10n.readerSettings,
+                          style: AppText.headline,
+                        ),
                         readerSheetSection('Text'),
                         readerSheetGroup([
                           readerSheetRow(
@@ -3309,10 +3355,7 @@ class _ReaderTtsChapterSource implements TtsChapterSource {
       chapter.url,
       sourceId: _reader.widget.sourceId,
     );
-    return filterNovelHtml(
-      text.html,
-      sl<ReaderPrefs>().textFilterEngine,
-    );
+    return filterNovelHtml(text.html, sl<ReaderPrefs>().textFilterEngine);
   }
 
   /// The chapter's own URL, so an auto-advanced resume point names a chapter the
