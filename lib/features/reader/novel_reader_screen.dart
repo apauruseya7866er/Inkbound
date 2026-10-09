@@ -257,6 +257,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// The same one-shot shape for the narration position.
   late bool _resumeNarration;
 
+  /// True while a chapter move is loading, so a second tap cannot start a
+  /// second load and race it.
+  bool _chapterMoveInFlight = false;
+
   void _startTts() {
     setState(() {
       _ttsPanelOpen = true;
@@ -726,10 +730,27 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// one happened to be.
   void _skipChapter(int? target) {
     if (target == null) return;
+    // One chapter move at a time. Two taps in quick succession start two loads,
+    // and whichever network call happens to land last wins - so the reader can
+    // end up on a chapter neither press asked for, with the sentences of the
+    // other one. Silently ignored second press, never queued.
+    if (_chapterMoveInFlight) {
+      debugPrint('[reader] chapter move already running; ignoring this press');
+      return;
+    }
     final resume = _tts?.state.isSpeaking ?? false;
+    _chapterMoveInFlight = true;
     unawaited(() async {
-      await _changeChapter(target);
-      if (resume && mounted) await _tts?.play();
+      try {
+        final ok = await _changeChapter(target);
+        // Only resume if the chapter actually arrived. `play()` after a failed
+        // load would restart the *old* chapter's sentences over a page showing
+        // an error for a different one - the voice and the screen disagreeing,
+        // which is worse than silence.
+        if (ok && resume && mounted) await _tts?.play();
+      } finally {
+        _chapterMoveInFlight = false;
+      }
     }());
   }
 
@@ -945,10 +966,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       context,
       cubit: tts,
       bookTitle: widget.showTitle,
-      chapterTitle: () =>
-          _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
-      canPreviousChapter: _prevIndex != null,
-      canNextChapter: _nextIndex != null,
+      chapterTitle: () => _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+      // Asked when the button is drawn, not when the page was pushed. The
+      // player is a route over a chapter that keeps moving underneath it, and a
+      // stale answer here is a dead Previous at the start of a book or a Next
+      // that stays live at the end and does nothing.
+      canPreviousChapter: () => _prevIndex != null,
+      canNextChapter: () => _nextIndex != null,
       onPreviousChapter: () => _skipChapter(_prevIndex),
       onNextChapter: () => _skipChapter(_nextIndex),
       cover: widget.cover,

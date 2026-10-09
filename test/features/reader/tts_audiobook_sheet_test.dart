@@ -137,8 +137,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'A Wizard of Earthsea',
             chapterTitle: () => 'Chapter 8',
-            canPreviousChapter: true,
-            canNextChapter: true,
+            canPreviousChapter: () => true,
+            canNextChapter: () => true,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -175,6 +175,110 @@ group('audiobook sheet', () {
       await cubit.close();
     });
 
+    testWidgets('the chapter buttons follow the chapter while it stays open', (
+        tester,
+      ) async {
+        // The bug, without a reader in the way: the sheet is a stateful route
+        // that outlives the chapter it was opened on, so Previous/Next have to
+        // be re-asked every time they are drawn. Captured once, they are wrong
+        // for every chapter after the first - Previous dead at the start of a
+        // book, Next live at the end and doing nothing when tapped.
+        var index = 0;
+        const last = 2;
+        final cubit = _FakeTtsCubit(total: 6);
+
+        Future<void> open() async {
+          await tester.pumpWidget(
+            MaterialApp(
+              home: TtsAudiobookSheet(
+                cubit: cubit,
+                bookTitle: 'Book',
+                chapterTitle: () => 'Chapter ${index + 1}',
+                canPreviousChapter: () => index > 0,
+                canNextChapter: () => index < last,
+                onPreviousChapter: () => index--,
+                onNextChapter: () => index++,
+                cover: null,
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+        }
+
+        IconButton button(String key) => tester.widget<IconButton>(
+              find.byKey(ValueKey(key)),
+            );
+
+        await open();
+        expect(button('audiobook-prev-chapter').onPressed, isNull);
+        expect(button('audiobook-next-chapter').onPressed, isNotNull);
+
+        // Same sheet instance, new chapter - the case a tap in the reader causes
+        // by loading the next one underneath this route.
+        index = 1;
+        await open();
+        expect(
+          button('audiobook-prev-chapter').onPressed,
+          isNotNull,
+          reason: 'a previous chapter exists now',
+        );
+        expect(button('audiobook-next-chapter').onPressed, isNotNull);
+
+        index = last;
+        await open();
+        expect(button('audiobook-prev-chapter').onPressed, isNotNull);
+        expect(
+          button('audiobook-next-chapter').onPressed,
+          isNull,
+          reason: 'this is the last chapter',
+        );
+
+        // And the label followed it, rather than staying on the chapter the
+        // page was opened with.
+        expect(find.text('Chapter 3'), findsOneWidget);
+        await cubit.close();
+      });
+
+    testWidgets('lyrics names the chapter being read', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      var chapter = 'Chapter 4';
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TtsAudiobookSheet(
+            cubit: cubit,
+            bookTitle: 'Book',
+            chapterTitle: () => chapter,
+            canPreviousChapter: () => true,
+            canNextChapter: () => true,
+            onPreviousChapter: () {},
+            onNextChapter: () {},
+            cover: null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+
+      // The transcript has to say which chapter it is a transcript *of*.
+      expect(find.text('Chapter 4'), findsOneWidget);
+
+      chapter = 'Chapter 5';
+      // The rebuild trigger is the cubit, exactly as in the real flow: loading a
+      // chapter adopts it, which emits, which rebuilds the transcript. Without
+      // that the label would only ever change if something unrelated forced a
+      // frame - which is why this goes through seek rather than a bare pump.
+      await cubit.seek(1);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Chapter 5'),
+        findsOneWidget,
+        reason: 'a skip must relabel the transcript in place',
+      );
+      await cubit.close();
+    });
+
     testWidgets('tapping a lyric line seeks to that sentence', (tester) async {
       final cubit = _FakeTtsCubit(total: 6);
       final chapters = <int>[];
@@ -186,8 +290,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -223,8 +327,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -264,8 +368,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -307,8 +411,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: true,
-            canNextChapter: true,
+            canPreviousChapter: () => true,
+            canNextChapter: () => true,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -351,8 +455,8 @@ group('audiobook sheet', () {
               cubit: cubit,
               bookTitle: 'Book',
               chapterTitle: () => 'Chapter 1',
-              canPreviousChapter: true,
-              canNextChapter: true,
+              canPreviousChapter: () => true,
+              canNextChapter: () => true,
               onPreviousChapter: () {},
               onNextChapter: () {},
               cover: null,
@@ -391,8 +495,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -426,8 +530,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -458,8 +562,8 @@ group('audiobook sheet', () {
             cubit: cubit,
             bookTitle: 'Book',
             chapterTitle: () => 'Chapter 1',
-            canPreviousChapter: canPrev,
-            canNextChapter: canNext,
+            canPreviousChapter: () => canPrev,
+            canNextChapter: () => canNext,
             onPreviousChapter: () => chapters.add(-1),
             onNextChapter: () => chapters.add(1),
             cover: null,
@@ -502,8 +606,8 @@ group('audiobook sheet', () {
                 cubit: cubit,
                 bookTitle: 'A Wizard of Earthsea',
                 chapterTitle: () => 'Chapter 8',
-                canPreviousChapter: true,
-                canNextChapter: true,
+                canPreviousChapter: () => true,
+                canNextChapter: () => true,
                 onPreviousChapter: () {},
                 onNextChapter: () {},
               ),

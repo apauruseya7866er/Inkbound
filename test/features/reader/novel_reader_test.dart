@@ -386,6 +386,10 @@ class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
     bool force = false,
   }) async {
     adopted.add(chapterId);
+    // Emits, like the real cubit does. This is what rebuilds the player, and
+    // therefore what a chapter button's enabled state has to be derived from -
+    // a sheet that only rebuilds on its own state is what goes stale.
+    if (!isClosed) emit(state.copyWith(chapterId: chapterId, totalSentences: views.length));
   }
 
   @override
@@ -393,6 +397,15 @@ class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
     playCalls++;
     playFrom = from ?? state.currentIndex;
   }
+
+  /// Explicit because a chapter change stops the engine before loading the next
+  /// one, and `noSuchMethod` returning null would be a `Future<void>` that never
+  /// arrives - a type error inside the reader rather than a test failure.
+  @override
+  Future<void> stop({bool clearPosition = true}) async {}
+
+  @override
+  void setChapterIndex(int index) {}
 
   /// Everything else the reader asks of a cubit - attaching the chapter source,
   /// transport, settings, lifecycle - is accepted and ignored.
@@ -1322,6 +1335,52 @@ void main() {
         // exactly where the voice had got to, which is the thing incognito is
         // for.
         expect(tts.seeks, isEmpty);
+        await disposeReader(tester);
+      });
+    });
+
+    group('chapter navigation from the player', () {
+      Widget playerHarness() => MaterialApp(
+        home: NovelReaderScreen(
+          sourceId: 'ani:n',
+          showId: 'b1',
+          showTitle: 'Book',
+          cover: null,
+          chapters: [chapter('c1', 'u1'), chapter('c2', 'u2')],
+          startIndex: 0,
+          openPlayerOnLoad: true,
+        ),
+      );
+
+      void registerChapters() {
+        ani.register(
+          _RawHtmlReadingProvider('ani:n', {
+            'u1': '<p>Alpha sentence one. Alpha sentence two.</p>',
+            'u2': '<p>Beta sentence one. Beta sentence two.</p>',
+          }),
+        );
+      }
+
+      testWidgets('the lyrics view names the chapter being read', (
+        tester,
+      ) async {
+        // A transcript with no chapter on it cannot place the reader - in a long
+        // chapter, or one arrived at by a skip. The chapter's own title, never
+        // the sentence index: that is local to a chapter and says nothing about
+        // which chapter this is.
+        final tts = _StubTtsCubit();
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerChapters();
+
+        await tester.pumpWidget(playerHarness());
+        await tester.pumpAndSettle();
+
+        expect(find.text('c1'), findsWidgets);
+
+        await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+        await tester.pumpAndSettle();
+        expect(find.text('c1'), findsWidgets);
         await disposeReader(tester);
       });
     });

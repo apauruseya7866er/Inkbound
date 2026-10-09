@@ -36,8 +36,8 @@ Future<void> showTtsAudiobookSheet(
   required TtsCubit cubit,
   required String bookTitle,
   required String Function() chapterTitle,
-  required bool canPreviousChapter,
-  required bool canNextChapter,
+  required bool Function() canPreviousChapter,
+  required bool Function() canNextChapter,
   required VoidCallback onPreviousChapter,
   required VoidCallback onNextChapter,
   String? cover,
@@ -102,13 +102,22 @@ class TtsAudiobookSheet extends StatefulWidget {
   final TtsCubit cubit;
   final String bookTitle;
 
-  /// Read on every build, not captured once: auto-advance changes the chapter
+/// Read on every build, not captured once: auto-advance changes the chapter
   /// while this is open and the title has to follow it.
   final String Function() chapterTitle;
   final String? cover;
 
-  final bool canPreviousChapter;
-  final bool canNextChapter;
+  /// Read on every build too, and for the same reason — but these matter more.
+  ///
+  /// A title that lags is cosmetic. A *disabled button* is not: captured once,
+  /// the first chapter's Previous stayed disabled for the whole session, and
+  /// the last chapter's Next stayed enabled and did nothing when tapped, which
+  /// is indistinguishable from the navigation being broken. The chapter moves
+  /// under this screen — by a tap here, or by narration reaching the end of one
+  /// on its own — so the answer has to be asked when the button is drawn.
+  final bool Function() canPreviousChapter;
+  final bool Function() canNextChapter;
+
   final VoidCallback onPreviousChapter;
   final VoidCallback onNextChapter;
 
@@ -118,6 +127,7 @@ class TtsAudiobookSheet extends StatefulWidget {
 
 class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
   _SheetView _view = _SheetView.player;
+
 
   @override
   Widget build(BuildContext context) {
@@ -157,6 +167,7 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
                               bookTitle: widget.bookTitle,
                             )
                           : _LyricsBody(
+                              chapterTitle: widget.chapterTitle,
                               cubit: widget.cubit,
                               state: state,
                               current: current,
@@ -395,19 +406,27 @@ Container(
 }
 
 class _LyricsBody extends StatefulWidget {
-  const _LyricsBody({
-    required this.cubit,
-    required this.state,
-    required this.current,
-  });
+    const _LyricsBody({
+      required this.cubit,
+      required this.state,
+      required this.current,
+      required this.chapterTitle,
+    });
 
-  final TtsCubit cubit;
-  final TtsState state;
-  final int current;
+    final TtsCubit cubit;
+    final TtsState state;
+    final int current;
 
-  @override
-  State<_LyricsBody> createState() => _LyricsBodyState();
-}
+    /// The chapter being read, as a function for the same reason the player's
+    /// is: the transcript outlives the chapter change that a skip causes, and a
+    /// transcript with no chapter named on it is the one thing that cannot say
+    /// where the reader is. Never the sentence index - that is local to a
+    /// chapter and has nothing to do with which chapter this is.
+    final String Function() chapterTitle;
+
+    @override
+    State<_LyricsBody> createState() => _LyricsBodyState();
+  }
 
 class _LyricsBodyState extends State<_LyricsBody> {
   final _scroll = ScrollController();
@@ -561,40 +580,61 @@ class _LyricsBodyState extends State<_LyricsBody> {
       );
     }
     final viewport = MediaQuery.sizeOf(context).height;
-    return ListView.builder(
-      controller: _scroll,
-      padding: EdgeInsets.symmetric(vertical: viewport * 0.20, horizontal: _gutter),
-      itemCount: sentences.length,
-      itemBuilder: (context, i) {
-        final distance = (i - widget.current).abs();
-        final active = distance == 0;
-        final opacity = active
-            ? 1.0
-            : (0.62 - distance * 0.1).clamp(0.16, 0.56);
-        return Semantics(
-          button: true,
-          label: 'Sentence ${i + 1}',
-          child: GestureDetector(
-            key: _keys.putIfAbsent(i, GlobalKey.new),
-            behavior: HitTestBehavior.opaque,
-            onTap: () => widget.cubit.seek(i),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: _rowPadding),
-              child: Text(
-                sentences[i].text,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textPrimary.withValues(alpha: opacity),
-                  fontSize: active ? _fontActive : _fontIdle,
-                  height: _lineHeight,
-                  fontWeight: active ? FontWeight.w700 : FontWeight.w400,
-                ),
-              ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(_gutter, 8, _gutter, 0),
+          child: Text(
+            // Re-read on every build, so a skip relabels the transcript in
+            // place rather than leaving it named for the chapter behind.
+            widget.chapterTitle(),
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.4,
             ),
           ),
-        );
-      },
-    );
+        ),
+        Expanded(
+          child: ListView.builder(
+            controller: _scroll,
+            padding: EdgeInsets.symmetric(vertical: viewport * 0.20, horizontal: _gutter),
+            itemCount: sentences.length,
+            itemBuilder: (context, i) {
+              final distance = (i - widget.current).abs();
+              final active = distance == 0;
+              final opacity = active
+                  ? 1.0
+                  : (0.62 - distance * 0.1).clamp(0.16, 0.56);
+              return Semantics(
+                button: true,
+                label: 'Sentence ${i + 1}',
+                child: GestureDetector(
+                  key: _keys.putIfAbsent(i, GlobalKey.new),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.cubit.seek(i),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: _rowPadding),
+                    child: Text(
+                      sentences[i].text,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: AppColors.textPrimary.withValues(alpha: opacity),
+                        fontSize: active ? _fontActive : _fontIdle,
+                        height: _lineHeight,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+            ),
+          ),
+        ],
+      );
   }
 }
 
@@ -871,8 +911,8 @@ class _TransportRow extends StatelessWidget {
   final TtsCubit cubit;
   final TtsState state;
   final int current;
-  final bool canPreviousChapter;
-  final bool canNextChapter;
+  final bool Function() canPreviousChapter;
+  final bool Function() canNextChapter;
   final VoidCallback onPreviousChapter;
   final VoidCallback onNextChapter;
   final VoidCallback onShuffle;
@@ -899,7 +939,7 @@ class _TransportRow extends StatelessWidget {
           IconButton(
             key: const ValueKey('audiobook-prev-chapter'),
             tooltip: 'Previous chapter',
-            onPressed: canPreviousChapter ? onPreviousChapter : null,
+            onPressed: canPreviousChapter() ? onPreviousChapter : null,
             icon: const Icon(Icons.skip_previous_rounded),
             iconSize: 32,
             color: AppColors.textPrimary,
@@ -921,7 +961,7 @@ class _TransportRow extends StatelessWidget {
           IconButton(
             key: const ValueKey('audiobook-next-chapter'),
             tooltip: 'Next chapter',
-            onPressed: canNextChapter ? onNextChapter : null,
+            onPressed: canNextChapter() ? onNextChapter : null,
             icon: const Icon(Icons.skip_next_rounded),
             iconSize: 32,
             color: AppColors.textPrimary,
