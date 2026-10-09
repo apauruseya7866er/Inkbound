@@ -1412,6 +1412,7 @@ class _DetailViewState extends State<_DetailView>
     int index,
     MediaDetail detail, {
     bool peek = false,
+    bool openPlayer = false,
   }) {
     // Novel-only build: a manga detail page can still be reached from a
     // restored backup or a deep link, so normalise the type here rather than
@@ -1441,6 +1442,7 @@ class _DetailViewState extends State<_DetailView>
                   startIndex: index,
                   malId: detail.malId ?? widget.item.malId,
                   peek: peek,
+                  openPlayerOnLoad: openPlayer,
                 ),
               ),
             )
@@ -2313,12 +2315,32 @@ class _DetailViewState extends State<_DetailView>
                   tooltip: context.l10n.share,
                   onTap: () => _share(detail, sourceName),
                 ),
-                _IconAction(
-                  icon: Icons.public_rounded,
-                  label: context.l10n.web,
-                  tooltip: context.l10n.openSourceSite,
-                  onTap: _openSourceSite,
-                ),
+                // Web is the source's own page. A novel has no use for it - nothing there
+                // that the reader does not already have - and it is the one
+                // action slot a listen belongs in, so a novel spends it on
+                // read-aloud instead. Every other type keeps Web.
+                if (detail.type == ProviderType.novel)
+                  _IconAction(
+                    icon: Icons.headphones_rounded,
+                    // English like the rest of the read-aloud surface
+                    // (`Read aloud`, `Audiobook progress`), rather than a new
+                    // key in every locale for one action slot.
+                    label: 'Listen',
+                    tooltip: 'Listen to this novel',
+                    onTap: () => _openReader(
+                      eps,
+                      _readResumeIndex(eps).index,
+                      detail,
+                      openPlayer: true,
+                    ),
+                  )
+                else
+                  _IconAction(
+                    icon: Icons.public_rounded,
+                    label: context.l10n.web,
+                    tooltip: context.l10n.openSourceSite,
+                    onTap: _openSourceSite,
+                  ),
                 // Novel only — a manga chapter is images, not text, and
                 // there's nothing to put in an EPUB.
                 if (detail.type == ProviderType.novel)

@@ -52,6 +52,7 @@ class NovelReaderScreen extends StatefulWidget {
     this.malId,
     this.resolveChapters = false,
     this.peek = false,
+    this.openPlayerOnLoad = false,
   });
 
   final String sourceId;
@@ -68,6 +69,17 @@ class NovelReaderScreen extends StatefulWidget {
   /// because the detail screen derives "where you left off" from the highest
   /// marked chapter; a peek mark alone would move your place.
   final bool peek;
+
+  /// Open the read-aloud player over the page as soon as the chapter has
+  /// loaded, and start reading.
+  ///
+  /// For the detail screen's player action, which is a request to *listen*, not
+  /// to read. It goes through this screen rather than straight to the player
+  /// because the player is a view, not a source of text: the chapter has to be
+  /// fetched, filtered and segmented here first, or it would open onto an empty
+  /// transcript and read text the reader never sees. Only the first load acts
+  /// on it — turning a chapter mid-listen must not throw the player up again.
+  final bool openPlayerOnLoad;
 
   /// MAL id, when known — identifies the title for tracker chapter scrobble
   /// (AniList/MAL manga list). Falls back to [showTitle] when null/unmatched.
@@ -221,6 +233,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// turn that already does this job.
   bool _isPaginated = false;
 
+  /// Whether the first load still has a player to open over it. Cleared as
+  /// soon as it acts, so it is a one-shot rather than a mode.
+  late bool _autoOpenPlayer;
+
   void _startTts() {
     setState(() {
       _ttsPanelOpen = true;
@@ -245,6 +261,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _index = widget.startIndex;
+    _autoOpenPlayer = widget.openPlayerOnLoad;
     _scrollController = ScrollController()..addListener(_onScroll);
     _pageController = PageController();
     // Built here, NOT lazily: createTicker reads TickerMode off the
@@ -382,6 +399,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       _scrollLayout = NovelTextLayout.fromHtml(html);
       _syncTtsFor(html);
       _restoreScrollPosition();
+      // After the chapter is segmented, never before: the player opens onto this
+      // chapter's sentences, and a player over a chapter it has not read yet
+      // would be an empty screen with a voice that says nothing.
+      _maybeAutoOpenPlayer();
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -855,6 +876,56 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     }
   }
 
+  /// Opens the full-screen read-aloud player over this page.
+  ///
+  /// One place, because the player is only as good as what it was handed: the
+  /// segmented chapter, the chapter list for its transport, and the cover. The
+  /// bar's expand button and the detail screen's action both come through here
+  /// so neither can end up opening a differently-wired player.
+  Future<void> _openAudiobookPlayer() async {
+    final tts = _tts;
+    if (tts == null || !mounted) return;
+    await showTtsAudiobookSheet(
+      context,
+      cubit: tts,
+      bookTitle: widget.showTitle,
+      chapterTitle: () =>
+          _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
+      canPreviousChapter: _prevIndex != null,
+      canNextChapter: _nextIndex != null,
+      onPreviousChapter: () => _skipChapter(_prevIndex),
+      onNextChapter: () => _skipChapter(_nextIndex),
+      cover: widget.cover,
+    );
+  }
+
+  /// Opens the player on load, for a reader who asked to listen rather than to
+  /// read.
+  ///
+  /// The chapter is already loaded and segmented by the time this runs, so the
+  /// transcript is the chapter the page is showing. Speech starts with the
+  /// player rather than after it: `push` completes when the route is popped, so
+  /// awaiting it here would leave the player open and silent until the reader
+  /// closed it.
+  void _maybeAutoOpenPlayer() {
+    if (!_autoOpenPlayer || !mounted) return;
+    // Consumed on the way in, so turning the chapter from inside the player
+    // does not put the player up again over the new one.
+    _autoOpenPlayer = false;
+    final tts = _tts;
+    if (tts == null) return;
+    setState(() {
+      _ttsPanelOpen = true;
+      // Same reason _startTts gives: the panel is chrome, and narration with
+      // no visible controls reads as a feature that did not start.
+      _chromeVisible = true;
+    });
+    unawaited(_openAudiobookPlayer());
+    // No await between opening and speaking, so the words start with the
+    // screen rather than a frame later.
+    unawaited(tts.play());
+  }
+
   void _toggleChrome() => setState(() => _chromeVisible = !_chromeVisible);
 
   /// Re-cleans the open chapter when the rules changed while it was on screen.
@@ -1247,18 +1318,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
                   child: TtsPlayerBar(
                     cubit: _tts!,
                     onOpenSettings: _openTtsSheet,
-                    onOpenPlayer: () => showTtsAudiobookSheet(
-                      context,
-                      cubit: _tts!,
-                      bookTitle: widget.showTitle,
-                      chapterTitle: () =>
-                          _chapterLabel(_index) ?? 'Chapter ${_index + 1}',
-                      canPreviousChapter: _prevIndex != null,
-                      canNextChapter: _nextIndex != null,
-                      onPreviousChapter: () => _skipChapter(_prevIndex),
-                      onNextChapter: () => _skipChapter(_nextIndex),
-                      cover: widget.cover,
-                    ),
+                    onOpenPlayer: _openAudiobookPlayer,
                     onClose: () {
                       setState(() => _ttsPanelOpen = false);
                       _tts?.stop();

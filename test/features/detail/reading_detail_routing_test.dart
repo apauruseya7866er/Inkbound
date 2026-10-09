@@ -935,4 +935,137 @@ void main() {
       expect(find.text('Episode 2'), findsOneWidget);
     },
   );
+
+  // ── The Listen action ──────────────────────────────────────────────────────
+
+  group('the Listen action', () {
+    Future<void> showDetail(
+      WidgetTester tester,
+      MediaItem item,
+      MediaDetail detail,
+    ) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      sl.registerSingleton<SourceRepository>(_StubSourceRepository(detail));
+      sl.registerSingleton<CatalogueRepository>(sl<SourceRepository>());
+
+      await tester.pumpWidget(MaterialApp(home: DetailScreen(item: item)));
+      await tester.pump(); // let the cubit's load() resolve
+      await tester.pump();
+    }
+
+    testWidgets('a novel offers Listen where it used to offer Web', (
+      tester,
+    ) async {
+      await showDetail(tester, _novelItem, _novelDetail);
+
+      expect(find.text('Listen'), findsWidgets);
+      expect(find.text('Web'), findsNothing);
+      expect(find.byIcon(Icons.headphones_rounded), findsOneWidget);
+      // Web went only for novels: nothing else about the row moved.
+      expect(find.byIcon(Icons.ios_share_rounded), findsOneWidget);
+    });
+
+    testWidgets('an anime keeps Web and is offered no player', (tester) async {
+      await showDetail(tester, _animeItem, _animeDetail);
+
+      expect(find.text('Web'), findsWidgets);
+      expect(find.byIcon(Icons.public_rounded), findsOneWidget);
+      expect(find.text('Listen'), findsNothing);
+      expect(find.byIcon(Icons.headphones_rounded), findsNothing);
+    });
+
+    testWidgets('it opens the novel reader asking for the player', (
+      tester,
+    ) async {
+      await showDetail(tester, _novelItem, _novelDetail);
+
+      final observer = _RecordingNavigatorObserver();
+      // Rebuild under an observer so the push is recorded.
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [observer],
+          home: const DetailScreen(item: _novelItem),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Listen').first);
+      final route = observer.pushed.last as MaterialPageRoute;
+      final pushed = route.builder(
+        tester.element(find.byType(DetailScreen)),
+      );
+
+      // The reader, not the player: the player is opened by the reader once the
+      // chapter is loaded and segmented. Pushing it directly from here is what
+      // would show an empty transcript.
+      expect(pushed, isA<NovelReaderScreen>());
+      expect((pushed as NovelReaderScreen).openPlayerOnLoad, isTrue);
+    });
+
+    testWidgets('it opens at the last-read chapter, not chapter one', (
+      tester,
+    ) async {
+      await showDetail(tester, _novelItem, _novelDetail);
+
+      final observer = _RecordingNavigatorObserver();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [observer],
+          home: const DetailScreen(item: _novelItem),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Listen').first);
+      final route = observer.pushed.last as MaterialPageRoute;
+      final pushed = route.builder(
+        tester.element(find.byType(DetailScreen)),
+      ) as NovelReaderScreen;
+
+      // Nothing has been read on this device yet, so it opens where Read would
+      // open: the first chapter.
+      expect(pushed.startIndex, 0);
+    });
+
+    testWidgets('it picks up where the reader left off', (tester) async {
+      tester.view.physicalSize = const Size(800, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      sl.registerSingleton<SourceRepository>(
+        _StubSourceRepository(_novelDetail),
+      );
+      sl.registerSingleton<CatalogueRepository>(sl<SourceRepository>());
+      // Chapter 1 finished, so the reader was last on chapter 2 - the same
+      // place Continue opens, because both go through _readResumeIndex.
+      sl.unregister<ReadStore>();
+      sl.registerSingleton<ReadStore>(
+        _FakeReadStore({'c1': (pos: 19, total: 20)}),
+      );
+
+      final observer = _RecordingNavigatorObserver();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorObservers: [observer],
+          home: const DetailScreen(item: _novelItem),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      await tester.tap(find.text('Listen').first);
+      final route = observer.pushed.last as MaterialPageRoute;
+      final pushed = route.builder(
+        tester.element(find.byType(DetailScreen)),
+      ) as NovelReaderScreen;
+
+      expect(pushed.startIndex, 1);
+      expect(pushed.openPlayerOnLoad, isTrue);
+    });
+  });
 }

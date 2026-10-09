@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_widget_from_html/flutter_widget_from_html.dart';
 import 'package:hive/hive.dart';
@@ -28,6 +29,9 @@ import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
+import 'package:watch_app/core/reading/tts/tts_cubit.dart';
+import 'package:watch_app/core/reading/tts/tts_state.dart';
+import 'package:watch_app/features/reader/tts_audiobook_sheet.dart';
 import 'package:watch_app/features/reader/novel_reader_screen.dart';
 
 /// A fake reading-capable source that hands back canned text per chapter
@@ -306,6 +310,60 @@ class _FakeTracker extends ChangeNotifier implements Tracker {
   Map<String, dynamic>? exportSession() => null;
   @override
   Future<void> importSession(Map<String, dynamic> session) async {}
+}
+
+/// The smallest thing the reader will accept as a read-aloud cubit.
+///
+/// The reader only asks it to adopt a chapter, attach a chapter source, play,
+/// and be listened to by the panel. A real cubit needs a platform and a prefs
+/// box behind it, none of which this is testing — what matters here is the
+/// order: chapter segmented first, player opened second.
+class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
+  _StubTtsCubit()
+    : super(
+        TtsState(
+          status: TtsStatus.speaking,
+          available: true,
+          bookId: 'b1',
+          chapterId: 'c1',
+          totalSentences: 3,
+          sentences: [
+            for (var i = 0; i < 3; i++)
+              TtsSentenceView(
+                index: i,
+                text: 'Sentence $i of the chapter goes here.',
+                blockIndex: i,
+                pauseAfterMs: 0,
+              ),
+          ],
+          currentIndex: 0,
+        ),
+      );
+
+  int playCalls = 0;
+  final List<String> adopted = [];
+
+  @override
+  Future<void> adoptChapter({
+    required String bookId,
+    required String chapterId,
+    required List<TtsSentenceView> views,
+    bool force = false,
+  }) async {
+    adopted.add(chapterId);
+  }
+
+  @override
+  Future<void> play({int? from}) async => playCalls++;
+
+  /// Everything else the reader asks of a cubit - attaching the chapter source,
+  /// transport, settings, lifecycle - is accepted and ignored.
+  ///
+  /// Throwing on the unlisted ones would fail these tests for reasons that have
+  /// nothing to do with what is being tested. The two calls that matter are
+  /// overridden above, so nothing that matters is silently swallowed.
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
 
 void main() {
@@ -994,6 +1052,86 @@ void main() {
     // if the coordinate maths is wrong — and that maths depends on the mode
     // (scrolling measures blocks; paginated runs a TextPainter over the page),
     // on the safe-area inset, and on the font and margins actually laid out.
+    group('the Listen action', () {
+      Widget playerHarness({required bool openPlayer}) =>
+          MaterialApp(
+            home: NovelReaderScreen(
+              sourceId: 'ani:n',
+              showId: 'b1',
+              showTitle: 'Book',
+              cover: null,
+              chapters: [chapter('c1', 'u1'), chapter('c2', 'u2')],
+              startIndex: 0,
+              openPlayerOnLoad: openPlayer,
+            ),
+          );
+
+      void registerHtmlChapter() {
+        ani.register(
+          _RawHtmlReadingProvider('ani:n', {
+            'u1': '<p>Alpha sentence one. Alpha sentence two.</p>',
+            'u2': 'second chapter',
+          }),
+        );
+      }
+
+      testWidgets('it opens the player once the chapter is loaded', (
+        tester,
+      ) async {
+        final tts = _StubTtsCubit();
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(playerHarness(openPlayer: true));
+        await settleBriefly(tester);
+
+        // Segmenting first is the whole point: a player opened before the
+        // chapter arrived would be a transcript of nothing, and this stub would
+        // have adopted nothing to play.
+        expect(tts.adopted, isNotEmpty);
+        expect(find.byType(TtsAudiobookSheet), findsOneWidget);
+        // ...and it starts reading, which is what the action asked for.
+        expect(tts.playCalls, 1);
+        await disposeReader(tester);
+      });
+
+      testWidgets('an ordinary open leaves the player alone', (tester) async {
+        final tts = _StubTtsCubit();
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(playerHarness(openPlayer: false));
+        await settleBriefly(tester);
+
+        expect(find.byType(TtsAudiobookSheet), findsNothing);
+        expect(tts.playCalls, 0);
+        await disposeReader(tester);
+      });
+
+      testWidgets('the reader is still behind the player', (tester) async {
+        final tts = _StubTtsCubit();
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(playerHarness(openPlayer: true));
+        await settleBriefly(tester);
+
+        // The player is a view over the reader, not a replacement for it:
+        // closing it must land back on the chapter, still loaded.
+        await tester.tap(find.byKey(const ValueKey('audiobook-sheet-close')));
+        await settleBriefly(tester);
+
+        expect(find.byType(TtsAudiobookSheet), findsNothing);
+        expect(find.byType(NovelReaderScreen), findsOneWidget);
+        expect(find.textContaining('Alpha sentence one', findRichText: true),
+            findsWidgets);
+        await disposeReader(tester);
+      });
+    });
+
     group('tapping the page', () {
       /// Where the reader's scroll offset is right now, without reaching into
       /// private state.
