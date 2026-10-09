@@ -2175,15 +2175,30 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   ///
   /// Paged and scroll mode use different layouts: turning a page means nothing
   /// in a continuous scroll, and scrolling means nothing on a fixed page.
+  /// Which tap layout a scrolling novel uses.
+  ///
+  /// A layout the reader configured is theirs and is used as-is. Otherwise the
+  /// default opens and closes the controls, because the strip layout's
+  /// `scrollDown` zone meant a tap in the lower part of the page moved them a
+  /// few lines down and took the controls with it - the reader was trying to
+  /// read, and tapping to get the chrome back instead scrolled them off the
+  /// sentence they were on.
+  TapZoneLayout _novelScrollTapZones(ReaderPrefs prefs) =>
+      prefs.hasSavedTapZones(TapZoneLayout.webtoon)
+      ? prefs.tapZones(TapZoneLayout.webtoon)
+      : TapZoneLayout.novelScrollDefault;
+
   void _dispatchTap(Offset global) {
     final size = MediaQuery.sizeOf(context);
     if (size.width <= 0 || size.height <= 0) return;
     final prefs = sl<ReaderPrefs>();
     // Novels are laid out left-to-right whichever manga mode is set, so the
     // paged layout is read directly rather than through the reading mode.
-    final layout = prefs.tapZones(
-      prefs.novelPaginated ? TapZoneLayout.paged : TapZoneLayout.webtoon,
-    );
+    // Paging is left alone: left and right turning the page is the long-standing
+    // convention there, and it is not what moves a reader down a chapter.
+    final layout = prefs.novelPaginated
+        ? prefs.tapZones(TapZoneLayout.paged)
+        : _novelScrollTapZones(prefs);
     _runReaderAction(
       layout.actionAt(
         Offset(

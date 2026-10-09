@@ -37,6 +37,39 @@ void main() {
     );
   });
 
+  group('a scrolling novel', () {
+    test('a tap anywhere opens and closes the controls', () {
+      // The strip default puts scrollUp and scrollDown on the top and bottom
+      // thirds, so a tap in the lower part of a novel's page moved the reader
+      // further down the chapter. Reading position is not a tap's to change.
+      final l = TapZoneLayout.novelScrollDefault;
+      expect(l.actionAt(const Offset(0.5, 0.05)), ReaderAction.toggleMenu);
+      expect(l.actionAt(centre), ReaderAction.toggleMenu);
+      expect(l.actionAt(const Offset(0.5, 0.95)), ReaderAction.toggleMenu);
+      expect(l.actionAt(const Offset(0.02, 0.99)), ReaderAction.toggleMenu);
+      expect(l.actionAt(const Offset(0.98, 0.01)), ReaderAction.toggleMenu);
+      // Nothing is left unmapped, so there is no dead corner of the page.
+      expect(l.actionAt(const Offset(0.5, 0.5), rtl: true),
+          ReaderAction.toggleMenu);
+    });
+
+    test('the manga strip default still scrolls', () {
+      // The same file, one reader apart: a webtoon genuinely does want a tap to
+      // scroll it, so the shared default is untouched.
+      final l = TapZoneLayout.defaultFor(TapZoneLayout.webtoon);
+      expect(l.actionAt(const Offset(0.5, 0.1)), ReaderAction.scrollUp);
+      expect(l.actionAt(const Offset(0.5, 0.9)), ReaderAction.scrollDown);
+    });
+
+    test('scrolling stays one setting away for anyone who wants it', () {
+      final custom = TapZoneLayout.novelScrollDefault.withZoneAction(
+        0,
+        ReaderAction.scrollDown,
+      );
+      expect(custom.actionAt(const Offset(0.5, 0.9)), ReaderAction.scrollDown);
+    });
+  });
+
   test('every reading mode the reader can be in maps to a layout', () {
     // The reader reports 'ltr' | 'rtl' | 'vertical'. 'vertical' falling through
     // to the paged layout was a real bug: left/right zones firing nextPage at a

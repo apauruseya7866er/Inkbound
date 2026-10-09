@@ -23,6 +23,7 @@ import 'package:watch_app/core/provider/reading_provider.dart';
 import 'package:watch_app/core/reading/read_history.dart';
 import 'package:watch_app/core/reading/read_store.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
+import 'package:watch_app/core/reading/tap_zones.dart';
 import 'package:watch_app/core/repository/source_repository.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
 import 'package:watch_app/core/tracker/tracker.dart';
@@ -461,6 +462,49 @@ void main() {
         startIndex: 0,
       ),
     );
+
+    /// A bounded pump, not `pumpAndSettle`.
+    ///
+    /// These tests press the page, and after a press the reader keeps
+    /// scheduling frames — the dialog's route animation, then the gesture's
+    /// own settling. `pumpAndSettle` waits for a frame that never comes and
+    /// the test hangs for its full timeout instead of failing usefully. A
+    /// fixed couple of pumps is both bounded and enough for a route to be in.
+    Future<void> settleBriefly(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    /// The sentence the dialog is offering.
+    String dialogQuote(WidgetTester tester) => tester
+        .widgetList<Text>(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.byType(Text),
+          ),
+        )
+        .map((t) => t.data)
+        .whereType<String>()
+        .first;
+
+    Future<void> expectHideDialog(WidgetTester tester, String quoted) async {
+      await settleBriefly(tester);
+      expect(find.text(quoted), findsWidgets);
+      expect(find.text('Hide'), findsOneWidget);
+    }
+
+    /// Takes the reader down before the test ends.
+    ///
+    /// Left mounted, it keeps the timers a live reader keeps — the auto-scroll
+    /// resume grace among them — and the test never finishes. The existing
+    /// long-press test disposes for the same reason.
+    Future<void> disposeReader(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        await tester.pumpWidget(const SizedBox());
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      });
+    }
 
     testWidgets('renders chapter text and advances to next chapter', (
       tester,
@@ -950,6 +994,139 @@ void main() {
     // if the coordinate maths is wrong — and that maths depends on the mode
     // (scrolling measures blocks; paginated runs a TextPainter over the page),
     // on the safe-area inset, and on the font and margins actually laid out.
+    group('tapping the page', () {
+      /// Where the reader's scroll offset is right now, without reaching into
+      /// private state.
+      double scrollOffset(WidgetTester tester) =>
+          tester.state<ScrollableState>(find.byType(Scrollable).first)
+              .position
+              .pixels;
+
+      /// 1.0 while the controls are showing, 0.0 while they are not. The bars
+      /// are always in the tree so they have something to fade, so presence
+      /// proves nothing.
+      double chromeOpacity(WidgetTester tester) => tester
+          .widget<AnimatedOpacity>(
+            find
+                .ancestor(
+                  of: find.byIcon(Icons.arrow_back_rounded),
+                  matching: find.byType(AnimatedOpacity),
+                )
+                .first,
+          )
+          .opacity;
+
+      void registerLongChapter() {
+        ani.register(
+          _RawHtmlReadingProvider('ani:n', {
+            'u1': '<p>${'A sentence of prose to read. ' * 40}</p>',
+            'u2': 'second chapter',
+          }),
+        );
+      }
+
+      testWidgets('a tap does not move the reading position', (tester) async {
+        registerLongChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+        final before = scrollOffset(tester);
+
+        // The lower part of the page is where this went wrong: it used to be
+        // the scrollDown zone, so the tap scrolled and the controls stayed
+        // hidden — the reader was trying to get the chrome back.
+        await tester.tapAt(Offset(size.width / 2, size.height * 0.9));
+        await settleBriefly(tester);
+
+        expect(scrollOffset(tester), before);
+        expect(chromeOpacity(tester), 1.0);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a tap on the top of the page does not scroll either', (
+        tester,
+      ) async {
+        registerLongChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+        final before = scrollOffset(tester);
+
+        await tester.tapAt(Offset(size.width / 2, size.height * 0.08));
+        await settleBriefly(tester);
+
+        expect(scrollOffset(tester), before);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a tap brings the controls back and puts them away again', (
+        tester,
+      ) async {
+        registerLongChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+
+        expect(chromeOpacity(tester), 0.0);
+        await tester.tapAt(Offset(size.width / 2, size.height * 0.5));
+        await settleBriefly(tester);
+        expect(chromeOpacity(tester), 1.0);
+
+        await tester.tapAt(Offset(size.width / 2, size.height * 0.5));
+        await settleBriefly(tester);
+        expect(chromeOpacity(tester), 0.0);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a layout the reader configured is still theirs', (
+        tester,
+      ) async {
+        registerLongChapter();
+        // Asked for explicitly: this is a saved layout, and a saved layout is
+        // the reader's own choice, however it was set.
+        await tester.runAsync(() async {
+          await sl<ReaderPrefs>().setTapZones(
+            TapZoneLayout.defaultFor(
+              TapZoneLayout.webtoon,
+            ).withZoneAction(2, ReaderAction.scrollDown),
+          );
+        });
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+        await tester.tapAt(Offset(size.width / 2, size.height * 0.9));
+        await settleBriefly(tester);
+
+        // Configured to scroll down, so it scrolls down and stays as it was.
+        expect(scrollOffset(tester), greaterThan(0));
+        await disposeReader(tester);
+      });
+
+      testWidgets('paged mode still turns the page', (tester) async {
+        registerLongChapter();
+        await tester.runAsync(() async {
+          await sl<ReaderPrefs>().setNovelPaginated(true);
+        });
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // Left and right turning the page is the long-standing convention
+        // there, and it is not what moves a reader down a chapter. Untouched.
+        final size = tester.view.physicalSize / tester.view.devicePixelRatio;
+        await tester.tapAt(Offset(size.width * 0.85, size.height / 2));
+        await settleBriefly(tester);
+        await tester.pump(const Duration(milliseconds: 400));
+
+        // The page turned, so the controls are showing: the middle zone is not
+        // what fired, and the turn did not stop being a turn.
+        expect(chromeOpacity(tester), 0.0);
+        await disposeReader(tester);
+      });
+    });
+
     group('long press, measured on screen', () {
       // Prose, a heading, more prose: prose resolves to a sentence, the heading
       // falls back to the whole block, and the gaps between blocks resolve to
@@ -1000,48 +1177,6 @@ void main() {
         return box.localToGlobal(Offset.zero) & box.size;
       }
 
-      /// A bounded pump, not `pumpAndSettle`.
-      ///
-      /// These tests press the page, and after a press the reader keeps
-      /// scheduling frames — the dialog's route animation, then the gesture's
-      /// own settling. `pumpAndSettle` waits for a frame that never comes and
-      /// the test hangs for its full timeout instead of failing usefully. A
-      /// fixed couple of pumps is both bounded and enough for a route to be in.
-      Future<void> settleBriefly(WidgetTester tester) async {
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 400));
-        await tester.pump(const Duration(milliseconds: 400));
-      }
-
-      /// The sentence the dialog is offering.
-      String dialogQuote(WidgetTester tester) => tester
-          .widgetList<Text>(
-            find.descendant(
-              of: find.byType(AlertDialog),
-              matching: find.byType(Text),
-            ),
-          )
-          .map((t) => t.data)
-          .whereType<String>()
-          .first;
-
-      Future<void> expectHideDialog(WidgetTester tester, String quoted) async {
-        await settleBriefly(tester);
-        expect(find.text(quoted), findsWidgets);
-        expect(find.text('Hide'), findsOneWidget);
-      }
-
-      /// Takes the reader down before the test ends.
-      ///
-      /// Left mounted, it keeps the timers a live reader keeps — the auto-scroll
-      /// resume grace among them — and the test never finishes. The existing
-      /// long-press test disposes for the same reason.
-      Future<void> disposeReader(WidgetTester tester) async {
-        await tester.runAsync(() async {
-          await tester.pumpWidget(const SizedBox());
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        });
-      }
 
       Future<void> expectNoHideDialog(WidgetTester tester) async {
         await settleBriefly(tester);

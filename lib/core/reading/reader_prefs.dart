@@ -212,6 +212,14 @@ class ReaderPrefs {
     layoutId,
   );
 
+  /// Whether the reader has configured [layoutId] themselves.
+  ///
+  /// A saved layout is their own choice and stands. This is how a default can
+  /// change without silently discarding a layout someone set on purpose — the
+  /// novel reader asks before it stops honouring a saved webtoon strip.
+  bool hasSavedTapZones(String layoutId) =>
+      _box.containsKey('tapZones_$layoutId');
+
   /// The layout for the mode currently being read.
   TapZoneLayout tapZonesForMode(String readingMode) =>
       tapZones(TapZoneLayout.idForReadingMode(readingMode));

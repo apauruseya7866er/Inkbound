@@ -196,6 +196,30 @@ class TapZoneLayout {
     ],
   );
 
+  /// The default for a scrolling novel: a tap opens and closes the controls,
+  /// and does nothing else.
+  ///
+  /// Deliberately not a new [id] and deliberately not the [webtoon] default,
+  /// which is shared with the manga reader where scrolling on a tap is wanted.
+  /// A novel is prose on a strip, and that default puts `scrollDown` on the
+  /// bottom third - so a tap meant for the middle of the page moved the reader
+  /// a few lines further down, and moving the reading position is the one thing
+  /// a tap on the page should not do by itself.
+  ///
+  /// A layout the reader configured still wins. This is only what a tap does
+  /// before anyone has said otherwise, and the scroll actions stay one setting
+  /// away for anyone who wants them back.
+  static const TapZoneLayout novelScrollDefault = TapZoneLayout(
+    id: webtoon,
+    name: 'Novel (scrolling)',
+    zones: [
+      TapZone(
+        bounds: Rect.fromLTRB(0, 0, 1, 1),
+        action: ReaderAction.toggleMenu,
+      ),
+    ],
+  );
+
   /// Which layout a reading mode uses.
   ///
   /// Takes the reader's own mode values ('ltr' | 'rtl' | 'vertical'). The
