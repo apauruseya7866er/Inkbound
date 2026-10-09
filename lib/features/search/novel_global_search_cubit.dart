@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/di/injector.dart';
@@ -134,6 +135,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
       state.copyWith(
         query: q,
         searching: true,
+        sourceCount: sources.length,
         groups: [
           for (final s in sources)
             NovelSourceGroup(
@@ -147,10 +149,21 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     );
 
     if (sources.isEmpty) {
+      final excluded = _excludedNovelSources();
+      // Logged because "nothing here" is otherwise indistinguishable from a
+      // bug: this names every source that was loaded and every one that was
+      // switched off, so "why is it empty" is answered by the log rather than
+      // guessed at.
+      debugPrint(
+        '[novel-search] "$q": no searchable novel source. '
+        'loaded=${_repo.loadedSources.map((s) => s.id).join(',')} '
+        'excluded=${excluded.map((s) => s.id).join(',')}',
+      );
       emit(
         state.copyWith(
           searching: false,
           noSources: true,
+          excludedCount: excluded.length,
         ),
       );
       return;
@@ -256,6 +269,22 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     ];
   }
 
+  /// Novel sources that exist but are switched off for search.
+  ///
+  /// Reported alongside the empty state so "all of them are off" is a
+  /// different sentence from "you have none" - one is a setting, the other is
+  /// an install.
+  List<({String id, String name, String? lang})> _excludedNovelSources() {
+    final excluded = <({String id, String name, String? lang})>[];
+    for (final s in _repo.loadedSources) {
+      if (s.id == ZmodeIds.sourceId) continue;
+      if (!ContentMode.novel.matchesProvider(sourceTypeOf(s.id))) continue;
+      if (_prefs.isIncluded(s.id)) continue;
+      excluded.add((id: s.id, name: s.name, lang: _languages[s.id]));
+    }
+    return excluded;
+  }
+
   /// Pinned only, which is the narrowing Reikai offers.
   void setPinnedOnly(bool value) {
     if (state.pinnedOnly == value) return;
@@ -296,6 +325,8 @@ class NovelGlobalSearchState {
     this.query = '',
     this.searching = false,
     this.noSources = false,
+    this.sourceCount = 0,
+    this.excludedCount = 0,
     this.pinnedOnly = false,
     this.hideEmpty = false,
     this.groups = const [],
@@ -307,6 +338,16 @@ class NovelGlobalSearchState {
   /// Nothing to search at all - no novel sources installed, or all switched
   /// off for search. Distinct from "searched and found nothing".
   final bool noSources;
+
+  /// Novel sources that exist and are searchable, before the query ran.
+  ///
+  /// Shown so an empty screen can say "searched 7 sources" instead of
+  /// leaving the reader to wonder whether anything was tried.
+  final int sourceCount;
+
+  /// Novel sources that exist but are switched off for search - the difference
+  /// between "none installed" and "none switched on".
+  final int excludedCount;
 
   final bool pinnedOnly;
   final bool hideEmpty;
@@ -323,6 +364,8 @@ class NovelGlobalSearchState {
     String? query,
     bool? searching,
     bool? noSources,
+    int? sourceCount,
+    int? excludedCount,
     bool? pinnedOnly,
     bool? hideEmpty,
     List<NovelSourceGroup>? groups,
@@ -330,6 +373,8 @@ class NovelGlobalSearchState {
     query: query ?? this.query,
     searching: searching ?? this.searching,
     noSources: noSources ?? this.noSources,
+    sourceCount: sourceCount ?? this.sourceCount,
+    excludedCount: excludedCount ?? this.excludedCount,
     pinnedOnly: pinnedOnly ?? this.pinnedOnly,
     hideEmpty: hideEmpty ?? this.hideEmpty,
     groups: groups ?? this.groups,

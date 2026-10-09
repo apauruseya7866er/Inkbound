@@ -1828,11 +1828,11 @@ class HomeNovelSearchAction extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return IconButton(
-      icon: const DockIcon(
-        DockGlyph.search,
-        color: AppColors.textSecondary,
-        size: 22,
-      ),
+      // A book, not another magnifier. Two identical search buttons side by side
+      // is worse than no second button at all - a reader taps one, gets the
+      // other, and concludes the app is broken. Material rather than a DockIcon
+      // so it reads as a different thing at a glance, which is the whole point.
+      icon: const Icon(Icons.menu_book_rounded, color: AppColors.textSecondary),
       tooltip: 'Search novels',
       onPressed: () => Navigator.of(context).push(
         MaterialPageRoute<void>(

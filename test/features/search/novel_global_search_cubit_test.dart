@@ -466,4 +466,39 @@ void main() {
     expect(group.language, isNull, reason: 'absent, so the line is left out');
     await cubit.close();
   });
+
+  test('none installed and all switched off are told apart', () async {
+    // One needs an extension, the other needs a setting flipped. A single
+    // "nothing to search" cannot tell a reader which one they are looking at,
+    // and guessing wrong sends them to install something they already have.
+    final off = _FakeRepo(_loaded);
+    final offCubit = _cubitFor(off, excluded: {'lnr:n', 'lnr:x'});
+    await offCubit.search('the alpha');
+    expect(offCubit.state.noSources, isTrue);
+    expect(offCubit.state.excludedCount, 2, reason: 'they exist, but are off');
+    await offCubit.close();
+
+    final none = _FakeRepo([(id: 'mihon:m', name: 'Manga only')]);
+    final noneCubit = _cubitFor(none);
+    await noneCubit.search('the alpha');
+    expect(noneCubit.state.noSources, isTrue);
+    expect(
+      noneCubit.state.excludedCount,
+      0,
+      reason: 'nothing to switch back on - they need installing',
+    );
+    await noneCubit.close();
+  });
+
+  test('the source count is reported, so an empty page is not a mystery', () async {
+    final repo = _FakeRepo(_loaded);
+    final cubit = _cubitFor(repo);
+    await cubit.search('the alpha');
+    expect(
+      cubit.state.sourceCount,
+      2,
+      reason: 'two novel sources were actually queried',
+    );
+    await cubit.close();
+  });
 }

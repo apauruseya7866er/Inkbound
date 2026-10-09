@@ -168,12 +168,28 @@ class _Body extends StatelessWidget {
       );
     }
     if (state.noSources) {
-      return const _Message(
+      // "You have none" and "they are all switched off" are different
+      // problems with different fixes, so they are different sentences.
+      return _Message(
         icon: Icons.search_off_rounded,
-        text: 'No novel sources are switched on for search.',
+        text: state.excludedCount > 0
+            ? 'Your ${state.excludedCount} novel '
+                  '${state.excludedCount == 1 ? 'source is' : 'sources are'} '
+                  'switched off for search. Turn them on in search settings to '
+                  'include them here.'
+            : 'No novel sources are installed yet. Add one from the extensions '
+                  'screen, then search again.',
       );
     }
     final groups = cubit.visibleGroups();
+    if (groups.isEmpty && state.sourceCount > 0) {
+      return _Message(
+        icon: Icons.search_off_rounded,
+        text: 'Searched ${state.sourceCount} '
+            '${state.sourceCount == 1 ? 'source' : 'sources'}. '
+            'Turn off "Has results" to see the ones with nothing.',
+      );
+    }
     if (groups.isEmpty) {
       return const _Message(
         icon: Icons.search_off_rounded,
