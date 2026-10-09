@@ -1043,10 +1043,38 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// sentence — copy, share, look up — is a gesture in the app they can already
   /// reach, and a menu that has grown a submenu since the last time anyone used
   /// it is a menu nobody reads.
+  /// Explains, in the app log, why a long press resolved to nothing.
+  ///
+  /// The failure used to be silent, and silence has two very different causes:
+  /// the gesture lost its arena to a scroll (the reader meant to move the page,
+  /// so no dialog is correct), or the press landed somewhere the hit test could
+  /// not map to text (a bug, or a legitimate gap between paragraphs). Only the
+  /// first line here is even called when the arena is lost - `_onSentenceLongPress`
+  /// never runs in that case - so an entry with a `press at` prefix and no
+  /// matching line means the gesture was cancelled, and one *with* it means the
+  /// text was not mapped.
+  void _logLongPressMiss(String stage, Offset global) {
+    debugPrint(
+      '[reader] long press found no text at $stage: press at '
+      '${global.dx.toStringAsFixed(1)},${global.dy.toStringAsFixed(1)} '
+      '${_isPaginated ? 'paginated' : 'scroll'} '
+      'safeAreaTop=${MediaQuery.paddingOf(context).top} '
+      'blocks=${_scrollLayout?.blocks.length ?? 0} '
+      'measured=${_blockOffsets?.length ?? 0}',
+    );
+  }
+
   Future<void> _onSentenceLongPress(Offset global) async {
     if (!mounted) return;
     final hit = _sentenceAt(global);
-    if (hit == null) return;
+    if (hit == null) {
+      _logLongPressMiss('after hit test', global);
+      return;
+    }
+    debugPrint(
+      '[reader] long press resolved block ${hit.blockIndex} '
+      '${hit.start}-${hit.end}: ${hit.text}',
+    );
     final prefs = sl<ReaderPrefs>();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1143,7 +1171,13 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: (d) => _dispatchTap(d.globalPosition),
-              onLongPressStart: (d) => _onSentenceLongPress(d.globalPosition),
+              onLongPressStart: (d) {
+                // Logged so a miss has a companion line. Recognised-then-no-text means
+                // the hit test failed; no line at all means the gesture lost its arena
+                // to a scroll, which is the reader scrolling and is correct.
+                debugPrint('[reader] long press gesture recognised');
+                _onSentenceLongPress(d.globalPosition);
+              },
               // Touch pauses; lifting resumes after a grace. See the manga
               // reader — stopping outright on a drag made a nudge fatal.
               child: Listener(

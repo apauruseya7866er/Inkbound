@@ -94,6 +94,18 @@ class _FakeReadingProvider implements BaseProvider, ReadingProvider {
       );
 }
 
+/// The same fake, but hands the chapter HTML back verbatim instead of wrapping
+/// it in a `<p>`. The long-press geometry tests need the real block structure —
+/// paragraphs, a heading, and the whitespace between them — because that
+/// structure is exactly what the hit test has to navigate.
+class _RawHtmlReadingProvider extends _FakeReadingProvider {
+  _RawHtmlReadingProvider(super.sourceId, super.textByUrl);
+
+  @override
+  Future<ChapterText> getText(String chapterUrl) async =>
+      ChapterText(html: textByUrl[chapterUrl] ?? 'missing');
+}
+
 /// A reading source whose `getText` throws on the first call and succeeds on
 /// every call after — for the error/retry path.
 class _FlakyReadingProvider implements BaseProvider, ReadingProvider {
@@ -932,5 +944,304 @@ void main() {
     // testing the reader. It is covered instead by the two halves it is made
     // of: `hideTextEverywhere` persisting the rule, and the reader rendering a
     // chapter clean against a rule saved before it was ever opened.
+    // What follows covers the part the tests above cannot: the *geometry*.
+    // Those press a widget the finder already located, so the hit test is
+    // handed the one point that is known to be right. Long-press hides nothing
+    // if the coordinate maths is wrong — and that maths depends on the mode
+    // (scrolling measures blocks; paginated runs a TextPainter over the page),
+    // on the safe-area inset, and on the font and margins actually laid out.
+    group('long press, measured on screen', () {
+      // Prose, a heading, more prose: prose resolves to a sentence, the heading
+      // falls back to the whole block, and the gaps between blocks resolve to
+      // nothing. Long enough that the target paragraphs sit clear of the top
+      // bar, which is stacked over the body and would swallow the press.
+      const html =
+          '<p>Alpha sentence one. Alpha sentence two.</p>'
+          '<p>Beta sentence one. Beta sentence two.</p>'
+          '<h3>AN: A heading read aloud skips.</h3>'
+          '<p>Gamma sentence one. Gamma sentence two.</p>';
+
+      void registerHtmlChapter() {
+        ani.register(
+          _RawHtmlReadingProvider('ani:n', {'u1': html, 'u2': html}),
+        );
+      }
+
+      /// The built-in rules would strip the heading before it could be pressed,
+      /// so every test here starts with filtering off — which is also the state
+      /// a reader is in when they have chosen to manage their own rules.
+      Future<void> filtersOff(WidgetTester tester) async {
+        await tester.runAsync(() async {
+          await sl<ReaderPrefs>().setTextFiltersEnabled(false);
+        });
+      }
+
+      Future<void> prefs(
+        WidgetTester tester,
+        Future<void> Function() apply,
+      ) async {
+        await tester.runAsync(apply);
+      }
+
+      /// A point inside the block containing [needle]. Horizontal, because the
+      /// paragraph is a single line and the sentence under test is decided by
+      /// how far across it the finger lands.
+      Offset pressInside(WidgetTester tester, String needle) {
+        final box = tester.renderObject<RenderBox>(
+          find.textContaining(needle, findRichText: true).first,
+        );
+        return box.localToGlobal(Offset.zero) + const Offset(30, 12);
+      }
+
+      Rect boxOf(WidgetTester tester, String needle) {
+        final box = tester.renderObject<RenderBox>(
+          find.textContaining(needle, findRichText: true).first,
+        );
+        return box.localToGlobal(Offset.zero) & box.size;
+      }
+
+      /// A bounded pump, not `pumpAndSettle`.
+      ///
+      /// These tests press the page, and after a press the reader keeps
+      /// scheduling frames — the dialog's route animation, then the gesture's
+      /// own settling. `pumpAndSettle` waits for a frame that never comes and
+      /// the test hangs for its full timeout instead of failing usefully. A
+      /// fixed couple of pumps is both bounded and enough for a route to be in.
+      Future<void> settleBriefly(WidgetTester tester) async {
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+
+      /// The sentence the dialog is offering.
+      String dialogQuote(WidgetTester tester) => tester
+          .widgetList<Text>(
+            find.descendant(
+              of: find.byType(AlertDialog),
+              matching: find.byType(Text),
+            ),
+          )
+          .map((t) => t.data)
+          .whereType<String>()
+          .first;
+
+      Future<void> expectHideDialog(WidgetTester tester, String quoted) async {
+        await settleBriefly(tester);
+        expect(find.text(quoted), findsWidgets);
+        expect(find.text('Hide'), findsOneWidget);
+      }
+
+      /// Takes the reader down before the test ends.
+      ///
+      /// Left mounted, it keeps the timers a live reader keeps — the auto-scroll
+      /// resume grace among them — and the test never finishes. The existing
+      /// long-press test disposes for the same reason.
+      Future<void> disposeReader(WidgetTester tester) async {
+        await tester.runAsync(() async {
+          await tester.pumpWidget(const SizedBox());
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        });
+      }
+
+      Future<void> expectNoHideDialog(WidgetTester tester) async {
+        await settleBriefly(tester);
+        expect(find.text('Hide'), findsNothing);
+      }
+
+      testWidgets('scrolling mode resolves the sentence under the finger', (
+        tester,
+      ) async {
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        await tester.longPressAt(pressInside(tester, 'Beta sentence one'));
+        await expectHideDialog(tester, 'Beta sentence one.');
+        await disposeReader(tester);
+      });
+
+      testWidgets('a safe-area inset does not shift the lookup', (
+        tester,
+      ) async {
+        // The whole bug: the inset used to be added where it did not belong, so
+        // the lookup landed a notch low and resolved to the wrong line - or,
+        // at the very top of a chapter, to nothing at all.
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.padding = const FakeViewPadding(top: 48, bottom: 24);
+        addTearDown(tester.view.reset);
+
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        await tester.longPressAt(pressInside(tester, 'Beta sentence one'));
+        await expectHideDialog(tester, 'Beta sentence one.');
+        await disposeReader(tester);
+      });
+
+      testWidgets('a larger font and wider margins still resolve', (
+        tester,
+      ) async {
+        await prefs(tester, () async {
+          await sl<ReaderPrefs>().setFontSize(30);
+          await sl<ReaderPrefs>().setMarginWidth(40);
+        });
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        await tester.longPressAt(pressInside(tester, 'Beta sentence one'));
+        await expectHideDialog(tester, 'Beta sentence one.');
+        await disposeReader(tester);
+      });
+
+      testWidgets('the paginated path resolves the sentence under the finger', (
+        tester,
+      ) async {
+        // A different branch entirely: no block offsets, a TextPainter over the
+        // page, and one more inset to remove (the page's own top padding).
+        await prefs(tester, () => sl<ReaderPrefs>().setNovelPaginated(true));
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // A page is one RichText for the whole chapter, so there is no
+        // per-paragraph box to aim at the way there is when scrolling. The page's
+        // own text area is the anchor, and the press walks down through it.
+        final page = boxOf(tester, 'Alpha sentence one');
+
+        await tester.longPressAt(Offset(page.left + 30, page.top + 8));
+        await settleBriefly(tester);
+        expect(find.text('Hide'), findsOneWidget);
+        expect(dialogQuote(tester), 'Alpha sentence one.');
+        await tester.tap(find.text('Cancel'));
+        await settleBriefly(tester);
+
+        // Further down the page is a different sentence. Without this the first
+        // assertion would pass even if every press resolved to the top.
+        await tester.longPressAt(Offset(page.left + 30, page.top + 70));
+        await settleBriefly(tester);
+        expect(find.text('Hide'), findsOneWidget);
+        expect(dialogQuote(tester), isNot('Alpha sentence one.'));
+        await disposeReader(tester);
+      });
+
+      testWidgets('the paginated path follows the text down past an inset', (
+        tester,
+      ) async {
+        // The page's text starts below both the inset and its own padding, and
+        // the lookup has to take both out. Aimed by the page's own box, so this
+        // fails if the inset is counted twice or not at all.
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.padding = const FakeViewPadding(top: 48, bottom: 24);
+        addTearDown(tester.view.reset);
+
+        await prefs(tester, () => sl<ReaderPrefs>().setNovelPaginated(true));
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        final page = boxOf(tester, 'Alpha sentence one');
+        expect(page.top, greaterThan(48));
+
+        await tester.longPressAt(Offset(page.left + 30, page.top + 8));
+        await settleBriefly(tester);
+        expect(find.text('Hide'), findsOneWidget);
+        expect(dialogQuote(tester), 'Alpha sentence one.');
+        await disposeReader(tester);
+      });
+
+testWidgets('empty space past the end of the chapter offers nothing', (
+        tester,
+      ) async {
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // A chapter this short leaves most of the page empty. A press out in it
+        // is not on a sentence, so there must be no dialog — and no crash
+        // hunting for one.
+        final last = boxOf(tester, 'Gamma sentence one');
+        expect(last.bottom, lessThan(500));
+        await tester.longPressAt(Offset(last.left + 30, last.bottom + 200));
+        await expectNoHideDialog(tester);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a press between two blocks stays with the text around it', (
+        tester,
+      ) async {
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // Whitespace between paragraphs is not a dead zone: a reader aiming
+        // between two lines means one of them, so the lookup snaps to the
+        // nearest sentence rather than doing nothing. What matters is that it
+        // stays local — a press in the seam must not surface a sentence from
+        // some other paragraph, which is exactly what a wrong coordinate
+        // conversion would do.
+        final alpha = boxOf(tester, 'Alpha sentence one');
+        final beta = boxOf(tester, 'Beta sentence one');
+        await tester.longPressAt(
+          Offset(alpha.left + 30, (alpha.bottom + beta.top) / 2),
+        );
+        await settleBriefly(tester);
+        expect(find.text('Hide'), findsOneWidget);
+          final quoted = dialogQuote(tester);
+        expect(
+          quoted.startsWith('Alpha sentence') ||
+              quoted.startsWith('Beta sentence'),
+          isTrue,
+          reason: 'a press in the seam quoted a distant sentence: "$quoted"',
+        );
+        await disposeReader(tester);
+      });
+
+      testWidgets('a heading still falls back to the whole block', (
+        tester,
+      ) async {
+        // Read-aloud skips headings, so there is no sentence list over this
+        // line; the fallback to the whole block is what makes it hideable at
+        // all. Geometry work must not cost that.
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        await tester.longPressAt(pressInside(tester, 'A heading read aloud'));
+        await expectHideDialog(tester, 'AN: A heading read aloud skips.');
+        await disposeReader(tester);
+      });
+
+      testWidgets('holding and then moving scrolls instead of hiding', (
+        tester,
+      ) async {
+        await filtersOff(tester);
+        registerHtmlChapter();
+        await tester.pumpWidget(harness());
+        await tester.pumpAndSettle();
+
+        // Scrolling is what a finger on this page is for, and the Hide dialog is
+        // worse than a mis-aimed scroll. The drag has to win the gesture arena
+        // before the long-press deadline, so this moves well inside it.
+        final at = pressInside(tester, 'Beta sentence one');
+        final gesture = await tester.startGesture(at);
+        await gesture.moveBy(const Offset(0, -40));
+        await tester.pump(const Duration(milliseconds: 40));
+        await gesture.moveBy(const Offset(0, -40));
+        await tester.pump(const Duration(milliseconds: 40));
+        await gesture.up();
+        await expectNoHideDialog(tester);
+        await disposeReader(tester);
+      });
+    });
   });
 }
