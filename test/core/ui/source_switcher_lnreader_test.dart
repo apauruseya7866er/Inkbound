@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:dio/dio.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/di/injector.dart' show sl;
 import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
@@ -11,6 +12,9 @@ import 'package:watch_app/core/provider/cloudstream_provider.dart';
 import 'package:watch_app/core/provider/provider_downloader.dart';
 import 'package:watch_app/core/provider/provider_manager.dart';
 import 'package:watch_app/core/provider/provider_registry.dart';
+import 'package:watch_app/core/mihon/mihon_manager.dart';
+import 'package:watch_app/core/repository/source_repository.dart';
+import 'package:watch_app/core/state/active_source_cubit.dart';
 import 'package:watch_app/core/ui/source_switcher.dart';
 
 /// Task 6's fix: `categorizedSources()` enumerated ProviderRegistry,
@@ -126,12 +130,48 @@ void main() {
       expect(hasReadingSourcesFor(ContentMode.anime), isFalse);
     });
 
-    test('reading the novel bucket never builds the LNReader QuickJS runtime', () {
-      categorizedSources();
-      hasReadingSourcesFor(ContentMode.novel);
-      expect(lnrManager.runtimeBuilt, isFalse);
+test('reading the novel bucket never builds the LNReader QuickJS runtime', () {
+        categorizedSources();
+        hasReadingSourcesFor(ContentMode.novel);
+        expect(lnrManager.runtimeBuilt, isFalse);
+      });
+
+      // The sibling of the bug above, one layer down.
+      //
+      // `categorizedSources` read the manager directly, so it typed its plugins
+      // correctly. `SourceRepository._rawSources` builds the list that search
+      // actually queries, and it mapped the stored meta's bare id ("plugin-a")
+      // instead of the provider's `'lnr:plugin-a'`. `sourceTypeOf` matches on
+      // that prefix, so every installed LNReader source came out of a novel
+      // search typed as anime - which is why the sources screen listed 150-odd
+      // of them and a novel search found none.
+      test('the searchable source list carries the lnr: id, not the bare one', () {
+        final repo = SourceRepository(
+          manager: ProviderManager(dio: Dio()),
+          csManager: CloudStreamManager(),
+          aniManager: AniyomiManager(),
+          mihonManager: MihonManager(),
+          lnrManager: lnrManager,
+          activeSource: ActiveSourceCubit(),
+          prefs: PlaybackPrefs(),
+        );
+
+        final ids = repo.loadedSources.map((s) => s.id).toList();
+        expect(
+          ids,
+          contains('lnr:plugin-a'),
+          reason: 'sourceTypeOf and provider resolution both key on lnr:',
+        );
+        expect(
+          ids,
+          isNot(contains('plugin-a')),
+          reason: 'the bare id is typed as anime and resolves to no provider',
+        );
+        // And it is actually a novel source, which is the thing that broke.
+        expect(ContentMode.novel.matchesProvider(sourceTypeOf('lnr:plugin-a')),
+            isTrue);
+      });
     });
-  });
 
   // A GetIt with no LnReaderManager at all is the state every pre-Task-6 test
   // runs in — categorizedSources must not crash there.

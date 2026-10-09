@@ -66,6 +66,17 @@ class NovelSourceGroup {
 /// the set is "the active source plus a couple" and not fine when it is every
 /// novel source the user has ever installed.
 class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
+  /// `sourceLanguages` is a [SourceRepository] detail, not on
+  /// [CatalogueRepository] - putting it on the interface would force every
+  /// implementation, test doubles included, to grow a member they never use.
+  ///
+  /// Resolves against whichever repo this cubit actually got, so a test double
+  /// passed in by a caller yields no languages rather than a cast error.
+  static Map<String, String> _langsOf(CatalogueRepository? repo) {
+    final r = repo ?? sl<SourceRepository>();
+    return r is SourceRepository ? r.sourceLanguages : const <String, String>{};
+  }
+
   NovelGlobalSearchCubit({
     CatalogueRepository? repo,
     SearchSourcePrefs? prefs,
@@ -73,14 +84,22 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     bool Function(String id)? isPinned,
     int maxConcurrent = defaultMaxConcurrent,
     Duration debounce = defaultDebounce,
-  }) : _repo = repo ?? sl<CatalogueRepository>(),
+  }) :
+       // SourceRepository, NOT `sl<CatalogueRepository>()`.
+       //
+       // The CatalogueRepository singleton is a CatalogueRouter, which with Z
+       // Mode on resolves `loadedSources` to the METADATA catalogue - a single
+       // `zm` pseudo-source (see CatalogueRouter._browse and
+       // MetadataRepository.loadedSources). This cubit excludes `zm` by id, so
+       // it was left with an empty list and reported "no novel sources are
+       // installed" while the reader had 150-odd of them sitting right there in
+       // the sources screen, which reads the LNReader manager directly.
+       //
+       // Same reasoning as SearchScreen's sources scope, which reaches for
+       // `sl<SourceRepository>()` for exactly this reason.
+       _repo = repo ?? sl<SourceRepository>(),
        _prefs = prefs ?? sl<SearchSourcePrefs>(),
-       // Not on the interface: `sourceLanguages` is a SourceRepository detail,
-       // and putting it on CatalogueRepository would force every implementation
-       // - including the test doubles - to grow a member they have no use for.
-       _languages =
-           languages ??
-           (repo is SourceRepository ? repo.sourceLanguages : const {}),
+       _languages = languages ?? _langsOf(repo),
        _isPinned = isPinned ?? PinnedSources.isPinned,
        _maxConcurrent = maxConcurrent,
        _debounce = debounce,

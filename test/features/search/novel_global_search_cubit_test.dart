@@ -1,4 +1,21 @@
+import 'dart:io';
+
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive/hive.dart';
+import 'package:watch_app/core/di/injector.dart' show sl;
+import 'package:watch_app/core/lnreader/lnreader_extension_service.dart';
+import 'package:watch_app/core/lnreader/lnreader_manager.dart';
+import 'package:watch_app/core/mihon/mihon_manager.dart';
+import 'package:watch_app/core/playback/playback_prefs.dart';
+import 'package:watch_app/core/provider/cloudstream_provider.dart';
+import 'package:watch_app/core/provider/provider_downloader.dart';
+import 'package:watch_app/core/provider/provider_manager.dart';
+import 'package:watch_app/core/provider/provider_registry.dart';
+import 'package:watch_app/core/repository/source_repository.dart';
+import 'package:watch_app/core/state/active_source_cubit.dart';
+import 'package:watch_app/core/zmode/zmode_ids.dart';
+
 import 'package:watch_app/core/models/media_item.dart';
 import 'package:watch_app/core/models/provider_info.dart';
 import 'package:watch_app/core/playback/search_source_prefs.dart';
@@ -9,6 +26,38 @@ import 'package:watch_app/features/search/novel_global_search_cubit.dart';
 /// Records every search it was asked for, answers per source, and can be made
 /// slow or broken for one source without touching the others - which is the
 /// whole point of the screen, and so the whole point of these tests.
+class _FakeLoader implements ProviderRuntimeLoader {
+  @override
+  JsProvider? get(String id) => null;
+
+  @override
+  Future<void> load({
+    required String sourceId,
+    required String jsSource,
+    String originRepoUrl = '',
+    String displayName = '',
+  }) async {}
+
+  @override
+  void setSettings(String sourceId, Map<String, dynamic> settings) {}
+
+  @override
+  void remove(String id) {}
+}
+
+class _FakeFetcher implements ProviderJsFetcher {
+  @override
+  Future<CachedProvider> fetch({
+    required String name,
+    required String url,
+    bool force = false,
+  }) async =>
+      CachedProvider(name: name, jsCode: '', url: url, fetchedAt: DateTime.now());
+
+  @override
+  Future<void> remove(String name) async {}
+}
+
 class _FakeRepo implements CatalogueRepository {
   _FakeRepo(this.loaded);
 
@@ -500,5 +549,97 @@ void main() {
       reason: 'two novel sources were actually queried',
     );
     await cubit.close();
+  });
+
+  // The one that matters, and the reason every other test here passed while
+  // the screen said "no novel sources are installed".
+  //
+  // They all inject `repo:`. Nobody exercised the DEFAULT, and the default was
+  // `sl<CatalogueRepository>()` - which is a CatalogueRouter, resolving
+  // `loadedSources` to the metadata catalogue while Z Mode is on: exactly one
+  // `zm` pseudo-source. This cubit excludes `zm` by id, so it was left with
+  // nothing and reported an empty install, with the real 150-odd LNReader
+  // sources invisible. The fix resolves sl<SourceRepository>() instead.
+  group('default repository resolution', () {
+    late Directory tempDir;
+    late LnReaderManager lnrManager;
+
+    const meta = LnReaderPluginMeta(
+      id: 'plugin-a',
+      name: 'Novel Fire',
+      site: 'https://a.test/',
+      lang: 'en',
+      version: '1.0.0',
+      url: 'https://cdn.test/a.js',
+      iconUrl: 'https://cdn.test/a.png',
+    );
+
+    setUp(() async {
+      tempDir = await Directory.systemTemp.createTemp('novel_global_default');
+      Hive.init(tempDir.path);
+      await ProviderRegistry.init();
+      await PlaybackPrefs.init();
+      await CloudStreamManager.init();
+      sl.registerSingleton<ProviderRegistry>(
+        ProviderRegistry(downloader: _FakeFetcher(), manager: _FakeLoader()),
+      );
+      sl.registerSingleton<PlaybackPrefs>(PlaybackPrefs());
+      sl.registerSingleton<CloudStreamManager>(CloudStreamManager());
+      sl.registerSingleton<AniyomiManager>(AniyomiManager());
+
+      lnrManager = LnReaderManager(
+        service: LnReaderExtensionService(
+          httpGet: (url) async => throw StateError('no network'),
+        ),
+        fetch: (url, init) async => throw StateError('no network'),
+      );
+      await lnrManager.init();
+      await Hive.box<Map>(LnReaderExtensionService.boxName)
+          .put(meta.id, {...meta.toMap(), 'js': ''});
+
+      sl.registerSingleton<LnReaderManager>(lnrManager);
+      sl.registerSingleton<SourceRepository>(
+        SourceRepository(
+          manager: ProviderManager(dio: Dio()),
+          csManager: CloudStreamManager(),
+          aniManager: AniyomiManager(),
+          mihonManager: MihonManager(),
+          lnrManager: lnrManager,
+          activeSource: ActiveSourceCubit(),
+          prefs: PlaybackPrefs(),
+        ),
+      );
+      // What the singleton used to resolve to: the router, Z Mode on, so the
+      // only entry is the pseudo-source this cubit drops.
+      sl.registerSingleton<CatalogueRepository>(
+        _FakeRepo([(id: ZmodeIds.sourceId, name: 'AniList')]),
+      );
+    });
+
+    tearDown(() async {
+      await sl.reset();
+      await Hive.close();
+      try {
+        await tempDir.delete(recursive: true);
+      } catch (_) {}
+    });
+
+    test('installed LNReader sources are found without an injected repo', () async {
+      final cubit = NovelGlobalSearchCubit(
+        prefs: _FakePrefs(const {}),
+        isPinned: (_) => false,
+        debounce: Duration.zero,
+      );
+      addTearDown(cubit.close);
+
+      await cubit.search('anything');
+
+      expect(
+        cubit.state.noSources,
+        isFalse,
+        reason: 'ZNReader sources are installed; the empty state is a bug',
+      );
+      expect(cubit.state.sourceCount, 1);
+    });
   });
 }
