@@ -88,6 +88,7 @@ import 'cubit/home_cubit.dart';
 import 'home_screen_tv.dart';
 import 'lists_hub_screen.dart';
 import 'genres_screen.dart';
+import '../search/novel_global_search_screen.dart';
 import 'search_screen.dart';
 import 'cubit/tracker_home_rows.dart' show releasedCount;
 import 'see_all_screen.dart';
@@ -662,6 +663,7 @@ class _HomeViewState extends State<_HomeView>
             _headerDownloadButton(),
             _notificationBell(context),
             const HomeSearchAction(),
+            const HomeNovelSearchAction(),
             const HomeSourceSwitcherSlot(),
           ],
         ),
@@ -1809,6 +1811,38 @@ class _HomeViewState extends State<_HomeView>
 /// dock. Shown regardless of Z Mode: [SearchScreen] itself already switches
 /// between the metadata catalogue and the active source, so the header icon
 /// that reaches it doesn't need to.
+/// A second way in, for the question the general search cannot answer.
+///
+/// The magnifier opens [SearchScreen], whose scope follows whatever mode Home
+/// is in - so with Z Mode on it searches the catalogue, and with it off it
+/// searches the sources of the current content mode, possibly narrowed to the
+/// one active source. That is right for "what can I find where I am" and wrong
+/// for "which of my sources has this book", which is the question a reader with
+/// twenty novel extensions actually has.
+///
+/// Separate control rather than a mode-dependent meaning for the existing one:
+/// an icon that means two different things is worse than two icons.
+class HomeNovelSearchAction extends StatelessWidget {
+  const HomeNovelSearchAction({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      icon: const DockIcon(
+        DockGlyph.search,
+        color: AppColors.textSecondary,
+        size: 22,
+      ),
+      tooltip: 'Search novels',
+      onPressed: () => Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => const NovelGlobalSearchScreen(),
+        ),
+      ),
+    );
+  }
+}
+
 class HomeSearchAction extends StatelessWidget {
   const HomeSearchAction({super.key});
 
