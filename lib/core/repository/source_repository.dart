@@ -266,6 +266,19 @@ class SourceRepository implements CatalogueRepository {
   @override
   List<({String id, String name})> get loadedSources => _named(_rawLoadedSources);
 
+  /// Each loaded source's declared language, where it declares one.
+  ///
+  /// Separate from [loadedSources] because that one *spends* the language: it
+  /// folds it into the name when two sources share one ("NovelHub (EN)"), which
+  /// is right for a picker and wrong for a screen that shows the language on its
+  /// own line beside the name. Sources that report no language are absent here
+  /// rather than present-and-empty, so a caller can tell "not stated" from
+  /// "stated as blank".
+  Map<String, String> get sourceLanguages => {
+    for (final s in _rawLoadedSources)
+      if (s.lang != null && s.lang!.isNotEmpty) s.id: s.lang!,
+  };
+
   /// Disambiguates same-named sources by appending their language code.
   ///
   /// Also collapses duplicate ids (first wins). Multi-language Mihon/Aniyomi

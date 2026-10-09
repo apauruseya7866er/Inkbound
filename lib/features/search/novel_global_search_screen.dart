@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/models/media_item.dart';
 import '../../core/theme/app_colors.dart';
 import '../detail/detail_screen.dart';
+import 'browse_source_screen.dart';
 import 'novel_global_search_cubit.dart';
 
 /// Search every installed novel source for one title.
@@ -240,13 +241,49 @@ class _SourceSection extends StatelessWidget {
             child: Row(
               children: [
                 // The source name is what makes a row trustworthy: the same
-                // title on two sites is two different books.
-                Text(
-                  group.sourceName,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                // title on two sites is two different books. The language under
+                // it is what tells two similarly-named sources apart without
+                // opening both.
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        group.sourceName,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      if (group.language case final lang?)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            _languageName(lang),
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-                const Spacer(),
                 _StatusLabel(status: group.status),
+                const SizedBox(width: 8),
+                // Into that source alone. The grouped list answers "which of
+                // my sources has this book"; this answers "show me everything
+                // else this one has".
+                IconButton(
+                  key: ValueKey('novel-search-open-${group.sourceId}'),
+                  tooltip: 'Open ${group.sourceName}',
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => BrowseSourceScreen(
+                        sourceId: group.sourceId,
+                        title: group.sourceName,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -263,6 +300,37 @@ class _SourceSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 'en' reads as 'English', 'pt-BR' as 'Portuguese (Brazil)'.
+///
+/// A bare code would be accurate and useless to a reader deciding which of
+/// three same-named sources to open.
+String _languageName(String code) {
+  const names = {
+    'en': 'English',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'zh': 'Chinese',
+    'es': 'Spanish',
+    'fr': 'French',
+    'de': 'German',
+    'it': 'Italian',
+    'pt': 'Portuguese',
+    'ru': 'Russian',
+    'id': 'Indonesian',
+    'vi': 'Vietnamese',
+    'th': 'Thai',
+    'ar': 'Arabic',
+    'tr': 'Turkish',
+  };
+  final normalised = code.replaceAll('_', '-');
+  final base = normalised.split('-').first.toLowerCase();
+  final region = normalised.contains('-')
+      ? normalised.split('-').last.toUpperCase()
+      : '';
+  final name = names[base] ?? base.toUpperCase();
+  return region.isEmpty ? name : '$name ($region)';
 }
 
 class _StatusLabel extends StatelessWidget {

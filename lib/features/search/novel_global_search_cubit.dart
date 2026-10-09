@@ -9,7 +9,9 @@ import '../../core/playback/pinned_sources.dart';
 import '../../core/playback/search_source_prefs.dart';
 import '../../core/playback/source_health_store.dart';
 import '../../core/repository/catalogue_repository.dart';
+import '../../core/repository/source_repository.dart';
 import '../../core/ui/source_switcher.dart';
+import '../../core/zmode/zmode_ids.dart';
 
 /// Where one source got to with a query.
 enum NovelSourceStatus { loading, hits, empty, failed }
@@ -26,11 +28,16 @@ class NovelSourceGroup {
     required this.sourceId,
     required this.sourceName,
     required this.status,
+    this.language,
     this.items = const [],
   });
 
   final String sourceId;
   final String sourceName;
+
+  /// Shown under the name, so a reader with several sources of the same name
+  /// can tell them apart without reading each one's catalogue.
+  final String? language;
   final NovelSourceStatus status;
   final List<MediaItem> items;
 
@@ -41,6 +48,7 @@ class NovelSourceGroup {
     sourceId: sourceId,
     sourceName: sourceName,
     status: status ?? this.status,
+    language: language,
     items: items ?? this.items,
   );
 }
@@ -60,11 +68,18 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
   NovelGlobalSearchCubit({
     CatalogueRepository? repo,
     SearchSourcePrefs? prefs,
+    Map<String, String>? languages,
     bool Function(String id)? isPinned,
     int maxConcurrent = defaultMaxConcurrent,
     Duration debounce = defaultDebounce,
   }) : _repo = repo ?? sl<CatalogueRepository>(),
        _prefs = prefs ?? sl<SearchSourcePrefs>(),
+       // Not on the interface: `sourceLanguages` is a SourceRepository detail,
+       // and putting it on CatalogueRepository would force every implementation
+       // - including the test doubles - to grow a member they have no use for.
+       _languages =
+           languages ??
+           (repo is SourceRepository ? repo.sourceLanguages : const {}),
        _isPinned = isPinned ?? PinnedSources.isPinned,
        _maxConcurrent = maxConcurrent,
        _debounce = debounce,
@@ -81,6 +96,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
 
   final CatalogueRepository _repo;
   final SearchSourcePrefs _prefs;
+  final Map<String, String> _languages;
   final bool Function(String id) _isPinned;
   final int _maxConcurrent;
   final Duration _debounce;
@@ -123,6 +139,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
             NovelSourceGroup(
               sourceId: s.id,
               sourceName: s.name,
+              language: s.lang,
               status: NovelSourceStatus.loading,
             ),
         ],
@@ -163,7 +180,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
   }
 
   Future<({List<MediaItem> items, bool failed})> _run(
-    ({String id, String name}) source,
+    ({String id, String name, String? lang}) source,
     String query,
   ) async {
     try {
@@ -183,7 +200,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
   }
 
   void _apply(
-    ({String id, String name}) source,
+    ({String id, String name, String? lang}) source,
     ({List<MediaItem> items, bool failed}) outcome,
   ) {
     emit(
@@ -211,11 +228,33 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
   /// Novel by provider type rather than by whatever Home is showing: this
   /// screen is the one place a reader goes to search everything regardless of
   /// the mode they left Home in.
-  List<({String id, String name})> _novelSources() => filterSourcesForMode(
-    {for (final s in _repo.loadedSources) s.id: s},
-    ContentMode.novel,
-    (s) => sourceTypeOf(s.id),
-  ).values.where((s) => _prefs.isIncluded(s.id)).toList();
+  List<({String id, String name, String? lang})> _novelSources() {
+    final languages = _languages;
+    // The Z Mode pseudo-source is dropped before anything asks what type it is.
+    //
+    // It types as novel while browsing novels, and its display name is whatever
+    // catalogue is configured - AniList, MAL, TMDB - but it is a list of
+    // canonical entries, not a place a novel can be read from. Left in, it is
+    // the one section a reader sees, and it answers with metadata rather than
+    // with anything they could open.
+    //
+    // Excluded by id rather than by type, because its type is exactly the thing
+    // that is misleading here.
+    final candidates = {
+      for (final s in _repo.loadedSources)
+        if (s.id != ZmodeIds.sourceId) s.id: s,
+    };
+    final eligible = filterSourcesForMode(
+      candidates,
+      ContentMode.novel,
+      (s) => sourceTypeOf(s.id),
+    ).values;
+    return [
+      for (final s in eligible)
+        if (_prefs.isIncluded(s.id))
+          (id: s.id, name: s.name, lang: languages[s.id]),
+    ];
+  }
 
   /// Pinned only, which is the narrowing Reikai offers.
   void setPinnedOnly(bool value) {

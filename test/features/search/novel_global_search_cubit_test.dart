@@ -14,6 +14,7 @@ class _FakeRepo implements CatalogueRepository {
 
   /// `{id: name}` for every loaded source, typed by [types].
   final List<({String id, String name})> loaded;
+  final Map<String, String> languages = {};
   final Map<String, ProviderType> types = {
     'lnr:n': ProviderType.novel,
     'mihon:m': ProviderType.manga,
@@ -39,6 +40,9 @@ class _FakeRepo implements CatalogueRepository {
 
   @override
   List<({String id, String name})> get loadedSources => loaded;
+
+  @override
+  Map<String, String> get sourceLanguages => languages;
 
   @override
   Future<({List<MediaItem> items, SourceOutcome outcome})> searchStatus(
@@ -104,6 +108,7 @@ NovelGlobalSearchCubit _cubitFor(
 }) => NovelGlobalSearchCubit(
   repo: repo,
   prefs: _FakePrefs(excluded),
+  languages: repo.languages,
   isPinned: pinned ?? (id) => id == 'lnr:x',
   maxConcurrent: maxConcurrent,
   debounce: Duration.zero,
@@ -405,6 +410,60 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 120));
 
     expect(repo.searched, isEmpty);
+    await cubit.close();
+  });
+
+  test('the metadata catalogue is not one of the novel sources', () async {
+    // Z Mode types as novel while browsing novels, and its display name is
+    // whatever catalogue is configured - AniList, MAL, TMDB. It is a list of
+    // canonical entries, not a place a novel can be read from, so putting it
+    // here meant the one section a reader saw was a catalogue - and none of the
+    // sources they could actually open a novel on.
+    final repo = _FakeRepo([
+      (id: 'zm', name: 'AniList'),
+      (id: 'lnr:n', name: 'Novel Site'),
+    ]);
+    repo.types['zm'] = ProviderType.novel;
+    repo.answers['lnr:n'] = items('lnr:n', 1);
+    final cubit = _cubitFor(repo);
+
+    await cubit.search('naruto');
+
+    expect(repo.searched, ['lnr:n'], reason: 'only real novel sources');
+    expect(
+      cubit.state.groups.map((g) => g.sourceName),
+      ['Novel Site'],
+    );
+    await cubit.close();
+  });
+
+  test('a source reports its language, so similar names can be told apart', () async {
+    final repo = _FakeRepo([
+      (id: 'lnr:en', name: 'NovelHub'),
+      (id: 'lnr:id', name: 'NovelHub'),
+    ]);
+    repo.languages['lnr:en'] = 'en';
+    repo.languages['lnr:id'] = 'id';
+    repo.answers['lnr:en'] = items('lnr:en', 1);
+    final cubit = _cubitFor(repo);
+
+    await cubit.search('naruto');
+
+    final byId = {for (final g in cubit.state.groups) g.sourceId: g};
+    expect(byId['lnr:en']!.language, 'en');
+    expect(byId['lnr:id']!.language, 'id');
+    await cubit.close();
+  });
+
+  test('a source that declares no language has none, rather than an empty one', () async {
+    final repo = _FakeRepo(_loaded);
+    repo.answers['lnr:x'] = items('lnr:x', 1);
+    final cubit = _cubitFor(repo);
+
+    await cubit.search('the alpha');
+
+    final group = cubit.state.groups.firstWhere((g) => g.sourceId == 'lnr:x');
+    expect(group.language, isNull, reason: 'absent, so the line is left out');
     await cubit.close();
   });
 }
