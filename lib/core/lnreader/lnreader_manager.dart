@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/hive/safe_box.dart';
 
+import 'lnreader_diagnostics.dart';
 import 'lnreader_extension_service.dart';
 import 'lnreader_provider.dart';
 import 'lnreader_runtime.dart';
@@ -92,6 +93,27 @@ class LnReaderManager {
     final runtime = _runtime ??= LnReaderRuntime(fetch: fetch);
     await runtime.loadPlugin(pluginId, js);
     _loadedPluginIds.add(pluginId);
+    // Logged after a successful load, because this compares the *loaded*
+    // plugin's own identity against the index entry it was installed under -
+    // the only way to tell a genuine id mismatch from a plugin that merely
+    // failed to load. A mismatch is what makes a plugin's own setting appear
+    // to reset on every restart while nothing is wrong with the setting.
+    //
+    // Guarded because this is diagnostics: a plugin that loads but cannot
+    // describe itself must not break the load that already succeeded.
+    try {
+      final info = runtime.pluginInfo(pluginId);
+      LnReaderDiag.identity(
+        indexId: pluginId,
+        pluginId: info['id'] as String?,
+        pluginName: info['name'] as String?,
+        site: info['site'] as String?,
+      );
+    } catch (_) {
+      debugPrint(
+        '[lnr-diag] loaded index=$pluginId but pluginInfo() failed',
+      );
+    }
   }
 
   /// Ensures [pluginId] is loaded, then calls `plugin[method](...args)`.

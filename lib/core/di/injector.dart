@@ -114,6 +114,7 @@ import '../lnreader/seed_repo.dart';
 import '../lnreader/lnreader_manager.dart';
 import '../lnreader/novel_lang_prefs.dart';
 import '../prefs/source_lang_prefs.dart';
+import '../lnreader/lnreader_diagnostics.dart';
 import '../lnreader/lnreader_runtime.dart' show LnReaderHttpResponse;
 import '../mihon/mihon_extension_service.dart';
 import '../mihon/mihon_manager.dart';
@@ -518,6 +519,14 @@ await TorrentPrefs.init();
           : const <String, dynamic>{};
       final mergedHeaders = {..._lnreaderBrowserHeaders, ...pluginHeaders};
       final method = (init['method'] as String?)?.toUpperCase() ?? 'GET';
+      LnReaderDiag.request(
+        label: 'fetch',
+        url: url,
+        method: method,
+        requestHeaders: mergedHeaders.map(
+          (k, v) => MapEntry(k.toString(), v.toString()),
+        ),
+      );
 
       // Native HTTP first on mobile: headers alone don't get past
       // webnovel.com's Cloudflare check (confirmed on-device — still 403 with
@@ -546,7 +555,22 @@ await TorrentPrefs.init();
             // thrown: the plugin is JS and swallows its own fetch failures, so
             // an exception never leaves the runtime. HomeCubit reads the latch
             // when a load comes back empty and offers the solver.
-            if (res['cloudflare'] == true) {
+            final challenge = res['cloudflare'] == true;
+            LnReaderDiag.response(
+              label: 'fetch',
+              url: url,
+              status: (res['status'] as num?)?.toInt() ?? 0,
+              finalUrl: res['url'] as String? ?? '',
+              bodyBytes: (res['body'] as String? ?? '').length,
+              responseHeaders: res['headers'] is Map
+                  ? (res['headers'] as Map).map(
+                      (k, v) => MapEntry(k.toString(), v.toString()),
+                    )
+                  : const {},
+              cloudflare: challenge,
+              via: 'native',
+            );
+            if (challenge) {
               NovelCloudflare.needsSolve(res['url'] as String? ?? url);
             }
             return LnReaderHttpResponse(
@@ -578,15 +602,31 @@ await TorrentPrefs.init();
           validateStatus: (_) => true,
         ),
       );
+      final body = res.data ?? '';
+      final finalUrl = res.realUri.toString();
+      final responseHeaders = res.headers.map.map(
+        (k, v) => MapEntry(k, v.join(', ')),
+      );
+      LnReaderDiag.response(
+        label: 'fetch',
+        url: url,
+        status: res.statusCode ?? 0,
+        finalUrl: finalUrl,
+        bodyBytes: body.length,
+        responseHeaders: responseHeaders,
+        // The native lane is the one that can see a challenge; this one never
+        // sets the flag, so a challenge answered here still shows up as a bare
+        // status, which is the honest answer rather than a guess.
+        via: 'dio',
+      );
       return LnReaderHttpResponse(
         status: res.statusCode ?? 0,
-        body: res.data ?? '',
-        url: res.realUri.toString(),
-        // Dio hands back a list per header (a name may repeat); join them the
-        // way HTTP does rather than keeping only the first.
-        headers: res.headers.map.map(
-          (k, v) => MapEntry(k, v.join(', ')),
-        ),
+        body: body,
+        // realUri, not `url`: this is the post-redirect URL, so a login wall or
+        // a challenge redirect is visible rather than hidden behind the
+        // address the plugin asked for.
+        url: finalUrl,
+        headers: responseHeaders,
       );
     },
   );

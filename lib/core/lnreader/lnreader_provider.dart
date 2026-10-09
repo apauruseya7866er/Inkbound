@@ -9,6 +9,7 @@ import '../models/provider_info.dart';
 import '../models/video_source.dart';
 import '../provider/base_provider.dart';
 import '../provider/reading_provider.dart';
+import 'lnreader_diagnostics.dart';
 import 'lnreader_extension_service.dart';
 import 'lnreader_manager.dart';
 
@@ -225,14 +226,28 @@ class LnReaderProvider implements BaseProvider, ReadingProvider {
   /// Invokes [method] on the plugin through the manager, catching any
   /// JS/timeout failure so callers degrade cleanly (same role as
   /// MihonProvider's `_safeInvoke`).
-  Future<dynamic> _safeCall(String method, List<Object?> args) async {
-    try {
-      return await manager.callPlugin(meta.id, method, args);
-    } catch (e) {
-      debugPrint('[lnreader] $method(${meta.id}) failed: $e');
-      return null;
+Future<dynamic> _safeCall(String method, List<Object?> args) async {
+      // One line per stage, and the single place worth instrumenting: every
+      // plugin method in this provider goes through here, so this is where
+      // "which stage failed" is answerable. `meta.id` labels the line, which is
+      // also how a log tells you *which* webnovel-family source is installed.
+      final label = meta.id;
+      try {
+        final raw = await manager.callPlugin(meta.id, method, args);
+        final (kind, detail) = LnReaderDiag.describe(raw);
+        LnReaderDiag.stage(label: label, method: method, kind: kind, detail: detail);
+        return raw;
+      } catch (e) {
+        LnReaderDiag.stage(
+          label: label,
+          method: method,
+          kind: 'threw',
+          error: e,
+        );
+        debugPrint('[lnreader] $method(${meta.id}) failed: $e');
+        return null;
+      }
     }
-  }
 
   /// Invokes [method] expecting a JSON array of `{name, path, cover?}`
   /// novels and maps it to [MediaItem]s.

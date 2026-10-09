@@ -262,10 +262,16 @@ globalThis.__unloadPlugin = function (id) {
 globalThis.__pluginInfo = function (pluginId) {
   var plugin = globalThis.__lnplugins[pluginId];
   if (!plugin) throw new Error('unknown plugin: ' + pluginId);
-  return JSON.stringify({
-    name: plugin.name,
-    site: plugin.site,
-    version: plugin.version,
-    filters: plugin.filters,
-  });
+return JSON.stringify({
+          // `id` is included for the diagnostics layer: it is the plugin's own
+          // identity, compared against the index entry it was installed under.
+          // Reikai does a two-pass load for exactly this reason - a plugin that
+          // reads storage at construction time needs the store scoped to its
+          // real id, which cannot be known until the module has run once.
+          id: plugin.id,
+          name: plugin.name,
+          site: plugin.site,
+          version: plugin.version,
+          filters: plugin.filters,
+        });
 };

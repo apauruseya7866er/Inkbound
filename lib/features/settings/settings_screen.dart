@@ -18,7 +18,8 @@ import '../../core/ui/streaming_prefs.dart';
 import '../../core/zmode/metadata_provider_prefs.dart';
 import '../../core/cache/media_cache.dart';
 import '../../core/logging/app_logger.dart';
-import '../../core/logging/log_report_service.dart';
+  import '../../core/logging/log_report_service.dart';
+  import '../../core/lnreader/lnreader_diagnostics.dart';
 import '../../core/tracker/mal_service.dart';
 import '../../core/tracker/mangabaka_service.dart';
 import '../../core/tracker/simkl_service.dart';
@@ -1202,6 +1203,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (mounted) setState(() {});
         },
       ),
+    // Source diagnostics, next to Share logs because the two are used together:
+    // turn this on, reproduce the broken source, then share the log. Off by
+    // default - it is one line per HTTP request and this screen is reached by
+    // people debugging their own install, which is exactly when it is wanted.
+    _SettingsEntry(
+      section: SettingsSection.advanced,
+      icon: Icons.travel_explore_rounded,
+      title: 'Source request log',
+      subtitle: LnReaderDiag.verboseFetch
+          ? 'On - every source request is logged'
+          : 'Off - log each source request to find why one fails',
+      keywords:
+          'source log diagnostics novel extension lnreader plugin request '
+          'network debug webnovel why not working empty failed',
+      onTap: () async {
+        LnReaderDiag.verboseFetch = !LnReaderDiag.verboseFetch;
+        setState(() {});
+      },
+    ),
     _SettingsEntry(
       section: SettingsSection.advanced,
       icon: Icons.bug_report_outlined,
