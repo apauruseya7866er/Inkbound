@@ -488,4 +488,185 @@ group('audiobook sheet', () {
       await cubit.close();
     });
   });
+
+  group('the player covers the page', () {
+    /// A reader behind it, so there is something for the route to cover and
+    /// something to come back to.
+    Widget host(_FakeTtsCubit cubit) => MaterialApp(
+      home: Builder(
+        builder: (context) => Scaffold(
+          body: Center(
+            child: TextButton(
+              onPressed: () => showTtsAudiobookSheet(
+                context,
+                cubit: cubit,
+                bookTitle: 'A Wizard of Earthsea',
+                chapterTitle: () => 'Chapter 8',
+                canPreviousChapter: true,
+                canNextChapter: true,
+                onPreviousChapter: () {},
+                onNextChapter: () {},
+              ),
+              child: const Text('open the player'),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    /// The screen size the player actually occupies.
+    Size occupiedBy(WidgetTester tester) =>
+        tester.getSize(find.byType(TtsAudiobookSheet));
+
+    testWidgets('it fills the screen rather than sitting at 92% of it', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(host(cubit));
+      final surface = tester.view.physicalSize / tester.view.devicePixelRatio;
+
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      // The strip of reader showing above it was the complaint: a third of a
+      // transcript screen spent on the page behind it.
+      expect(occupiedBy(tester).height, surface.height);
+      expect(occupiedBy(tester).width, surface.width);
+      await cubit.close();
+    });
+
+    testWidgets('it covers the page behind it, edge to edge', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      // No scrim and no gap: nothing of the reader is reachable while the
+      // player is up.
+      expect(find.text('open the player'), findsNothing);
+      await cubit.close();
+    });
+
+    testWidgets('the system back button returns to the reader', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+      expect(find.byType(TtsAudiobookSheet), findsOneWidget);
+
+      // A route, so back pops it the way back pops anything else. Narration is
+      // unaffected either way - it runs in a foreground service.
+      final popped = await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(popped, isTrue);
+      expect(find.byType(TtsAudiobookSheet), findsNothing);
+      expect(find.text('open the player'), findsOneWidget);
+      await cubit.close();
+    });
+
+    testWidgets('the close control still returns to the reader', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-close')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(TtsAudiobookSheet), findsNothing);
+      expect(find.text('open the player'), findsOneWidget);
+      await cubit.close();
+    });
+
+    testWidgets('the header clears the status bar', (tester) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.padding = const FakeViewPadding(top: 48, bottom: 24);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      // Covering the page put the header under the clock, where a sheet never
+      // was. It has to come back down.
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('audiobook-sheet-close'))).dy,
+        greaterThanOrEqualTo(48),
+      );
+      await cubit.close();
+    });
+
+    testWidgets('a short viewport and large text do not overflow', (
+      tester,
+    ) async {
+      // The risk in moving from a sheet to a page is the fixed rows underneath
+      // the scrolling body. A small screen and a big system font together is
+      // where that gives out, and an overflow is a black-and-yellow stripe
+      // across the player's controls.
+      final cubit = _FakeTtsCubit(total: 6);
+      tester.view.physicalSize = const Size(360, 480);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(
+        MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+          child: host(cubit),
+        ),
+      );
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      // The controls are all still there, on a screen a fifth of the usual area.
+      expect(find.byKey(const ValueKey('audiobook-play')), findsOneWidget);
+      await cubit.close();
+    });
+
+    testWidgets('lyrics stay scrollable on a short viewport', (tester) async {
+      final cubit = _FakeTtsCubit(total: 40);
+      tester.view.physicalSize = const Size(360, 480);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      // The transcript is the thing that has to scroll on a small screen.
+      final scrollable = find.descendant(
+        of: find.byType(TtsAudiobookSheet),
+        matching: find.byType(Scrollable),
+      );
+      expect(scrollable, findsWidgets);
+      await cubit.close();
+    });
+
+    testWidgets('the view toggle keeps the controls and the spoken sentence', (
+      tester,
+    ) async {
+      // Switching views must not restart anything: the same cubit, the same
+      // transport, and the transcript still opens on what is being read.
+      final cubit = _FakeTtsCubit(total: 6, current: 3);
+      await tester.pumpWidget(host(cubit));
+      await tester.tap(find.text('open the player'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('Sentence number 3 of the chapter goes here.'),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('audiobook-play')), findsOneWidget);
+      await cubit.close();
+    });
+  });
 }

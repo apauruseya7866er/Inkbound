@@ -9,11 +9,28 @@ import 'package:watch_app/core/reading/tts/tts_prefs.dart';
 import 'package:watch_app/core/reading/tts/tts_state.dart';
 import 'package:watch_app/core/theme/app_colors.dart';
 
-/// Opens the read-aloud audiobook sheet over the reader.
+/// Opens the read-aloud audiobook player over the reader, covering the page.
+/// A full-screen page, not a sheet.
 ///
-/// A sheet and not a pushed route: the page stays behind it, and dismissing it
-/// hands the reader straight back without interrupting narration - which runs in
-/// a foreground service and does not care what is on screen.
+/// It was a `showModalBottomSheet` sized to 92% of the height, which left a strip
+/// of the reader showing above it and a rounded edge hanging in the middle of the
+/// screen. The transcript and the artwork are the whole point of this screen, and
+/// neither has a use for that strip - so it covers the page now.
+///
+/// What did not change, deliberately:
+///
+///   * Narration runs in a foreground service and does not care what is on
+///     screen, so the book is still being read the whole time this is open, and
+///     dismissing it hands the reader straight back to where they were.
+///   * The close control and the system back button both pop the route, so the
+///     way out is the way it was.
+///   * Player and lyrics are one widget sharing one header, so moving between
+///     them is a toggle with the controls staying put, not a navigation. The
+///     cubit is the reader's own, which is why the sentence being spoken is still
+///     tracked while this is open.
+///
+/// The name is left alone: renaming it would touch the reader and every test that
+/// opens it for no gain, and it still describes what the thing is.
 Future<void> showTtsAudiobookSheet(
   BuildContext context, {
   required TtsCubit cubit,
@@ -25,20 +42,42 @@ Future<void> showTtsAudiobookSheet(
   required VoidCallback onNextChapter,
   String? cover,
 }) {
-  return showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: Colors.transparent,
-    barrierColor: Colors.black.withValues(alpha: 0.6),
-    builder: (_) => TtsAudiobookSheet(
-      cubit: cubit,
-      bookTitle: bookTitle,
-      chapterTitle: chapterTitle,
-      canPreviousChapter: canPreviousChapter,
-      canNextChapter: canNextChapter,
-      onPreviousChapter: onPreviousChapter,
-      onNextChapter: onNextChapter,
-      cover: cover,
+  return Navigator.of(context).push<void>(
+    PageRouteBuilder<void>(
+      // Modal: it is a thing opened over the reader rather than a step in a
+      // sequence, and it should not sit in the reader's back stack as if it did.
+      fullscreenDialog: true,
+      transitionDuration: const Duration(milliseconds: 220),
+      reverseTransitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (_, _, _) => TtsAudiobookSheet(
+        cubit: cubit,
+        bookTitle: bookTitle,
+        chapterTitle: chapterTitle,
+        canPreviousChapter: canPreviousChapter,
+        canNextChapter: canNextChapter,
+        onPreviousChapter: onPreviousChapter,
+        onNextChapter: onNextChapter,
+        cover: cover,
+      ),
+      // A short fade with a slight lift, so it reads as the sheet growing into
+      // the page it came from. Anything longer makes a reader wait to get to
+      // the thing they tapped.
+      transitionsBuilder: (_, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.04),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
     ),
   );
 }
@@ -82,81 +121,75 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return FractionallySizedBox(
-      heightFactor: 0.92,
-      child: ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
-        child: Material(
-          // Material, not a ColoredBox: the quick actions are InkWells, which
-          // assert on a missing Material ancestor when they build.
-          color: AppColors.bg,
-          child: BlocBuilder<TtsCubit, TtsState>(
-            bloc: widget.cubit,
-            builder: (context, state) {
-              final total = state.totalSentences;
-              final current = total == 0
-                  ? 0
-                  : state.currentIndex.clamp(0, total - 1);
-              return Stack(
-                fit: StackFit.expand,
-                children: [
-                  _BlurredBackdrop(cover: widget.cover),
-                  SafeArea(
-                    top: false,
-                    child: Column(
-                      children: [
-                        _SheetHeader(
-                          onClose: () => Navigator.of(context).maybePop(),
-                          showingLyrics: _view == _SheetView.lyrics,
-                          onToggleView: () => setState(() {
-                            _view = _view == _SheetView.player
-                                ? _SheetView.lyrics
-                                : _SheetView.player;
-                          }),
-                        ),
-                        Expanded(
-                          child: _view == _SheetView.player
-                              ? _PlayerBody(
-                                  cover: widget.cover,
-                                  chapterTitle: widget.chapterTitle(),
-                                  bookTitle: widget.bookTitle,
-                                )
-                              : _LyricsBody(
-                                  cubit: widget.cubit,
-                                  state: state,
-                                  current: current,
-                                ),
-                        ),
-                        _WaveformProgress(
-                          cubit: widget.cubit,
-                          state: state,
-                          current: current,
-                        ),
-                        _CounterRow(state: state, current: current),
-                        _TransportRow(
-                          cubit: widget.cubit,
-                          state: state,
-                          current: current,
-                          canPreviousChapter: widget.canPreviousChapter,
-                          canNextChapter: widget.canNextChapter,
-                          onPreviousChapter: widget.onPreviousChapter,
-                          onNextChapter: widget.onNextChapter,
-                          onShuffle: () {
-                            if (total < 2) return;
-                            final next = math.Random().nextInt(total);
-                            if (next != current) widget.cubit.seek(next);
-                          },
-                        ),
-                        _QuickActions(cubit: widget.cubit, state: state),
-                        const SizedBox(height: 8),
-                      ],
+    return Material(
+      // Material, not a ColoredBox: the quick actions are InkWells, which
+      // assert on a missing Material ancestor when they build.
+      color: AppColors.bg,
+      child: BlocBuilder<TtsCubit, TtsState>(
+        bloc: widget.cubit,
+        builder: (context, state) {
+          final total = state.totalSentences;
+          final current = total == 0 ? 0 : state.currentIndex.clamp(0, total - 1);
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              _BlurredBackdrop(cover: widget.cover),
+              // Insets on all four sides now, where the sheet only ever needed
+              // the bottom: covering the page puts the header under the status
+              // bar, and the transport under the navigation bar.
+              SafeArea(
+                child: Column(
+                  children: [
+                    _SheetHeader(
+                      onClose: () => Navigator.of(context).maybePop(),
+                      showingLyrics: _view == _SheetView.lyrics,
+                      onToggleView: () => setState(() {
+                        _view = _view == _SheetView.player
+                            ? _SheetView.lyrics
+                            : _SheetView.player;
+                      }),
                     ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
+                    Expanded(
+                      child: _view == _SheetView.player
+                          ? _PlayerBody(
+                              cover: widget.cover,
+                              chapterTitle: widget.chapterTitle(),
+                              bookTitle: widget.bookTitle,
+                            )
+                          : _LyricsBody(
+                              cubit: widget.cubit,
+                              state: state,
+                              current: current,
+                            ),
+                    ),
+                    _WaveformProgress(
+                      cubit: widget.cubit,
+                      state: state,
+                      current: current,
+                    ),
+                    _CounterRow(state: state, current: current),
+                    _TransportRow(
+                      cubit: widget.cubit,
+                      state: state,
+                      current: current,
+                      canPreviousChapter: widget.canPreviousChapter,
+                      canNextChapter: widget.canNextChapter,
+                      onPreviousChapter: widget.onPreviousChapter,
+                      onNextChapter: widget.onNextChapter,
+                      onShuffle: () {
+                        if (total < 2) return;
+                        final next = math.Random().nextInt(total);
+                        if (next != current) widget.cubit.seek(next);
+                      },
+                    ),
+                    _QuickActions(cubit: widget.cubit, state: state),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -790,19 +823,31 @@ class _CounterRow extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            total == 0 ? '0 / 0' : '${current + 1} / $total',
-            style: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 13,
-            ),
-          ),
-          if (left.isNotEmpty)
-            Text(
-              left,
+          // Flexible, so a long chapter count and a long time-left share the
+          // row instead of overflowing it. On a narrow screen with a large
+          // system font these two together are wider than the player.
+          Flexible(
+            child: Text(
+              total == 0 ? '0 / 0' : '${current + 1} / $total',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: const TextStyle(
                 color: AppColors.textSecondary,
                 fontSize: 13,
+              ),
+            ),
+          ),
+          if (left.isNotEmpty)
+            Flexible(
+              child: Text(
+                left,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 13,
+                ),
               ),
             ),
         ],
@@ -907,34 +952,46 @@ class _QuickActions extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 2, 14, 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          _QuickAction(
-            key: const ValueKey('audiobook-sleep'),
-            icon: Icons.timer_outlined,
-            label: sleepLabel,
-            onTap: () {
-              final at = _sleepCycle.indexOf(state.sleepTimerMinutes);
-              cubit.setSleepTimer(_sleepCycle[(at + 1) % _sleepCycle.length]);
-            },
+          // Each action gets an equal share and may shrink within it. Five
+          // labelled actions are wider than a small phone once the system font
+          // is scaled up, and the row used to overflow rather than give the
+          // labels room to ellipsise.
+          Flexible(
+            child: _QuickAction(
+              key: const ValueKey('audiobook-sleep'),
+              icon: Icons.timer_outlined,
+              label: sleepLabel,
+              onTap: () {
+                final at = _sleepCycle.indexOf(state.sleepTimerMinutes);
+                cubit.setSleepTimer(_sleepCycle[(at + 1) % _sleepCycle.length]);
+              },
+            ),
           ),
-          _QuickAction(
-            key: const ValueKey('audiobook-minus-sentence'),
-            icon: Icons.keyboard_double_arrow_left_rounded,
-            label: '-1 Sent',
-            onTap: canStep ? () => cubit.skip(-1) : null,
+          Flexible(
+            child: _QuickAction(
+              key: const ValueKey('audiobook-minus-sentence'),
+              icon: Icons.keyboard_double_arrow_left_rounded,
+              label: '-1 Sent',
+              onTap: canStep ? () => cubit.skip(-1) : null,
+            ),
           ),
-          _QuickAction(
-            key: const ValueKey('audiobook-plus-sentence'),
-            icon: Icons.keyboard_double_arrow_right_rounded,
-            label: '+1 Sent',
-            onTap: canStep ? () => cubit.skip(1) : null,
+          Flexible(
+            child: _QuickAction(
+              key: const ValueKey('audiobook-plus-sentence'),
+              icon: Icons.keyboard_double_arrow_right_rounded,
+              label: '+1 Sent',
+              onTap: canStep ? () => cubit.skip(1) : null,
+            ),
           ),
-          _QuickAction(
-            key: const ValueKey('audiobook-speed'),
-            icon: Icons.speed_rounded,
-            label: '${state.rate.toStringAsFixed(1)}x',
-            onTap: () => cubit.setRate(TtsSpeed.next(state.rate)),
+          Flexible(
+            child: _QuickAction(
+              key: const ValueKey('audiobook-speed'),
+              icon: Icons.speed_rounded,
+              label: '${state.rate.toStringAsFixed(1)}x',
+              onTap: () => cubit.setRate(TtsSpeed.next(state.rate)),
+            ),
           ),
         ],
       ),
@@ -970,7 +1027,16 @@ class _QuickAction extends StatelessWidget {
             children: [
               Icon(icon, size: 22, color: tint),
               const SizedBox(height: 4),
-              Text(label, style: TextStyle(color: tint, fontSize: 11.5)),
+              Text(
+                label,
+                maxLines: 1,
+                // Five actions across a narrow screen with a large system font
+                // is more than they take. Ellipsising the label keeps every
+                // action reachable instead of letting the row overflow.
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: tint, fontSize: 11.5),
+              ),
             ],
           ),
         ),
