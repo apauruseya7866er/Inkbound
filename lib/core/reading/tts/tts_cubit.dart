@@ -55,6 +55,17 @@ class TtsCubit extends Cubit<TtsState> {
   /// notification refresh so it is not sent on every sentence.
   bool _serviceUp = false;
 
+  /// Whether any sentence has actually begun or finished speaking in the
+  /// current run.
+  ///
+  /// A completion on its own does not mean the chapter was read. An engine
+  /// that accepts the request and then fails every utterance still reports
+  /// the queue drained, and that completion was indistinguishable from
+  /// finishing a chapter - so the reader turned the page, loaded the next
+  /// one, failed all of its sentences too, and walked through the book one
+  /// silent chapter at a time. The reader had to close the app to stop it.
+  bool _hasSuccessfulSentence = false;
+
   /// Parsed sentences of the loaded chapter, kept beside the state so `play`
   /// can build the engine's unit list without re-parsing on every press.
   List<TtsSentenceView> _loaded = const [];
@@ -156,6 +167,9 @@ class TtsCubit extends Cubit<TtsState> {
   }) {
     if (chapterId.isEmpty) return;
     if (!force && chapterId == state.chapterId && _loaded.isNotEmpty) return;
+
+    // A new chapter has spoken nothing yet, however the last one ended.
+    _hasSuccessfulSentence = false;
 
     // One list, held by both `_loaded` and the state: a reader that is told a
     // different gap than the one about to be spoken is a bug waiting to be
@@ -347,6 +361,9 @@ class TtsCubit extends Cubit<TtsState> {
     }
 
     final startIndex = (from ?? state.currentIndex).clamp(0, _loaded.length - 1);
+    // Each run has to earn its own completion: what the previous one managed
+    // to speak says nothing about this one.
+    _hasSuccessfulSentence = false;
     emit(
       state.copyWith(
         status: TtsStatus.speaking,
@@ -562,12 +579,16 @@ class TtsCubit extends Cubit<TtsState> {
         // after the chapter is closed. Acting on it would set a highlight in
         // text that is no longer on screen.
         if (_loaded.isEmpty || index < 0 || index >= _loaded.length) return;
+        _hasSuccessfulSentence = true;
         emit(state.copyWith(currentIndex: index, clearError: true));
         _queuePosition(state.chapterId, index);
         unawaited(_syncServiceSentence());
 
       case TtsSentenceFinished():
-        break;
+        // Also proof the engine spoke, not just that it started talking: some
+        // engines report an utterance finishing without ever reporting its
+        // start, and that utterance was audible.
+        _hasSuccessfulSentence = true;
 
       case TtsUtteranceFailed(:final index, :final code):
         // A failed sentence is skipped by the engine, which keeps reading, so
@@ -608,6 +629,29 @@ class TtsCubit extends Cubit<TtsState> {
             '[TtsCubit] ignored a completion for a session that is '
             '${state.status.name}',
           );
+          return;
+        }
+        // The queue drained, but nothing was ever spoken: every utterance the
+        // engine accepted then failed. This is not a finished chapter, and
+        // advancing on it is what walked the reader through the whole book in
+        // silence. Stop here, say why, and leave them on the page they were
+        // reading - including its saved position, so Continue Reading returns
+        // here rather than jumping them forward past everything they missed.
+        if (!_hasSuccessfulSentence) {
+          debugPrint(
+            '[TtsCubit] chapter ${state.chapterId} completed with no sentence '
+            'spoken; not advancing',
+          );
+          emit(
+            state.copyWith(
+              status: TtsStatus.idle,
+              errorMessage: 'Text-to-speech could not read this chapter',
+            ),
+          );
+          // The engine is finished either way; the service is not, and leaving
+          // it up would keep a notification and a process alive for a session
+          // that has stopped.
+          unawaited(_tearDownService());
           return;
         }
         // The whole chapter was read, so there is nothing left to resume into.

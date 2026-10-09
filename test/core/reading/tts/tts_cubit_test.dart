@@ -1157,6 +1157,11 @@ void main() {
   });
 
   group('chapter auto-advance', () {
+    /// A completion only means a chapter finished if something actually
+    /// spoke first - see the guard in `_onEvent`. Tests that expect the
+    /// page to turn have to say a sentence played.
+    void speakOneSentence() => platform.emit(const TtsSentenceStarted(0));
+
     /// Stands in for the reader: turns to the next chapter and hands it back,
     /// which is the order the real one does it in — the reader loads and lays
     /// out the chapter first, and only then does the coordinator learn what
@@ -1218,6 +1223,7 @@ void main() {
       final cubit = await withChapters();
       expect(cubit.state.currentIndex, 0);
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1249,6 +1255,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1300,6 +1307,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1328,6 +1336,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 80));
@@ -1353,6 +1362,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1363,6 +1373,7 @@ void main() {
 
     test('advancing keeps the same book', () async {
       final cubit = await withChapters();
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
       // The resume point is keyed by book, so a chapter roll must not orphan it.
@@ -1372,6 +1383,7 @@ void main() {
 
     test('the auto-advanced chapter id is one the app can reopen', () async {
       final cubit = await withChapters();
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1399,6 +1411,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1414,6 +1427,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       await cubit.play();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
@@ -1427,6 +1441,7 @@ void main() {
       final cubit = await withChapters();
       cubit.detachChapterSource();
 
+      speakOneSentence();
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(cubit.state.status, TtsStatus.idle);
@@ -1461,6 +1476,88 @@ void main() {
       platform.emit(const TtsCompleted());
       await Future<void>.delayed(const Duration(milliseconds: 10));
       expect(platform.serviceUp, isTrue);
+    });
+
+    // The bug this whole guard exists for, in the shape it was reported in:
+    // open the app, tap Continue Reading, press play, and the engine accepts
+    // every sentence then fails to read every one of them. Each failure is
+    // skipped and reading continues, so the reader watched the app walk the
+    // whole book forward a chapter at a time with no voice, until they closed
+    // it. The completion at the end of that run is a drained queue, not a
+    // finished chapter.
+    test('a chapter where every sentence fails does not turn the page', () async {
+      final navigated = <int>[];
+      final cubit = await withChapters();
+      installReader(cubit, _FakeChapterSource(count: 3), navigated);
+
+      final total = cubit.state.totalSentences;
+      expect(total, greaterThan(1));
+      for (var i = 0; i < total; i++) {
+        platform.emit(TtsUtteranceFailed(i, 1));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      platform.emit(const TtsCompleted());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      // Still on the chapter they opened, nothing fetched, and told why.
+      expect(navigated, isEmpty);
+      expect(cubit.state.chapterId, 'c0');
+      expect(cubit.state.isSpeaking, isFalse);
+      expect(cubit.state.status, TtsStatus.idle);
+      expect(cubit.state.errorMessage, isNotNull);
+      // And no notification left behind for a session that has stopped.
+      expect(platform.serviceUp, isFalse);
+      await cubit.close();
+    });
+
+    // The same run, but one sentence made it through. Now the completion means
+    // what it says, and the guard must not get in the way of a real chapter
+    // ending.
+    test('one sentence spoken is enough to keep auto-advance', () async {
+      final navigated = <int>[];
+      final cubit = await withChapters();
+      installReader(cubit, _FakeChapterSource(count: 3), navigated);
+
+      platform.emit(const TtsSentenceStarted(1));
+      platform.emit(TtsUtteranceFailed(0, 1));
+      platform.emit(TtsUtteranceFailed(2, 1));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      platform.emit(const TtsCompleted());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(navigated, isNotEmpty);
+      expect(cubit.state.chapterId, isNot('c0'));
+      await cubit.close();
+    });
+
+    // The position is the reader's only way back to what they missed, so a
+    // failed run must not consume it.
+    test('a failed run keeps the saved position', () async {
+      final cubit = await build();
+      cubit.loadChapter(bookId: 'b1', chapterId: 'c1', html: _chapterHtml);
+      platform.becomeReady();
+      await Future<void>.delayed(Duration.zero);
+
+      // A first run that works, so there is a position worth keeping. Position
+      // 0 is not worth saving, hence reading from sentence 1.
+      await cubit.play();
+      platform.emit(const TtsSentenceStarted(1));
+      await Future<void>.delayed(Duration.zero);
+      await cubit.pause();
+      expect(prefs.resumePoint('b1'), isNotNull);
+
+      // They press play again and this time the engine fails everything. What
+      // the previous run managed to say must not make this completion count:
+      // it did not, so the position has to survive it.
+      await cubit.play();
+      for (var i = 0; i < cubit.state.totalSentences; i++) {
+        platform.emit(TtsUtteranceFailed(i, 1));
+      }
+      platform.emit(const TtsCompleted());
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(prefs.resumePoint('b1'), isNotNull);
+      await cubit.close();
     });
   });
 
