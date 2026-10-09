@@ -31,6 +31,7 @@ import 'package:watch_app/core/tracker/tracker.dart';
 import 'package:watch_app/core/tracker/tracker_hub.dart';
 import 'package:watch_app/core/reading/tts/tts_cubit.dart';
 import 'package:watch_app/core/reading/tts/tts_state.dart';
+import 'package:watch_app/core/reading/tts/tts_prefs.dart';
 import 'package:watch_app/features/reader/tts_audiobook_sheet.dart';
 import 'package:watch_app/features/reader/novel_reader_screen.dart';
 
@@ -319,16 +320,19 @@ class _FakeTracker extends ChangeNotifier implements Tracker {
 /// box behind it, none of which this is testing — what matters here is the
 /// order: chapter segmented first, player opened second.
 class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
-  _StubTtsCubit()
+  _StubTtsCubit({this.point})
     : super(
         TtsState(
-          status: TtsStatus.speaking,
+          // Idle, like a reader that has just opened. A speaking stub would make
+          // seek() restart playback, which is correct behaviour but is not what
+          // these tests are about.
+          status: TtsStatus.idle,
           available: true,
           bookId: 'b1',
           chapterId: 'c1',
-          totalSentences: 3,
+          totalSentences: 12,
           sentences: [
-            for (var i = 0; i < 3; i++)
+            for (var i = 0; i < 12; i++)
               TtsSentenceView(
                 index: i,
                 text: 'Sentence $i of the chapter goes here.',
@@ -341,7 +345,38 @@ class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
       );
 
   int playCalls = 0;
+  int? playFrom;
+  final List<int> seeks = [];
   final List<String> adopted = [];
+
+  /// The saved narration position for this book, when there is one.
+  TtsResumePoint? point;
+
+  @override
+  TtsResumePoint? resumePointFor(String bookId, String chapterId) {
+    // Only a point that belongs to the chapter being read, which is the whole
+    // reason the cubit checks it: a position saved against another chapter says
+    // nothing about this one.
+    return point != null && point!.chapterId == chapterId ? point : null;
+  }
+
+  @override
+  int resolveResumeIndex(TtsResumePoint point) {
+    // The real resolver's fingerprint matching and fallback are covered in the
+    // cubit's own tests. What is under test here is that the reader asks for it
+    // at all, and passes the answer on.
+    return point.sentenceIndex.clamp(0, state.sentences.length - 1);
+  }
+
+  @override
+  Future<void> seek(int index) async {
+    seeks.add(index);
+    if (!state.isActive) {
+      emit(state.copyWith(currentIndex: index));
+      return;
+    }
+    await play(from: index);
+  }
 
   @override
   Future<void> adoptChapter({
@@ -354,14 +389,19 @@ class _StubTtsCubit extends Cubit<TtsState> implements TtsCubit {
   }
 
   @override
-  Future<void> play({int? from}) async => playCalls++;
+  Future<void> play({int? from}) async {
+    playCalls++;
+    playFrom = from ?? state.currentIndex;
+  }
 
   /// Everything else the reader asks of a cubit - attaching the chapter source,
   /// transport, settings, lifecycle - is accepted and ignored.
   ///
   /// Throwing on the unlisted ones would fail these tests for reasons that have
-  /// nothing to do with what is being tested. The two calls that matter are
-  /// overridden above, so nothing that matters is silently swallowed.
+  /// nothing to do with what is being tested. The ones that matter are
+  /// overridden above, so nothing that matters is silently swallowed - though
+  /// note this means an un-overridden method yields null rather than failing,
+  /// which is why the resume methods are all explicit.
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
 }
@@ -1128,6 +1168,160 @@ void main() {
         expect(find.byType(NovelReaderScreen), findsOneWidget);
         expect(find.textContaining('Alpha sentence one', findRichText: true),
             findsWidgets);
+        await disposeReader(tester);
+      });
+    });
+
+    group('resuming narration', () {
+      Widget resumeHarness({
+        required bool resumeNarration,
+        required bool openPlayer,
+      }) => MaterialApp(
+        home: NovelReaderScreen(
+          sourceId: 'ani:n',
+          showId: 'b1',
+          showTitle: 'Book',
+          cover: null,
+          chapters: [chapter('c1', 'u1'), chapter('c2', 'u2')],
+          startIndex: 0,
+          resumeNarration: resumeNarration,
+          openPlayerOnLoad: openPlayer,
+        ),
+      );
+
+      void registerHtmlChapter() {
+        ani.register(
+          _RawHtmlReadingProvider('ani:n', {
+            'u1':
+                '<p>One. Two. Three. Four. Five. Six. Seven. Eight.</p>',
+            'u2': 'second chapter',
+          }),
+        );
+      }
+
+      /// A point saved on `u1`, the chapter the harness opens.
+      TtsResumePoint pointOn(int sentence) => TtsResumePoint(
+        chapterId: 'u1',
+        sentenceIndex: sentence,
+      );
+
+      testWidgets('narration is put back on the saved sentence', (tester) async {
+        final tts = _StubTtsCubit(point: pointOn(5));
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        expect(tts.seeks, [5]);
+        // Moved the position and stopped there: opening a book is not a request
+        // to be read to.
+        expect(tts.playCalls, 0);
+        await disposeReader(tester);
+      });
+
+      testWidgets('press, and it starts from the saved sentence', (
+        tester,
+      ) async {
+        final tts = _StubTtsCubit(point: pointOn(5));
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        // What the reader actually experiences: play picks up where the restored
+        // position left it, rather than beginning again at sentence one.
+        await tts.play();
+        expect(tts.playFrom, 5);
+        await disposeReader(tester);
+      });
+
+      testWidgets('an ordinary open leaves the position alone', (tester) async {
+        final tts = _StubTtsCubit(point: pointOn(5));
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        // Opened from the detail page, not from Continue Reading.
+        await tester.pumpWidget(resumeHarness(resumeNarration: false, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        expect(tts.seeks, isEmpty);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a point saved for another chapter is ignored', (
+        tester,
+      ) async {
+        // The point is keyed by chapter as well as book: this one belongs to the
+        // second chapter, so it says nothing about the first.
+        final tts = _StubTtsCubit(
+          point: const TtsResumePoint(chapterId: 'u2', sentenceIndex: 3),
+        );
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        expect(tts.seeks, isEmpty);
+        await disposeReader(tester);
+      });
+
+      testWidgets('a book with nothing saved starts at the beginning', (
+        tester,
+      ) async {
+        final tts = _StubTtsCubit();
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        expect(tts.seeks, isEmpty);
+        await disposeReader(tester);
+      });
+
+      testWidgets('the Listen action starts from the saved sentence too', (
+        tester,
+      ) async {
+        // The player speaks by itself, so it has to speak from the saved
+        // sentence - not, as it did, from the top of the chapter.
+        final tts = _StubTtsCubit(point: pointOn(5));
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: true));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(TtsAudiobookSheet), findsOneWidget);
+        expect(tts.playFrom, 5);
+        await disposeReader(tester);
+      });
+
+      testWidgets('incognito resumes nothing and starts where it likes', (
+        tester,
+      ) async {
+        IncognitoMode.notifier.value = true;
+        addTearDown(() => IncognitoMode.notifier.value = false);
+        final tts = _StubTtsCubit(point: pointOn(5));
+        sl.registerSingleton<TtsCubit>(tts);
+        addTearDown(tts.close);
+        registerHtmlChapter();
+
+        await tester.pumpWidget(resumeHarness(resumeNarration: true, openPlayer: false));
+        await tester.pumpAndSettle();
+
+        // Honouring an old listening position would tell a later session
+        // exactly where the voice had got to, which is the thing incognito is
+        // for.
+        expect(tts.seeks, isEmpty);
         await disposeReader(tester);
       });
     });

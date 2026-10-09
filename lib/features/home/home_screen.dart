@@ -2211,6 +2211,9 @@ Widget readerFor(ReadEntry e, Episode chapter) {
     chapters: [chapter],
     startIndex: 0,
     resolveChapters: true,
+    // This row means "carry on", so the voice has to carry on too. Both this
+    // and the History row come through here, and both are the same request.
+    resumeNarration: true,
   );
 }
 

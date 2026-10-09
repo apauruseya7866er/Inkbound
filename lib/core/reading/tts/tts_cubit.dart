@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../privacy/incognito_mode.dart';
 import 'sentence_parser.dart';
 import 'tts_chapters.dart';
 import 'tts_platform.dart';
@@ -872,6 +873,11 @@ class TtsCubit extends Cubit<TtsState> {
   // ── resume persistence ────────────────────────────────────────────────────
 
   void _queuePosition(String chapterId, int index) {
+    // Incognito means nothing about this session is recorded, and where the
+    // voice had got to is part of that. ReadStore and ReadHistory already
+    // refuse to write while it is on; this is the third place the same promise
+    // is kept, and it is the one that would survive leaving incognito behind.
+    if (IncognitoMode.on) return;
     if (state.bookId.isEmpty || chapterId.isEmpty) return;
     _pendingChapterId = chapterId;
     _pendingSentenceIndex = index;

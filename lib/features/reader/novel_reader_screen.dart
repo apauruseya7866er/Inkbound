@@ -12,6 +12,7 @@ import '../../core/reading/read_store.dart';
 import '../../core/reading/reader_prefs.dart';
 import '../../core/reading/tap_zones.dart';
 import '../../core/reading/text_filter.dart';
+import '../../core/privacy/incognito_mode.dart';
 import '../../core/reading/tts/sentence_parser.dart';
 import '../../core/reading/tts/tts_chapters.dart';
 import '../../core/reading/tts/tts_cubit.dart';
@@ -53,6 +54,7 @@ class NovelReaderScreen extends StatefulWidget {
     this.resolveChapters = false,
     this.peek = false,
     this.openPlayerOnLoad = false,
+    this.resumeNarration = false,
   });
 
   final String sourceId;
@@ -80,6 +82,21 @@ class NovelReaderScreen extends StatefulWidget {
   /// transcript and read text the reader never sees. Only the first load acts
   /// on it — turning a chapter mid-listen must not throw the player up again.
   final bool openPlayerOnLoad;
+
+  /// Put narration back on the sentence this book and chapter were last read
+  /// from, once the chapter has loaded.
+  ///
+  /// For the ways into a book that mean *carry on*, not *start*: Continue
+  /// Reading and a History row. Reading position and narration position are
+  /// separate records — one is how far the page is scrolled, the other which
+  /// sentence the voice is on — so restoring the page says nothing about the
+  /// voice, and pressing play on a resumed chapter used to begin at sentence
+  /// one: the top of the chapter rather than the top of the reading.
+  ///
+  /// This moves the position and nothing else. It does not start audio, because
+  /// opening a book is not a request to be read to; [openPlayerOnLoad] is the
+  /// separate, explicit request for that.
+  final bool resumeNarration;
 
   /// MAL id, when known — identifies the title for tracker chapter scrobble
   /// (AniList/MAL manga list). Falls back to [showTitle] when null/unmatched.
@@ -237,6 +254,9 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// soon as it acts, so it is a one-shot rather than a mode.
   late bool _autoOpenPlayer;
 
+  /// The same one-shot shape for the narration position.
+  late bool _resumeNarration;
+
   void _startTts() {
     setState(() {
       _ttsPanelOpen = true;
@@ -262,6 +282,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     WidgetsBinding.instance.addObserver(this);
     _index = widget.startIndex;
     _autoOpenPlayer = widget.openPlayerOnLoad;
+    _resumeNarration = widget.resumeNarration;
     _scrollController = ScrollController()..addListener(_onScroll);
     _pageController = PageController();
     // Built here, NOT lazily: createTicker reads TickerMode off the
@@ -398,6 +419,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       // where a paragraph ends.
       _scrollLayout = NovelTextLayout.fromHtml(html);
       _syncTtsFor(html);
+      // Narration first, and the page second: they are separate records, and
+      // neither restore may disturb the other. The narration one also has to
+      // land before the player launch, which starts speech from wherever this
+      // left the voice.
+      _resumeNarrationPosition();
       _restoreScrollPosition();
       // After the chapter is segmented, never before: the player opens onto this
       // chapter's sentences, and a player over a chapter it has not read yet
@@ -874,6 +900,36 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       debugPrint('[TtsCubit] could not segment this chapter: $e');
       return false;
     }
+  }
+
+  /// Puts narration back where this book and chapter left off.
+  ///
+  /// The saved index cannot be trusted on its own: a text filter or a re-fetch
+  /// that trims a heading moves every sentence after it, and the narration
+  /// filter does that by design. So the index goes through
+  /// [TtsCubit.resolveResumeIndex], which re-anchors it on the sentence's
+  /// fingerprint and clamps to something valid when nothing matches — the one
+  /// place that knows how, with its own tests.
+  ///
+  /// [TtsCubit.seek] while idle moves the position without starting anything,
+  /// which is what "be able to carry on" means and not "start reading at me".
+  ///
+  /// Nothing happens in incognito. Nothing about the session is recorded while
+  /// it is on, and honouring an old listening position would tell a later
+  /// session exactly where the voice had got to — the thing incognito is for.
+  void _resumeNarrationPosition() {
+    if (!_resumeNarration) return;
+    // One-shot, like the player launch: turning the chapter from inside the
+    // player must not drag the narration position back to the old one.
+    _resumeNarration = false;
+    if (IncognitoMode.on) return;
+    final tts = _tts;
+    if (tts == null) return;
+    // Keyed by book id and chapter URL, which is why the ids here are the
+    // reader's own and not the route's: a different key simply finds nothing.
+    final point = tts.resumePointFor(widget.showId, _chapter.url);
+    if (point == null) return;
+    unawaited(tts.seek(tts.resolveResumeIndex(point)));
   }
 
   /// Opens the full-screen read-aloud player over this page.

@@ -1443,6 +1443,10 @@ class _DetailViewState extends State<_DetailView>
                   malId: detail.malId ?? widget.item.malId,
                   peek: peek,
                   openPlayerOnLoad: openPlayer,
+                  // The player starts speaking on its own, so it has to start
+                  // from where this book and chapter were last spoken - the
+                  // same reason Continue Reading restores it.
+                  resumeNarration: openPlayer,
                 ),
               ),
             )
