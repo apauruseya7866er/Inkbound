@@ -110,7 +110,7 @@ class _ScopeFilters extends StatelessWidget {
         child: Row(
           children: [
             _Chip(
-              label: 'All',
+              label: 'All sources',
               selected: !state.pinnedOnly,
               onTap: () => cubit.setPinnedOnly(false),
             ),
@@ -182,6 +182,18 @@ class _Body extends StatelessWidget {
       );
     }
     final groups = cubit.visibleGroups();
+    if (groups.isEmpty && state.pinnedOnly && cubit.pinnedNovelSourceCount() == 0) {
+      // The default scope is pinned, so "nothing pinned" is the first thing a
+      // reader with no pins yet hits. Say so, and give them the way out -
+      // otherwise the screen looks like the title was not found anywhere.
+      return _Message(
+        icon: Icons.push_pin_outlined,
+        text: 'You have not pinned any novel sources yet, so this searched '
+            'nothing. Pin the ones you trust, or search everything you have.',
+        actionLabel: 'Search all sources',
+        onAction: () => cubit.setPinnedOnly(false),
+      );
+    }
     if (groups.isEmpty && state.sourceCount > 0) {
       return _Message(
         icon: Icons.search_off_rounded,
@@ -214,10 +226,20 @@ class _Body extends StatelessWidget {
 }
 
 class _Message extends StatelessWidget {
-  const _Message({required this.icon, required this.text});
+  const _Message({
+    required this.icon,
+    required this.text,
+    this.actionLabel,
+    this.onAction,
+  });
 
   final IconData icon;
   final String text;
+
+  /// Optional way out, for a message that is really a question with a setting
+  /// behind it ("nothing is pinned" -> offer to search everything).
+  final String? actionLabel;
+  final VoidCallback? onAction;
 
   @override
   Widget build(BuildContext context) => Center(
@@ -233,6 +255,10 @@ class _Message extends StatelessWidget {
             textAlign: TextAlign.center,
             style: TextStyle(color: AppColors.textSecondary),
           ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(height: 20),
+            FilledButton.tonal(onPressed: onAction, child: Text(actionLabel!)),
+          ],
         ],
       ),
     ),

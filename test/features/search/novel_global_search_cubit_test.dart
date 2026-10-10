@@ -153,15 +153,23 @@ NovelGlobalSearchCubit _cubitFor(
   _FakeRepo repo, {
   Set<String> excluded = const {},
   bool Function(String)? pinned,
+  bool pinnedOnly = false,
   int maxConcurrent = 5,
-}) => NovelGlobalSearchCubit(
-  repo: repo,
-  prefs: _FakePrefs(excluded),
-  languages: repo.languages,
-  isPinned: pinned ?? (id) => id == 'lnr:x',
-  maxConcurrent: maxConcurrent,
-  debounce: Duration.zero,
-);
+}) {
+  final cubit = NovelGlobalSearchCubit(
+    repo: repo,
+    prefs: _FakePrefs(excluded),
+    languages: repo.languages,
+    isPinned: pinned ?? (id) => id == 'lnr:x',
+    maxConcurrent: maxConcurrent,
+    debounce: Duration.zero,
+  );
+  // Most of this suite is about the whole set, so opt out of the
+  // pinned-by-default scope explicitly. Safe before any query: switching scope
+  // with an empty query does not launch a search.
+  if (!pinnedOnly) cubit.setPinnedOnly(false);
+  return cubit;
+}
 
 void main() {
   test('only novel sources are searched, whatever Home was showing', () async {
@@ -431,7 +439,9 @@ void main() {
     final cubit = NovelGlobalSearchCubit(
       repo: repo,
       prefs: _FakePrefs(const {}),
-      isPinned: (_) => false,
+      // Everything pinned: these build the cubit directly and are about
+        // debounce, so the pinned-by-default scope should not empty the set.
+        isPinned: (_) => true,
       debounce: const Duration(milliseconds: 30),
     );
 
@@ -450,7 +460,9 @@ void main() {
     final cubit = NovelGlobalSearchCubit(
       repo: repo,
       prefs: _FakePrefs(const {}),
-      isPinned: (_) => false,
+      // Everything pinned: these build the cubit directly and are about
+        // debounce, so the pinned-by-default scope should not empty the set.
+        isPinned: (_) => true,
       debounce: const Duration(milliseconds: 30),
     );
 
@@ -627,7 +639,8 @@ void main() {
     test('installed LNReader sources are found without an injected repo', () async {
       final cubit = NovelGlobalSearchCubit(
         prefs: _FakePrefs(const {}),
-        isPinned: (_) => false,
+        // Pinned, because pinned-only is now the default scope.
+        isPinned: (_) => true,
         debounce: Duration.zero,
       );
       addTearDown(cubit.close);
@@ -640,6 +653,79 @@ void main() {
         reason: 'ZNReader sources are installed; the empty state is a bug',
       );
       expect(cubit.state.sourceCount, 1);
+    });
+  });
+
+  group('pinned by default', () {
+    test('the scope starts pinned', () {
+      expect(NovelGlobalSearchState().pinnedOnly, isTrue);
+    });
+
+    test('only pinned sources are searched, not merely displayed', () async {
+      final repo = _FakeRepo(_loaded);
+      for (final id in ['lnr:n', 'lnr:x']) {
+        repo.answers[id] = items(id, 1);
+      }
+      final cubit = _cubitFor(
+        repo,
+        pinned: (id) => id == 'lnr:x',
+        pinnedOnly: true,
+      );
+
+      await cubit.search('the alpha');
+
+      // Scoped, not filtered after the fact: the point is not asking every
+      // installed site to fill rows the reader did not ask for.
+      expect(repo.searched, ['lnr:x']);
+      expect(cubit.state.sourceCount, 1);
+      await cubit.close();
+    });
+
+    test('switching to all sources searches the rest', () async {
+      final repo = _FakeRepo(_loaded);
+      for (final id in ['lnr:n', 'lnr:x']) {
+        repo.answers[id] = items(id, 1);
+      }
+      final cubit = _cubitFor(
+        repo,
+        pinned: (id) => id == 'lnr:x',
+        pinnedOnly: true,
+      );
+
+      await cubit.search('the alpha');
+      expect(repo.searched, ['lnr:x']);
+
+      await cubit.setPinnedOnly(false);
+      expect(repo.searched.toSet(), {'lnr:n', 'lnr:x'});
+      expect(cubit.visibleGroups().length, 2);
+      await cubit.close();
+    });
+
+    test('pinnedNovelSourceCount reports what there is to pin', () async {
+      final repo = _FakeRepo(_loaded);
+      final cubit = _cubitFor(
+        repo,
+        pinned: (id) => id == 'lnr:x',
+        pinnedOnly: true,
+      );
+      expect(cubit.pinnedNovelSourceCount(), 1);
+      await cubit.close();
+    });
+
+    test('a reader with nothing pinned is told so, not shown an empty page',
+        () async {
+      final repo = _FakeRepo(_loaded);
+      final cubit = _cubitFor(repo, pinned: (_) => false, pinnedOnly: true);
+
+      await cubit.search('the alpha');
+
+      expect(cubit.visibleGroups(), isEmpty);
+      expect(cubit.pinnedNovelSourceCount(), 0);
+      // Still a real search having happened - the screen uses this to offer
+      // "search all sources" rather than claiming nothing was searched.
+      expect(cubit.state.noSources, isFalse);
+      expect(cubit.state.sourceCount, 0);
+      await cubit.close();
     });
   });
 }

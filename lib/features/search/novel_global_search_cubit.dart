@@ -150,6 +150,11 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     }
 
     final sources = _novelSources();
+    // "No sources" is a claim about what is INSTALLED and switched on, so it
+    // is decided on the unscoped set. An empty pinned subset is a different
+    // thing entirely - the reader has sources and has not pinned any - and
+    // reporting it as "none installed" would be a lie the screen repeats.
+    final installed = _switchedOnNovelSources();
     emit(
       state.copyWith(
         query: q,
@@ -167,7 +172,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
       ),
     );
 
-    if (sources.isEmpty) {
+    if (installed.isEmpty) {
       final excluded = _excludedNovelSources();
       // Logged because "nothing here" is otherwise indistinguishable from a
       // bug: this names every source that was loaded and every one that was
@@ -185,6 +190,14 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
           excludedCount: excluded.length,
         ),
       );
+      return;
+    }
+
+    if (sources.isEmpty) {
+      // Installed and switched on, but this scope covers none of them. The
+      // screen turns this into "nothing is pinned" with a way out, rather than
+      // an empty page that looks like a failed search.
+      emit(state.copyWith(searching: false));
       return;
     }
 
@@ -207,7 +220,7 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     );
     await Future.wait(workers);
 
-    if (generation != _generation) return;
+    if (generation != _generation || isClosed) return;
     emit(state.copyWith(searching: false));
   }
 
@@ -235,6 +248,10 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     ({String id, String name, String? lang}) source,
     ({List<MediaItem> items, bool failed}) outcome,
   ) {
+    // A search can be in flight when the reader leaves the screen - switching
+    // scope launches one, so this is reachable, not theoretical. Emitting into
+    // a closed cubit throws.
+    if (isClosed) return;
     emit(
       state.copyWith(
         groups: [
@@ -255,12 +272,30 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
     );
   }
 
-  /// Every installed novel source that is switched on for search.
+  /// Every installed novel source that is switched on for search, narrowed to
+  /// the ones pinned when this screen is in its default scope.
   ///
   /// Novel by provider type rather than by whatever Home is showing: this
   /// screen is the one place a reader goes to search everything regardless of
   /// the mode they left Home in.
   List<({String id, String name, String? lang})> _novelSources() {
+    final all = _switchedOnNovelSources();
+    if (!state.pinnedOnly) return all;
+    // Pinned-first, and it narrows the fan-out rather than just the rows
+    // shown. Searching 49 sites to display the 9 a reader pinned is a lot of
+    // radio and a lot of waiting for rows nobody asked for.
+    return [for (final s in all) if (_isPinned(s.id)) s];
+  }
+
+  /// How many novel sources are actually pinned.
+  ///
+  /// So an empty screen can say "nothing is pinned" - which has a completely
+  /// different fix - instead of implying the title was not found anywhere.
+  int pinnedNovelSourceCount() =>
+      _switchedOnNovelSources().where((s) => _isPinned(s.id)).length;
+
+  /// Installed novel sources that are switched on for search, unscoped.
+  List<({String id, String name, String? lang})> _switchedOnNovelSources() {
     final languages = _languages;
     // The Z Mode pseudo-source is dropped before anything asks what type it is.
     //
@@ -305,9 +340,17 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
   }
 
   /// Pinned only, which is the narrowing Reikai offers.
-  void setPinnedOnly(bool value) {
-    if (state.pinnedOnly == value) return;
+  ///
+  /// Changing it re-runs the current query: the fan-out is scoped to the same
+  /// set, so widening to every source has to actually go and ask them. The
+  /// returned future is that search, so a caller that is about to go away can
+  /// wait for it instead of racing it.
+  Future<void> setPinnedOnly(bool value) {
+    if (state.pinnedOnly == value) return Future<void>.value();
     emit(state.copyWith(pinnedOnly: value));
+    final q = state.query;
+    if (q.isEmpty) return Future<void>.value();
+    return search(q);
   }
 
   /// Hide the sources that finished with nothing.
@@ -346,7 +389,7 @@ class NovelGlobalSearchState {
     this.noSources = false,
     this.sourceCount = 0,
     this.excludedCount = 0,
-    this.pinnedOnly = false,
+    this.pinnedOnly = true,
     this.hideEmpty = false,
     this.groups = const [],
   });
@@ -368,6 +411,10 @@ class NovelGlobalSearchState {
   /// between "none installed" and "none switched on".
   final int excludedCount;
 
+  /// Search the pinned sources only. The default: the sources a reader pinned
+  /// are the ones they expect to answer, and fanning out to every installed
+  /// extension to fill a list they did not ask for is slower and noisier.
+  /// Cleared by tapping "All sources".
   final bool pinnedOnly;
   final bool hideEmpty;
   final List<NovelSourceGroup> groups;
