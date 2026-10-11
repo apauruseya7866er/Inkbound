@@ -144,7 +144,11 @@ class LnReaderProvider implements BaseProvider, ReadingProvider {
   @override
   Future<List<MediaItem>> search(String query, int page, {String category = ''}) async {
     await manager.ensureLoaded(meta.id);
-    return _fetchNovelList('searchNovels', [query, page]);
+    return _fetchNovelList(
+      'searchNovels',
+      [query, page],
+      propagateFailure: true,
+    );
   }
 
   @override
@@ -223,36 +227,62 @@ class LnReaderProvider implements BaseProvider, ReadingProvider {
 
   // ── private helpers ─────────────────────────────────────────────────────────
 
-  /// Invokes [method] on the plugin through the manager, catching any
+/// Invokes [method] on the plugin through the manager, catching any
   /// JS/timeout failure so callers degrade cleanly (same role as
   /// MihonProvider's `_safeInvoke`).
-Future<dynamic> _safeCall(String method, List<Object?> args) async {
-      // One line per stage, and the single place worth instrumenting: every
-      // plugin method in this provider goes through here, so this is where
-      // "which stage failed" is answerable. `meta.id` labels the line, which is
-      // also how a log tells you *which* webnovel-family source is installed.
-      final label = meta.id;
-      try {
-        final raw = await manager.callPlugin(meta.id, method, args);
-        final (kind, detail) = LnReaderDiag.describe(raw);
-        LnReaderDiag.stage(label: label, method: method, kind: kind, detail: detail);
-        return raw;
-      } catch (e) {
-        LnReaderDiag.stage(
-          label: label,
-          method: method,
-          kind: 'threw',
-          error: e,
-        );
-        debugPrint('[lnreader] $method(${meta.id}) failed: $e');
-        return null;
-      }
+  ///
+  /// Set [rethrowOnError] where an empty result is NOT a valid answer. The
+  /// list paths feed the repository, which reads an empty list as "this site
+  /// has nothing for that title" - so a refused request laundered into `null`
+  /// here becomes `[]` there, and the reader is told a blocked site simply had
+  /// no matches. The parse paths keep the degrade-cleanly behaviour on purpose:
+  /// one dead chapter should not take the whole page down with it.
+  Future<dynamic> _safeCall(
+    String method,
+    List<Object?> args, {
+    bool rethrowOnError = false,
+  }) async {
+    // One line per stage, and the single place worth instrumenting: every
+    // plugin method in this provider goes through here, so this is where
+    // "which stage failed" is answerable. `meta.id` labels the line, which is
+    // also how a log tells you *which* webnovel-family source is installed.
+    final label = meta.id;
+    try {
+      final raw = await manager.callPlugin(meta.id, method, args);
+      final (kind, detail) = LnReaderDiag.describe(raw);
+      LnReaderDiag.stage(label: label, method: method, kind: kind, detail: detail);
+      return raw;
+    } catch (e) {
+      LnReaderDiag.stage(
+        label: label,
+        method: method,
+        kind: 'threw',
+        error: e,
+      );
+      debugPrint('[lnreader] $method($label) failed: $e');
+      if (rethrowOnError) rethrow;
+      return null;
     }
+  }
 
   /// Invokes [method] expecting a JSON array of `{name, path, cover?}`
   /// novels and maps it to [MediaItem]s.
-  Future<List<MediaItem>> _fetchNovelList(String method, List<Object?> args) async {
-    final raw = await _safeCall(method, args);
+  ///
+  /// [propagateFailure] is for the search path only, where an empty list is
+  /// read as "this site has nothing for that title". The repository catches
+  /// there and classifies the failure (blocked / timed out / error), so the
+  /// screen can say "couldn't reach" rather than "no matches".
+  ///
+  /// The browse paths deliberately keep degrading to an empty list. Their
+  /// callers do not wrap these in a catch, so a thrown request would take a
+  /// carousel or genre row down with it - a worse outcome than a blank row on
+  /// a browse screen that has no way to explain itself.
+  Future<List<MediaItem>> _fetchNovelList(
+    String method,
+    List<Object?> args, {
+    bool propagateFailure = false,
+  }) async {
+    final raw = await _safeCall(method, args, rethrowOnError: propagateFailure);
     if (raw is! List) return const [];
     return raw
         .whereType<Map>()

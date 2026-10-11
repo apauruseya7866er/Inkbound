@@ -18,6 +18,18 @@ module.exports.default = {
 };
 ''';
 
+const _blockedPlugin = '''
+module.exports.default = {
+    name:'Fake', site:'https://fake.test/', version:'1.0.0', filters:{},
+    popularNovels:function(p,o){return Promise.resolve([{name:'N1',path:'/n1'}]);},
+    searchNovels:function(t,p){
+      return Promise.reject(new Error('DioException [connection error] 403 Cloudflare challenge'));
+    },
+    parseNovel:function(x){return Promise.resolve({name:'N1',summary:'sum'});},
+    parseChapter:function(x){return Promise.resolve('<p>body</p>');}
+  };
+  ''';
+
 const _meta = LnReaderPluginMeta(
   id: 'fake',
   name: 'Fake',
@@ -26,6 +38,16 @@ const _meta = LnReaderPluginMeta(
   version: '1.0.0',
   url: 'https://cdn.test/fake.js',
   iconUrl: 'https://cdn.test/fake.png',
+);
+
+const _blockedMeta = LnReaderPluginMeta(
+  id: 'blocked',
+  name: 'Blocked',
+  site: 'https://fake.test/',
+  lang: 'en',
+  version: '1.0.0',
+  url: 'https://cdn.test/blocked.js',
+  iconUrl: 'https://cdn.test/blocked.png',
 );
 
 void main() {
@@ -42,6 +64,7 @@ void main() {
     service = LnReaderExtensionService(
       httpGet: (url) async {
         if (url == _meta.url) return _fakePlugin;
+        if (url == _blockedMeta.url) return _blockedPlugin;
         throw StateError('unexpected httpGet($url)');
       },
     );
@@ -177,4 +200,18 @@ void main() {
     expect(() => provider.getPages('/n1/1'), throwsUnsupportedError);
     expect(manager.runtimeBuilt, isFalse);
   });
+
+  test(
+    'a refused search THROWS instead of returning an empty list, so the '
+    'caller can say "could not reach" rather than "no matches"',
+    () async {
+      // The bug: _safeCall caught this, _fetchNovelList turned the null into
+      // [], and the repository read [] as a site that simply had nothing. The
+      // screen then told the reader their pinned sources had lost the book.
+      await service.install(_blockedMeta);
+      final blockedProvider = manager.get('lnr:blocked')!;
+
+      await expectLater(blockedProvider.search('term', 1), throwsA(anything));
+    },
+  );
 }

@@ -235,7 +235,13 @@ class NovelGlobalSearchCubit extends Cubit<NovelGlobalSearchState> {
         cache: true,
       );
       final List<MediaItem> items = res.items;
-      return (items: items, failed: res.outcome == SourceOutcome.error);
+      // Anything short of a real answer. `error` alone was not enough: the
+      // repository reports a Cloudflare refusal as `blocked` and a dead site as
+      // `timeout`, and treating those as "found nothing" is the same lie -
+      // "no matches" and "could not reach" are different sentences.
+      final failed =
+          res.outcome != SourceOutcome.ok && res.outcome != SourceOutcome.empty;
+      return (items: items, failed: failed);
     } catch (_) {
       // The general search distinguishes error from timeout; here both mean the
       // same thing to a reader - this source had nothing for us - and the row

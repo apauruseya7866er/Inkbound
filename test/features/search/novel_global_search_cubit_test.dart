@@ -78,6 +78,11 @@ class _FakeRepo implements CatalogueRepository {
   /// Sources that throw, standing in for a dead or blocked site.
   final Set<String> broken = {};
 
+  /// Sources that fail in a specific way - a Cloudflare refusal, a dead site.
+  /// Separate from [broken] because the distinction is the whole point: these
+  /// used to render as "no matches".
+  final Map<String, SourceOutcome> brokenOutcomes = {};
+
   /// Sources whose answer arrives only after this many turns.
   final Map<String, int> slowTurns = {};
 
@@ -111,6 +116,10 @@ class _FakeRepo implements CatalogueRepository {
       await Future<void>.delayed(Duration.zero);
     }
     inFlight--;
+    final blocked = brokenOutcomes[id];
+    if (blocked != null) {
+      return (items: const <MediaItem>[], outcome: blocked);
+    }
     if (broken.contains(id)) {
       return (items: const <MediaItem>[], outcome: SourceOutcome.error);
     }
@@ -728,4 +737,42 @@ void main() {
       await cubit.close();
     });
   });
+
+    test('a blocked or timed-out source is not reported as "no matches"', () async {
+      final repo = _FakeRepo(_loaded);
+      repo.answers['lnr:n'] = items('lnr:n', 1);
+      repo.brokenOutcomes['lnr:x'] = SourceOutcome.blocked;
+      final cubit = _cubitFor(repo, pinned: (id) => true, pinnedOnly: true);
+
+      await cubit.search('the alpha');
+
+      final byId = {for (final g in cubit.state.groups) g.sourceId: g.status};
+      expect(byId['lnr:x'], NovelSourceStatus.failed,
+          reason: 'a refusal is not an empty result');
+      expect(byId['lnr:n'], NovelSourceStatus.hits);
+      await cubit.close();
+    });
+
+    test('a timed-out source is not reported as "no matches"', () async {
+      final repo = _FakeRepo(_loaded);
+      repo.brokenOutcomes['lnr:n'] = SourceOutcome.timeout;
+      final cubit = _cubitFor(repo, pinned: (id) => id == 'lnr:n', pinnedOnly: true);
+
+      await cubit.search('the alpha');
+
+      expect(cubit.state.groups.single.status, NovelSourceStatus.failed);
+      await cubit.close();
+    });
+
+    test('a source that genuinely has nothing stays "no matches"', () async {
+      final repo = _FakeRepo(_loaded);
+      // No answer registered: empty, and genuinely empty.
+      final cubit = _cubitFor(repo, pinned: (id) => id == 'lnr:n', pinnedOnly: true);
+
+      await cubit.search('the alpha');
+
+      expect(cubit.state.groups.single.status, NovelSourceStatus.empty,
+          reason: 'the distinction only means something if empty still means empty');
+      await cubit.close();
+    });
 }
