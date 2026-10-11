@@ -8,6 +8,53 @@ what went wrong.
 Versions are listed oldest first. The release date is the day the signed APK was
 published.
 
+## 4.2.0 - 2026-10-10
+
+### Clear out sources that have stopped working
+
+Two cleanups on Profile -> Sources -> Source health, each scoped and each
+carrying its own live count:
+
+- **Remove dead sources** - blocked, timed out, or throwing.
+- **Remove no-results** - answered, and the answer was nothing.
+
+Choosing one lists **only** that category, every row ticked, so unticking the
+few you want to keep is the only decision on screen. Nothing is removed until
+the bottom bar, which states how many, and a confirmation stands in front of
+it. A category with nothing in it disables its button rather than opening an
+empty picker.
+
+The two are kept apart on purpose. A dead source refuses to answer and is worth
+nothing until the site changes. A no-results source answered and said it had
+nothing, which for a niche title is often a perfectly healthy site that simply
+does not carry that book - and lumping the two together quietly argues for
+deleting working extensions. Sources that answer slowly, and sources still
+being probed, are in neither.
+
+The row's tick moves to the right, where it lines up with the delete control it
+stands in for.
+
+### Fixes
+
+- **A blocked source no longer reads as "no matches."** This was the reason a
+  pinned source full of a book could look like it had lost it. Two places lost
+  the failure on the way to the screen: the plugin helper caught the error and
+  returned null, which became an empty list, and the repository reads an empty
+  list as "this site has nothing for that title". So a Cloudflare refusal was
+  indistinguishable from a genuine no-results before it ever left the provider.
+  The search cubit also treated only a generic error as a failure, so blocked
+  and timed-out rendered as empty too. Both fixed - the screen now says
+  "couldn't reach", and a source that genuinely has nothing still says "no
+  matches".
+
+### Known
+
+- A source's language is still not shown on the novel search row; the field is
+  carried through but not filled in.
+- Browse rows (popular, latest) still degrade quietly to empty when a site
+  refuses them, rather than reporting the refusal. Search reports it; browse has
+  no way to explain itself and its callers do not catch.
+
 ## 4.1.0 - 2026-10-10
 
 First release under the app's new name. The package id is
