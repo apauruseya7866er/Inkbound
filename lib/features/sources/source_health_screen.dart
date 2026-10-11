@@ -129,6 +129,14 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
   /// should confirm once, not twenty times.
   bool _selecting = false;
 
+  /// Set while a scoped cleanup is armed, so the list shows only that
+  /// category. Null while browsing and after the cleanup is dismissed.
+  ///
+  /// Separate from [pinnedOnly]-style display state on purpose: this is not a
+  /// view preference the reader sets and forgets, it is the answer to "what
+  /// did they just ask me to delete", and it resets the moment they leave.
+  _RemovalScope? _scopeFilter;
+
   /// Source ids ticked for removal. Never contains an id that can't be
   /// uninstalled ([SourceUninstaller.canUninstall]), so a Z-Mode row can never
   /// be ticked and there is no way to confirm a batch the uninstaller refuses.
@@ -158,14 +166,18 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
     return false;
   }
 
-  void _toggleSelecting() {
-    setState(() {
-      _selecting = !_selecting;
-      // Leaving the selection behind would silently re-apply it the next time
-      // the mode is entered.
-      if (!_selecting) _selected.clear();
-    });
-  }
+void _toggleSelecting() {
+      setState(() {
+        _selecting = !_selecting;
+        // Leaving the selection behind would silently re-apply it the next time
+        // the mode is entered.
+        if (!_selecting) _selected.clear();
+        // And leaving the scope behind would show a narrowed list with nothing
+        // selected in it, which reads as "these are fine" rather than as "you
+        // are still in the cleanup".
+        if (!_selecting) _scopeFilter = null;
+      });
+    }
 
   void _toggleSelected(String id) {
     setState(() {
@@ -209,6 +221,22 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
     };
   }
 
+  /// Which rows the list is showing, which is the whole list while browsing and
+  /// only one category while a scoped cleanup is armed.
+  ///
+  /// Null is not "everything" by accident - it is the browsing state. A scoped
+  /// pass REPLACES the list rather than filtering the view of it: the reader
+  /// asked to deal with the dead ones, so the hundred healthy rows are not
+  /// anything they need to scroll past or, worse, could mistake for part of the
+  /// pending deletion.
+  List<_ProbeResult> get _visibleResults {
+    final scope = _scopeFilter;
+    if (scope == null) return _results;
+    return [for (final r in _results) if (_inScope(r, scope)) r];
+  }
+
+  int get _visibleCount => _visibleResults.length;
+
   int _scopeCount(_RemovalScope scope) =>
       _results.where((r) => _inScope(r, scope)).length;
 
@@ -221,6 +249,7 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
   void _enterSelectingScoped(_RemovalScope scope) {
     setState(() {
       _selecting = true;
+      _scopeFilter = scope;
       _selected
         ..clear()
         ..addAll([
@@ -600,6 +629,15 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                           ? '${_deep ? 'Deep t' : 'T'}esting '
                                 '${_results.length} source'
                                 '${_results.length == 1 ? '' : 's'}…'
+                          : _scopeFilter != null
+                          // Says what is on screen and how much of it is going,
+                          // because this list is NOT the whole list any more and
+                          // the reader has to know that before unticking.
+                          ? 'Showing the '
+                                '${_scopeFilter == _RemovalScope.dead ? 'dead' : 'no-results'} '
+                                'sources. '
+                                '$_visibleCount shown, ${_selected.length} '
+                                'ticked. Untick anything you want to keep.'
                           : _selecting
                           ? context.l10n.selectSourcesToRemoveHint
                           : '$working of $done returned results.'
@@ -651,34 +689,28 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                     ),
                     child: Column(
                       children: [
-                        for (var i = 0; i < _results.length; i++) ...[
-                          if (i > 0)
+                        for (final r in _visibleResults) ...[
+                          if (r.id != _visibleResults.first.id)
                             const Divider(
                               height: 0.5,
                               thickness: 0.5,
                               color: AppColors.hairline,
                             ),
                           _HealthRow(
-                            result: _results[i],
+                            result: r,
                             present: _present,
-                            searchIncluded: _searchPrefs.isIncluded(
-                              _results[i].id,
-                            ),
-                            playbackFails: _health.playbackFailures(
-                              _results[i].id,
-                            ),
+                            searchIncluded: _searchPrefs.isIncluded(r.id),
+                            playbackFails: _health.playbackFailures(r.id),
                             selecting: _selecting,
-                            selected: _selected.contains(_results[i].id),
-                            onToggleSelected: () =>
-                                _toggleSelected(_results[i].id),
+                            selected: _selected.contains(r.id),
+                            onToggleSelected: () => _toggleSelected(r.id),
                             // Every row offers removal, not just the broken
                             // ones: the user came here to clear out what isn't
                             // working, and making them learn this screen is the
                             // only place that can do it is a worse answer than
                             // an undo isn't.
-                            onUninstall:
-                                SourceUninstaller.canUninstall(_results[i].id)
-                                ? () => _confirmUninstallOne(_results[i])
+                            onUninstall: SourceUninstaller.canUninstall(r.id)
+                                ? () => _confirmUninstallOne(r)
                                 : null,
                           ),
                         ],
