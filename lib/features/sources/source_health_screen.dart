@@ -34,6 +34,16 @@ class SourceHealthScreen extends StatefulWidget {
   State<SourceHealthScreen> createState() => _SourceHealthScreenState();
 }
 
+/// Which set of sources a bulk-removal pass is scoped to.
+///
+/// Dead and no-results are different mistakes with different fixes. A dead
+/// source is one the site refuses to talk to - blocked, timed out, or throwing
+/// - and it is worth nothing until the site changes. A no-results source
+/// answered and said it had nothing, which for a niche title is often
+/// perfectly healthy and not something to delete on a hunch. Merging them into
+/// one "problems" list quietly argues for deleting working sources.
+enum _RemovalScope { dead, noResults }
+
 /// One probe's live result. [running] while in flight; otherwise the resolved
 /// outcome + measured response time.
 class _ProbeResult {
@@ -176,6 +186,47 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
           _selected.add(r.id);
         }
       }
+    });
+  }
+
+  /// Whether [r] belongs in a removal pass scoped to [scope].
+  ///
+  /// Only settled rows qualify. A source still being probed has no outcome yet,
+  /// and treating "not measured" as "no results" would offer to delete the
+  /// whole list while the run is still going.
+  bool _inScope(_ProbeResult r, _RemovalScope scope) {
+    if (r.running || r.outcome == null) return false;
+    if (!SourceUninstaller.canUninstall(r.id)) return false;
+    return switch (scope) {
+      // Answered, and the answer was nothing.
+      _RemovalScope.noResults => r.outcome == SourceOutcome.empty,
+      // Never gave a usable answer at all. `slow` is deliberately absent: it
+      // answered, just late.
+      _RemovalScope.dead =>
+        r.outcome == SourceOutcome.error ||
+            r.outcome == SourceOutcome.blocked ||
+            r.outcome == SourceOutcome.timeout,
+    };
+  }
+
+  int _scopeCount(_RemovalScope scope) =>
+      _results.where((r) => _inScope(r, scope)).length;
+
+  /// Enters selection mode already scoped to [scope], with its rows ticked.
+  ///
+  /// Ticked rather than merely filtered: the reader has already said "these
+  /// are the ones I want gone" by choosing the cleanup, and every one of them
+  /// is individually untickable. Nothing is removed until the bottom button,
+  /// which states how many.
+  void _enterSelectingScoped(_RemovalScope scope) {
+    setState(() {
+      _selecting = true;
+      _selected
+        ..clear()
+        ..addAll([
+          for (final r in _results)
+            if (_inScope(r, scope)) r.id,
+        ]);
     });
   }
 
@@ -559,6 +610,39 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
                       style: AppText.caption,
                     ),
                   ),
+                  if (!_selecting)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _ScopeButton(
+                              icon: Icons.error_outline_rounded,
+                              label: 'Remove dead sources',
+                              count: _scopeCount(_RemovalScope.dead),
+                              enabled: !_testing &&
+                                  _scopeCount(_RemovalScope.dead) > 0,
+                              onPressed: () => _enterSelectingScoped(
+                                _RemovalScope.dead,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _ScopeButton(
+                              icon: Icons.search_off_rounded,
+                              label: 'Remove no-results',
+                              count: _scopeCount(_RemovalScope.noResults),
+                              enabled: !_testing &&
+                                  _scopeCount(_RemovalScope.noResults) > 0,
+                              onPressed: () => _enterSelectingScoped(
+                                _RemovalScope.noResults,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   Container(
                     clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
@@ -630,6 +714,54 @@ class _SourceHealthScreenState extends State<SourceHealthScreen> {
               ),
             )
           : null,
+    );
+  }
+}
+
+/// One of the two scoped cleanups, with its live count on the face of it.
+///
+/// The count is the point. "Remove dead sources" as a bare button asks the
+/// reader to destroy something on trust; the same button reading "12" says
+/// this screen has measured what it is about to offer, and a "0" says there is
+/// nothing here to remove — which is an answer in itself, and the reason the
+/// button disables rather than opening an empty picker.
+class _ScopeButton extends StatelessWidget {
+  const _ScopeButton({
+    required this.icon,
+    required this.label,
+    required this.count,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final int count;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = enabled ? AppColors.accent : AppColors.textTertiary;
+    return OutlinedButton.icon(
+      onPressed: enabled ? onPressed : null,
+      icon: Icon(icon, size: 18, color: color),
+      label: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$label ($count)', style: AppText.caption),
+        ],
+      ),
+      style: OutlinedButton.styleFrom(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        side: BorderSide(color: color),
+        foregroundColor: color,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
     );
   }
 }
@@ -774,14 +906,9 @@ class _HealthRow extends StatelessWidget {
     }
 
     final row = Padding(
-      padding: EdgeInsets.fromLTRB(selecting ? 4 : 16, 12, 8, 12),
+      padding: EdgeInsets.fromLTRB(selecting ? 16 : 16, 12, 8, 12),
       child: Row(
         children: [
-          if (selecting)
-            Checkbox(
-              value: selected,
-              onChanged: (_) => onToggleSelected?.call(),
-            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -842,7 +969,7 @@ class _HealthRow extends StatelessWidget {
                 color: AppColors.accent,
               ),
             )
-          else if (onUninstall != null)
+          else if (onUninstall != null && !selecting)
             IconButton(
               onPressed: onUninstall,
               tooltip: context.l10n.uninstallSourceTooltip(result.name),
@@ -855,6 +982,15 @@ class _HealthRow extends StatelessWidget {
                     ? AppColors.accent
                     : AppColors.textTertiary,
               ),
+            ),
+          // Tick on the right, not the left. The row is tappable all the way
+          // across, so the checkbox marks state rather than being the target -
+          // and on the right it lines up with the delete control it stands in
+          // for, instead of pushing every source name off its left margin.
+          if (selecting)
+            Checkbox(
+              value: selected,
+              onChanged: (_) => onToggleSelected?.call(),
             ),
         ],
       ),
