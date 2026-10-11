@@ -8,6 +8,64 @@ what went wrong.
 Versions are listed oldest first. The release date is the day the signed APK was
 published.
 
+## 4.1.0 - 2026-10-10
+
+First release under the app's new name. The package id is
+`com.apauruseya7866er.inkbound`; the older releases stay on the page under their
+old name.
+
+### Search every novel source at once
+
+- **Search novels.** A new action on Home, beside the existing search, that
+  queries every installed novel source for one title and groups the answers by
+  where each came from - so the same book on two sites is visibly two books.
+  Five sources are queried at a time, rows stream in as they answer, and a
+  result that arrives after you have typed the next title is discarded rather
+  than repainting the screen with the previous query.
+- **Pinned sources by default.** The search asks the sources you pinned, not
+  all of them, because that is what you expect to answer. "All sources"
+  widens it and really does query the rest.
+- **Fix: the screen said you had no novel sources when you had 150-odd.** It
+  was reading the catalogue router, which with Z Mode enabled resolves to the
+  metadata catalogue - one pseudo-source, which the screen then discarded. The
+  sources tab was unaffected, which is why they were plainly listed there and
+  invisible here. The empty state also lied in the other direction: a reader
+  with sources but none pinned was told none were installed. It now says which,
+  and offers to search everything.
+- **Per-source arrow** opens that source, and the language a source declares is
+  shown under its name.
+- **Two different buttons.** The two search actions had looked identical; the
+  novel one is now a book.
+
+### Read-aloud and the reader
+
+- **Long press** no longer hits the wrong line: the hit test was reading screen
+  coordinates as content coordinates, so on a scrolled or paged chapter it
+  missed and logged.
+- **A tap shows the controls** instead of jumping to the next sentence, on
+  novels.
+- **The audiobook player fills the page** rather than floating over it, with
+  the transcript and the chapter controls following the chapter you are on.
+  Lyrics now name the chapter.
+- **A novel's Web action becomes Listen**, reusing the path that already worked
+  from the reader.
+- **Continue Reading picks narration back up** where it stopped, resolving the
+  saved fingerprint and ignoring a stale incognito flag.
+- **Playback stops** when a chapter finishes without speaking, instead of
+  running on unattended.
+
+### Extensions
+
+- **LNReader diagnostics**, redacted, per request and per stage: enough to see
+  whether an extension loaded, which plugin answered, and what it returned.
+
+### Known
+
+- A source's language is not yet shown on the novel search row; the field is
+  carried but not filled in.
+- Some extension sites refuse the app's requests and report as returning
+  nothing rather than as an error.
+
 ## 4.0.0 — 2026-10-05
 
 The current release, and the first one published on its own: the 3.0.x releases
