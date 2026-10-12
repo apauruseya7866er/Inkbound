@@ -22,9 +22,8 @@ Android **7.0 (API 24)**+ · **76.3 MB** · **arm64-v8a / armeabi-v7a**
 </p>
 
 <p align="center">
-  <img src=".github/screenshots/reader.png" width="31%" alt="The reader: one long page, no chrome" />
-  <img src=".github/screenshots/source-health.png" width="31%" alt="Source health: clear out what stopped working" />
-  <img src=".github/screenshots/settings.png" width="31%" alt="Settings: sources, reading, downloads, privacy" />
+  <img src=".github/screenshots/audiobook-player.png" width="31%" alt="Audiobook player: cover, waveform, sleep timer, sentence step, speed" />
+  <img src=".github/screenshots/lyrics-player.png" width="31%" alt="Lyrics view: the sentence being read, lit up and tappable" />
 </p>
 
 > Inkbound is a novel-focused fork of [Zangetsu](https://github.com/Spyou/Zangetsu) by Krishna Vishwakarma. The reader, source system, downloads, trackers and read-aloud engine are his work, carried over intact. If you use Inkbound, please [star the original](https://github.com/Spyou/Zangetsu).
