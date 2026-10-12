@@ -35,6 +35,7 @@ import '../search/title_suggestion_service.dart';
 import '../ui/animation_prefs.dart';
 import '../playback/skip_service.dart';
 import '../playback/resume_store.dart';
+import '../reading/novel_migrator.dart';
 import '../reading/read_history.dart';
 import '../reading/read_store.dart';
 import '../reading/reader_overrides.dart';
@@ -249,6 +250,10 @@ Future<void> initDependencies() async {
   sl.registerSingleton<CategoryStore>(CategoryStore());
   await MyListStore.init();
   sl.registerSingleton<MyListStore>(MyListStore());
+  // Migration reads My List, history and read positions, so it is registered
+  // after all three rather than lazily on first use - a migration that throws
+  // because a box is not open yet is exactly the bug this avoids.
+  sl.registerSingleton<NovelMigrator>(NovelMigrator());
   await TitlePrefsStore.init();
   sl.registerSingleton<TitlePrefsStore>(TitlePrefsStore());
   await HomeCache.init();

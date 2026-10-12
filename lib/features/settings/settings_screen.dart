@@ -67,6 +67,8 @@ import '../backup/backup_screen.dart';
 import '../onboarding/how_it_works.dart';
 import '../notify/subscriptions_screen.dart';
 import 'tracker_settings_screen.dart';
+import '../reading/novel_migrate_screen.dart';
+import '../reading/source_migrate_screen.dart';
 import '../sources/source_health_screen.dart';
 import '../sources/sources_screen.dart';
 import 'source_priority_screen.dart';
@@ -893,6 +895,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
       subtitle: l10n.sourceHealthSubtitle,
       keywords: 'source health test working dead status check',
       onTap: () => _push(const SourceHealthScreen()),
+    ),
+    // Migration, in both directions. Two entries rather than one because the
+    // reader arrives here knowing two different things: "these particular books
+    // came from somewhere that broke" and "this whole source is gone".
+    _SettingsEntry(
+      section: SettingsSection.sources,
+      icon: Icons.swap_horiz_rounded,
+      title: 'Migrate novels',
+      subtitle: 'Move books to another source',
+      keywords: 'migrate move novel source change replace swap transfer',
+      onTap: () => _push(const NovelMigrateScreen()),
+    ),
+    _SettingsEntry(
+      section: SettingsSection.sources,
+      icon: Icons.drive_file_move_outlined,
+      title: 'Migrate a whole source',
+      subtitle: 'Move everything on one source elsewhere',
+      keywords:
+          'migrate bulk source all novels dead extension sweep transfer',
+      onTap: () => _push(const SourceMigrateScreen()),
     ),
     if (Platform.isAndroid) ...[
       _SettingsEntry(
