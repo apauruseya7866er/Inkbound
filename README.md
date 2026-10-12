@@ -15,14 +15,17 @@ Android **7.0 (API 24)**+ · **76.3 MB** · **arm64-v8a / armeabi-v7a**
 
 </div>
 
-<!-- Screenshots go here once they are captured on the emulator.
 <p align="center">
-  <img src="docs/screenshots/library.png" width="23%" alt="Library" />
-  <img src="docs/screenshots/reader.png" width="23%" alt="Reader" />
-  <img src="docs/screenshots/audiobook.png" width="23%" alt="Audiobook player" />
-  <img src="docs/screenshots/lyrics.png" width="23%" alt="Lyrics view" />
+  <img src="docs/screenshots/search.png" width="31%" alt="Search every novel source at once" />
+  <img src="docs/screenshots/home.png" width="31%" alt="Home: continue reading and every source you installed" />
+  <img src="docs/screenshots/detail.png" width="31%" alt="A novel's page: chapters, characters, listen" />
 </p>
--->
+
+<p align="center">
+  <img src="docs/screenshots/reader.png" width="31%" alt="The reader: one long page, no chrome" />
+  <img src="docs/screenshots/source-health.png" width="31%" alt="Source health: clear out what stopped working" />
+  <img src="docs/screenshots/settings.png" width="31%" alt="Settings: sources, reading, downloads, privacy" />
+</p>
 
 > Inkbound is a novel-focused fork of [Zangetsu](https://github.com/Spyou/Zangetsu) by Krishna Vishwakarma. The reader, source system, downloads, trackers and read-aloud engine are his work, carried over intact. If you use Inkbound, please [star the original](https://github.com/Spyou/Zangetsu).
 
