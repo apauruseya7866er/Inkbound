@@ -250,10 +250,6 @@ Future<void> initDependencies() async {
   sl.registerSingleton<CategoryStore>(CategoryStore());
   await MyListStore.init();
   sl.registerSingleton<MyListStore>(MyListStore());
-  // Migration reads My List, history and read positions, so it is registered
-  // after all three rather than lazily on first use - a migration that throws
-  // because a box is not open yet is exactly the bug this avoids.
-  sl.registerSingleton<NovelMigrator>(NovelMigrator());
   await TitlePrefsStore.init();
   sl.registerSingleton<TitlePrefsStore>(TitlePrefsStore());
   await HomeCache.init();
@@ -989,6 +985,13 @@ await TorrentPrefs.init();
       animeLangs: animeLangPrefs,
     ),
   );
+
+  // Novel migration, registered HERE and not with the other stores: its
+  // constructor resolves SourceRepository eagerly, and registering it earlier
+  // made GetIt throw during boot - the app would not open past the splash.
+  // Everything it needs (MyListStore, ReadHistory, ReadStore) is registered
+  // well above this point.
+  sl.registerSingleton<NovelMigrator>(NovelMigrator());
 
   // Z Mode: the catalogue router and its metadata side. Off by default;
   // registering it costs nothing but makes the toggle instant.
