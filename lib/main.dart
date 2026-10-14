@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:ui' show PlatformDispatcher;
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -9,7 +8,6 @@ import 'package:media_kit/media_kit.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
-import 'core/analytics/analytics.dart';
 import 'core/app_config.dart';
 import 'core/app_mode.dart';
 import 'core/di/injector.dart';
@@ -20,11 +18,9 @@ import 'core/backup/backup_folder.dart';
 import 'core/backup/backup_payload.dart';
 import 'core/backup/backup_service.dart';
 import 'core/logging/app_logger.dart';
-import 'core/logging/crash_reports.dart';
 import 'core/platform/apple_tv.dart';
 import 'core/notify/cs_notify.dart';
 import 'core/notify/notification_service.dart';
-import 'core/notify/push_service.dart';
 import 'core/ui/home_rows_prefs.dart';
 import 'core/ui/route_observer.dart';
 import 'core/notify/subscription_checker.dart';
@@ -62,18 +58,16 @@ Future<void> main() async {
         if (message != null) AppLogger.instance.log(message);
         origDebugPrint(message, wrapWidth: wrapWidth);
       };
-      // Flutter framework errors → log + crash report + normal presentation.
+      // Flutter framework errors → log + normal presentation.
       final origOnError = FlutterError.onError;
       FlutterError.onError = (details) {
         AppLogger.instance.logError(details.exception, details.stack);
-        CrashReports.record(details.exception, details.stack);
         origOnError?.call(details);
       };
       // Errors from the engine that never reach a Dart zone — a failed
       // platform-channel reply, for one. Without this they are invisible.
       PlatformDispatcher.instance.onError = (error, stack) {
         AppLogger.instance.logError(error, stack);
-        CrashReports.record(error, stack, fatal: true);
         return true;
       };
       // Cap the in-memory image cache so a heavy source's posters + heroes can't
@@ -90,17 +84,6 @@ Future<void> main() async {
       VisibilityDetectorController.instance.updateInterval = const Duration(
         milliseconds: 80,
       );
-      // Firebase Analytics. Guarded so a build without google-services.json (or a
-      // device without Play Services) still boots — analytics just stays off.
-      try {
-        await Firebase.initializeApp().timeout(const Duration(seconds: 8));
-        Analytics.enabled = true;
-        // After initializeApp, and only if it worked — a build with no
-        // google-services.json has no Firebase to report to.
-        await CrashReports.enable();
-      } catch (e, st) {
-        AppLogger.instance.logError(e, st);
-      }
       // Resolve Apple TV before media_kit — Dart reports tvOS as iOS, and the
       // version string often has no "tvos" token, so we ask the native runner.
       final appleTv = await resolveAppleTv();
@@ -136,7 +119,6 @@ Future<void> main() async {
     },
     (error, stack) {
       AppLogger.instance.logError(error, stack);
-      CrashReports.record(error, stack, fatal: true);
     },
   );
 }
@@ -429,10 +411,6 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
         } catch (_) {}
       });
     }
-    // FCM broadcasts: subscribe every device to the `all` topic so we can push
-    // a custom notification to all users from the Firebase Console. Independent
-    // of onboarding + fire-and-forget so it never delays launch.
-    unawaited(PushService.instance.init());
     final elapsed = DateTime.now().difference(start);
     // The intro animation is 1600ms, so anything past that is just dead
     // waiting. Give it a hair over (1700) so the logo lands, then go — used
@@ -517,7 +495,7 @@ class _WatchAppState extends State<WatchApp> with WidgetsBindingObserver {
       scaffoldMessengerKey: shellFeatures ? rootMessengerKey : null,
       navigatorKey: rootNavigatorKey,
       navigatorObservers: shellFeatures
-          ? [Analytics.observer, appRouteObserver, TvRoutePopGuardObserver()]
+          ? [appRouteObserver, TvRoutePopGuardObserver()]
           : const [],
       home: _buildHome(),
       builder: (_, child) {

@@ -2590,7 +2590,7 @@ class PlayerCubit extends Cubit<PlayerState> {
     // of firing into a disposed player. This was the one that never checked:
     // _tryNextSource awaits a whole re-resolve (seconds, in the logs), which is
     // plenty of time to back out, and the emit below then threw "Cannot emit
-    // new states after calling close" — straight into Crashlytics.
+    // new states after calling close" — straight into the error log.
     final gen = _gen;
     final failed = state.active;
     if (failed != null) _tried.add(failed.url);

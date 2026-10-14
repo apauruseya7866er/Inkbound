@@ -15,8 +15,7 @@ import '../app_config.dart';
 ///     itself to check what aired, and iOS background refresh is a suggestion
 ///     the system is free to ignore — an alert that fires whenever iOS feels
 ///     like it is worse than none.
-///   • Push broadcasts ([showMessage]) work on iOS too: APNs does the waking,
-///     so none of the above applies.
+///   • [showMessage] carries in-app announcements and is Android-only too.
 class NotificationService {
   NotificationService._();
   static final NotificationService instance = NotificationService._();
@@ -32,8 +31,7 @@ class NotificationService {
   Future<void> init() async {
     if (_inited || !(Platform.isAndroid || Platform.isIOS)) return;
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    // Permission is requested by PushService (one prompt, at a moment we
-    // choose) rather than here on first init.
+    // Permission is requested here on first init (one prompt).
     const darwin = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -143,10 +141,9 @@ class NotificationService {
     );
   }
 
-  /// Show a general announcement / push message. Used for FCM foreground
-  /// messages, which Android does not display on its own (backgrounded ones the
-  /// system draws itself, image included). [imageUrl], when set and reachable,
-  /// renders as a big-picture notification; [payload] is optional tap data.
+  /// Show a general announcement. Android draws local notifications itself;
+  /// [imageUrl], when set and reachable, renders as a big-picture notification;
+  /// [payload] is optional tap data.
   Future<void> showMessage({
     required int id,
     required String title,
@@ -154,9 +151,8 @@ class NotificationService {
     String? imageUrl,
     String? payload,
   }) async {
-    // iOS draws foreground pushes itself once
-    // setForegroundNotificationPresentationOptions is set (see PushService),
-    // so redrawing here would show every broadcast twice.
+    // Android-only: there is no push transport on iOS any more, and the
+    // scheduled episode alerts stay Android-only (see the class docs).
     if (!Platform.isAndroid) return;
     if (!_inited) await init();
     StyleInformation? style;

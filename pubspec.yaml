@@ -66,9 +66,6 @@ dependencies:
   # Transitive via flutter_widget_from_html (etc.); needs a tvOS implementation.
   video_player_tvos: ^0.0.1
   wakelock_plus_tvos: ^0.0.1
-  firebase_core_tvos: ^0.0.2
-  firebase_analytics_tvos: ^0.0.1
-  firebase_messaging_tvos: ^0.0.1
   # Extract the .srt/.ssa from SubDL's zipped subtitle downloads.
   archive: ^4.0.9
 
@@ -158,12 +155,7 @@ dependencies:
   open_filex: ^4.5.0
   device_info_plus: ^13.2.0
   flutter_colorpicker: ^1.1.0
-  firebase_core: ^4.12.1
-  # Crash reporting. Same Firebase project as Analytics/FCM, no new account.
-  firebase_crashlytics: ^5.0.5
-  firebase_analytics: ^12.4.5
   supabase_flutter: ^2.16.0
-  firebase_messaging: ^16.4.3
   fluttertoast: ^10.0.0
   dynamic_color: ^2.1.0
 dev_dependencies:
