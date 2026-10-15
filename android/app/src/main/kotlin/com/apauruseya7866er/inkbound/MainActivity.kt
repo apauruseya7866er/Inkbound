@@ -91,11 +91,14 @@ class MainActivity : AppCompatActivity(), FlutterEngineConfigurator {
 
     /// Icon id (as Dart knows it) → the activity-alias that carries that icon.
     /// Keys are persisted in prefs and the alias names appear on users' home
-    /// screens, so neither side may be renamed once shipped.
+    /// screens, so neither side may be renamed once shipped. Ids may be retired
+    /// though: "classic" was dropped because its artwork was a byte-for-byte
+    /// copy of "default", and a picker that offers three names for two images is
+    /// worse than one that does not. Anything still persisted under it falls
+    /// back to [FALLBACK_ICON_ID] rather than leaving the user stuck.
     private val ICON_ALIASES = linkedMapOf(
         "crescent" to "com.apauruseya7866er.inkbound.MainActivityCrescent",
         "default" to "com.apauruseya7866er.inkbound.MainActivityDefault",
-        "classic" to "com.apauruseya7866er.inkbound.MainActivityClassic",
     )
 
     /// The one alias carrying android:enabled="true". Named because two places

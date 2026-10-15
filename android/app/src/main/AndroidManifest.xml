@@ -197,18 +197,6 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity-alias>
-        <activity-alias
-            android:name=".MainActivityClassic"
-            android:targetActivity=".MainActivity"
-            android:exported="true"
-            android:enabled="false"
-            android:icon="@mipmap/ic_launcher_classic"
-            android:label="Inkbound">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity-alias>
 
         <!-- Hosts a CloudStream plugin's own settings UI (it casts the Context to
              AppCompatActivity and shows a BottomSheetDialogFragment). Transparent

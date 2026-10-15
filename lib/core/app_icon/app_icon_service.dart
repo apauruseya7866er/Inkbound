@@ -47,6 +47,13 @@ class AppIconService {
 
   /// [defaultId] first — the picker leads with what a fresh install is
   /// actually wearing.
+  ///
+  /// Two, not three. "Classic" was retired: its launcher PNGs were byte-for-byte
+  /// identical to "Katana", so the picker showed one artwork under two names and
+  /// the home screen changed nothing when you tapped it. The id stays in nobody's
+  /// enum and is not renamed here — [selectedId] maps anything unrecognised to
+  /// [defaultId], so a reader who had picked it lands on the crescent and keeps
+  /// working.
   static const List<AppIconOption> options = [
     AppIconOption(
       id: 'crescent',
@@ -57,11 +64,6 @@ class AppIconService {
       id: 'default',
       label: 'Katana',
       asset: 'assets/icon/preview_default.png',
-    ),
-    AppIconOption(
-      id: 'classic',
-      label: 'Classic',
-      asset: 'assets/icon/preview_classic.png',
     ),
   ];
 

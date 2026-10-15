@@ -99,8 +99,8 @@ void main() {
       'a stale pref is corrected to the alias Android has enabled',
       () async {
         // The exact reported bug: an update changed which alias ships enabled,
-        // so the pref still said 'classic' while the crescent was on screen.
-        await icons.select('classic');
+        // so the pref still said 'default' while the crescent was on screen.
+        await icons.select('default');
         nativeSays('crescent');
         expect(await icons.reconciledId(), 'crescent');
         expect(
@@ -112,24 +112,24 @@ void main() {
     );
 
     test('an agreeing pref is left alone', () async {
-      await icons.select('classic');
-      nativeSays('classic');
-      expect(await icons.reconciledId(), 'classic');
-      expect(icons.selectedId, 'classic');
+      await icons.select('default');
+      nativeSays('default');
+      expect(await icons.reconciledId(), 'default');
+      expect(icons.selectedId, 'default');
     });
 
     test('an unreadable native side never clobbers a good pref', () async {
-      await icons.select('classic');
+      await icons.select('default');
       nativeSays(null);
-      expect(await icons.reconciledId(), 'classic');
-      expect(icons.selectedId, 'classic');
+      expect(await icons.reconciledId(), 'default');
+      expect(icons.selectedId, 'default');
     });
 
     test('an alias this build does not ship is ignored', () async {
-      await icons.select('classic');
+      await icons.select('default');
       nativeSays('some-removed-icon');
-      expect(await icons.reconciledId(), 'classic');
-      expect(icons.selectedId, 'classic');
+      expect(await icons.reconciledId(), 'default');
+      expect(icons.selectedId, 'default');
     });
   });
 }
