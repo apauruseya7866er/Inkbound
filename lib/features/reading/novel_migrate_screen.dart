@@ -111,10 +111,12 @@ class _NovelMigrateScreenState extends State<NovelMigrateScreen> {
     var carried = 0;
     for (final e in entries) {
       try {
+        final furthest = _furthestRead(e.key);
         final res = await _migrator.migrate(
           from: e.key,
           to: e.value,
-          chapterNumber: _chapterOf(e.key),
+          chapterNumber: furthest?.number,
+          chapterId: furthest?.chapterId,
         );
         if (res.ok) {
           moved++;
@@ -145,27 +147,21 @@ class _NovelMigrateScreenState extends State<NovelMigrateScreen> {
       );
   }
 
-  /// The chapter number the reader had reached, used as the destination guess.
+  /// The chapter the reader had reached on this book, as a number and the id it
+  /// had there.
   ///
-  /// Null when they never opened it, in which case there is nothing to carry
-  /// and the book simply opens at chapter one on the new source.
-  int? _chapterOf(MediaItem book) {
-    final entries = sl<ReadHistory>()
-        .all()
-        .where(
-          (e) => e.sourceId == book.sourceId && e.showId == book.id,
-        )
-        .toList();
-    if (entries.isEmpty) return null;
-    // Highest chapter NUMBER wins, not the most recent row: "furthest through"
-    // has to survive chapters that were re-opened out of order.
-    final nums = entries
-        .map((e) => e.chapterNumber)
-        .whereType<num>()
-        .map((n) => n.round())
-        .toList();
-    if (nums.isEmpty) return null;
-    return nums.reduce((a, b) => a > b ? a : b);
+  /// Null when they never opened it, in which case there is nothing to carry and
+  /// the book simply opens at chapter one on the new source.
+  ///
+  /// Read history is keyed one row per title, so this is that row - not a scan
+  /// for the highest chapter across many. The two halves have to describe the
+  /// same chapter: the number is what the destination's chapter list is searched
+  /// for, and the id is what selects the stored position that travels with it.
+  ({int number, String chapterId})? _furthestRead(MediaItem book) {
+    final e = sl<ReadHistory>().get(book.sourceId, book.id);
+    final n = e?.chapterNumber;
+    if (e == null || n == null) return null;
+    return (number: n.round(), chapterId: e.chapterId);
   }
 
   @override

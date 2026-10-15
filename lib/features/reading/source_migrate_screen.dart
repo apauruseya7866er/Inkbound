@@ -126,16 +126,13 @@ class _SourceMigrateScreenState extends State<SourceMigrateScreen> {
     setState(() => _picked[book] = picked);
   }
 
-  int? _chapterOf(MediaItem book) {
-    final nums = sl<ReadHistory>()
-        .all()
-        .where((e) => e.sourceId == book.sourceId && e.showId == book.id)
-        .map((e) => e.chapterNumber)
-        .whereType<num>()
-        .map((n) => n.round())
-        .toList();
-    if (nums.isEmpty) return null;
-    return nums.reduce((a, b) => a > b ? a : b);
+  /// The chapter the reader had reached on this book, as a number and the id it
+  /// had there. One row per title in read history, so this is that row.
+  ({int number, String chapterId})? _furthestRead(MediaItem book) {
+    final e = sl<ReadHistory>().get(book.sourceId, book.id);
+    final n = e?.chapterNumber;
+    if (e == null || n == null) return null;
+    return (number: n.round(), chapterId: e.chapterId);
   }
 
   Future<void> _applyAll() async {
@@ -168,10 +165,12 @@ class _SourceMigrateScreenState extends State<SourceMigrateScreen> {
     var moved = 0;
     for (final e in entries) {
       try {
+        final furthest = _furthestRead(e.key);
         final res = await _migrator.migrate(
           from: e.key,
           to: e.value,
-          chapterNumber: _chapterOf(e.key),
+          chapterNumber: furthest?.number,
+          chapterId: furthest?.chapterId,
         );
         // A refused book is simply still on the source afterwards, so it is
         // covered by the "still on this source" count below. Counting it twice

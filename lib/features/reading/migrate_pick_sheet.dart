@@ -182,21 +182,37 @@ class _MigratePickSheetState extends State<MigratePickSheet> {
                       if (c.sourceId != widget.excludeSourceId) c,
                   ];
                   final selectable = rows.where((c) => !c.failed).toList();
-                  if (selectable.isEmpty) {
+                  // Sources that did not answer. Kept apart from "had nothing"
+                  // and shown at the foot of the list rather than mixed in:
+                  // a source that answered with no results is fine, and one
+                  // that was blocked is the reason this screen exists. Silently
+                  // dropping them made a broken source indistinguishable from
+                  // one that simply does not carry this title.
+                  final failed = rows.where((c) => c.failed).toList();
+                  if (selectable.isEmpty && failed.isEmpty) {
                     return _Message(
                       icon: Icons.search_off_rounded,
-                      text: rows.isEmpty
-                          ? 'No installed source has "${widget.title}".'
-                          : 'No installed source answered. They may all be '
-                                'blocked - try again later.',
+                      text: 'No installed source has "${widget.title}".',
+                      onRetry: _retry,
+                    );
+                  }
+                  if (selectable.isEmpty) {
+                    return _Message(
+                      icon: Icons.cloud_off_rounded,
+                      text:
+                          'None of your ${failed.length} sources answered. They '
+                          'may all be blocked - try again later.',
                       onRetry: _retry,
                     );
                   }
                   return ListView.separated(
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 20),
-                    itemCount: selectable.length,
+                    itemCount: selectable.length + (failed.isEmpty ? 0 : 1),
                     separatorBuilder: (_, _) => const SizedBox(height: 2),
                     itemBuilder: (context, i) {
+                      if (i >= selectable.length) {
+                        return _FailedSources(failed: failed);
+                      }
                       final c = selectable[i];
                       return _CandidateRow(
                         candidate: c,
@@ -278,6 +294,57 @@ class _CandidateRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// The sources that did not answer, named.
+///
+/// Not selectable and not a result - this is the "you should probably fix this"
+/// footer. Naming them is the point: a reader who is told "12 sources did not
+/// answer" learns nothing, and one told which can go check whether the site is
+/// down or their own connection is.
+class _FailedSources extends StatelessWidget {
+  const _FailedSources({required this.failed});
+
+  final List<MigrationCandidate> failed;
+
+  @override
+  Widget build(BuildContext context) {
+    final names = [for (final c in failed) c.sourceId ?? '?'];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.cloud_off_rounded,
+                size: 14,
+                color: AppColors.textTertiary,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '${names.length} source${names.length == 1 ? '' : 's'} did not '
+                'answer',
+                style: AppText.overline.copyWith(
+                  color: AppColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            names.join(', '),
+            style: AppText.overline.copyWith(
+              color: AppColors.textTertiary.withValues(alpha: 0.8),
+            ),
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
       ),
     );
   }

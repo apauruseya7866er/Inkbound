@@ -77,6 +77,27 @@ class ReadPositionMover {
     return best;
   }
 
+  /// The position recorded for ONE specific chapter, or null when there is none.
+  ///
+  /// [furthest] answers "as far as they got"; this answers "where were they in
+  /// THIS chapter". Migration needs the second, not the first: the chapter number
+  /// the caller resolved the destination against comes from read history, so
+  /// carrying the position of some *other* chapter - one that merely happens to
+  /// have a higher scroll ratio - attaches the reader's place to a chapter they
+  /// were not on. When history knows the chapter, ask for that chapter's position
+  /// and fall back to [furthest] only when it does not.
+  /// Same shape as [furthest], so a caller can hold either without caring which
+  /// question it asked.
+  ({int pos, int total, String chapterId})? at(
+    String sourceId,
+    String showId,
+    String chapterId,
+  ) {
+    final raw = _store.get(sourceId, showId, chapterId);
+    if (raw == null) return null;
+    return (pos: raw.pos, total: raw.total, chapterId: chapterId);
+  }
+
   /// Writes [pos]/[total] onto [destChapterId] under the destination novel.
   ///
   /// Called by the migrator only after it has resolved the destination's own

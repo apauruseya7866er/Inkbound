@@ -4,6 +4,7 @@ import '../di/injector.dart';
 import '../models/media_item.dart';
 import '../models/provider_info.dart' show ProviderType;
 import '../playback/my_list.dart';
+import '../playback/source_health_store.dart' show SourceOutcome;
 import 'read_history.dart' show ReadEntry, ReadHistory;
 import 'read_position_mover.dart';
 import '../repository/source_repository.dart';
@@ -41,15 +42,60 @@ class NovelMigrator {
     MyListStore? list,
     ReadHistory? history,
     ReadPositionMover? positions,
-  }) : _sources = sources ?? sl<SourceRepository>(),
+    Future<List<({String id, String title})>> Function(MediaItem to)? chaptersOf,
+  }) : _injectedSources = sources,
        _list = list ?? sl<MyListStore>(),
        _history = history ?? sl<ReadHistory>(),
-       _positions = positions ?? ReadPositionMover();
+       _positions = positions ?? ReadPositionMover(),
+       _chaptersOf = chaptersOf ?? _chaptersFromSource;
 
-  final SourceRepository _sources;
+  final SourceRepository? _injectedSources;
+
+  /// Resolved on first use, not in the constructor.
+  ///
+  /// The injector builds this with no arguments, so a constructor-time lookup is
+  /// what production gets. Tests build it with stores only and never touch
+  /// [SourceRepository] at all - and resolving lazily rather than eagerly is
+  /// what lets them. Making the field simply nullable was worse than useless:
+  /// an un-injected migrator then held no repository, `matchCandidates` bailed
+  /// at its first line, and every picker in the app reported that no source had
+  /// the book. Caught on a device, not by a test, because no test called it.
+  late final SourceRepository _sources =
+      _injectedSources ?? sl<SourceRepository>();
+
   final MyListStore _list;
   final ReadHistory _history;
   final ReadPositionMover _positions;
+
+  /// How the destination's own chapter list is obtained.
+  ///
+  /// Injectable so the carry-over path is reachable from a test without a
+  /// provider behind it. It was not injectable when this was written, and the
+  /// only way to get chapters was through [SourceRepository] - which the two
+  /// screens had no reason to call, so neither did. `destinationChapters`
+  /// defaulted to empty, an empty list resolved to no chapter, and the position
+  /// silently never carried. The seam exists so that cannot happen quietly again.
+  final Future<List<({String id, String title})>> Function(MediaItem to)
+  _chaptersOf;
+
+  /// Reads a novel's chapters off its source. Returns empty on any failure: a
+  /// destination that will not list its chapters must cost the reader their
+  /// position, not the migration itself.
+  static Future<List<({String id, String title})>> _chaptersFromSource(
+    MediaItem to,
+  ) async {
+    try {
+      final episodes = await sl<SourceRepository>().episodes(
+        to.url,
+        sourceId: to.sourceId,
+      );
+      return [
+        for (final e in episodes) (id: e.id, title: e.title),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// How many sources to search at once while gathering candidates.
   ///
@@ -71,9 +117,9 @@ class NovelMigrator {
     List<String>? sourceIds,
     int concurrency = defaultConcurrency,
   }) async {
-    final all = sourceIds ??
-        _sources
-            .loadedSources
+    final all =
+        sourceIds ??
+        _sources.loadedSources
             .map((s) => s.id)
             .where((id) => id.startsWith('lnr:'))
             .toList();
@@ -92,9 +138,28 @@ class NovelMigrator {
             sourceId: id,
             cache: false,
           );
-          for (final item in res.items) {
-            if (item.type != ProviderType.novel) continue;
-            out.add(MigrationCandidate(item: item, score: score(title, item)));
+          // A blocked or timed-out source does NOT throw - searchStatus hands
+          // back an outcome and an empty list. Reading only `items` made that
+          // identical to a source that answered with nothing, which is the one
+          // distinction this whole feature is built to make: "Chikari had
+          // nothing" is fine, "Chikari is broken" is the reason to be here.
+          switch (res.outcome) {
+            case SourceOutcome.ok:
+            case SourceOutcome.empty:
+            case SourceOutcome.slow:
+              for (final item in res.items) {
+                if (item.type != ProviderType.novel) continue;
+                out.add(MigrationCandidate(item: item, score: score(title, item)));
+              }
+            case SourceOutcome.blocked:
+            case SourceOutcome.timeout:
+            case SourceOutcome.error:
+              out.add(
+                MigrationCandidate(
+                  failedSourceId: id,
+                  failure: res.outcome.name,
+                ),
+              );
           }
         } catch (_) {
           out.add(MigrationCandidate(failedSourceId: id, failure: 'no answer'));
@@ -139,10 +204,17 @@ class NovelMigrator {
   /// Re-points [from] at [to] in My List and history, carrying the reading
   /// position across.
   ///
-  /// [chapterNumber] is the destination chapter to attach the position to, or
-  /// null to skip carry-over entirely. The caller supplies it because only it
-  /// has resolved the destination's chapter list - see [resolveChapter] for why
-  /// that cannot be done here blind.
+  /// [chapterNumber] is the chapter the reader had reached on the OLD source, and
+  /// [chapterId] that chapter's id there. Both come from read history and must be
+  /// the same chapter: the number is resolved against the destination to find
+  /// where to land, and the id is what selects which stored position travels with
+  /// it. Pass [chapterId] alone and the position falls back to [ReadPositionMover.furthest],
+  /// which is the right answer only when history knows nothing.
+  ///
+  /// [destinationChapters] overrides the fetch, for tests and for a caller that
+  /// already has the list. Left null it is read from the destination itself -
+  /// previously the only way to supply it, which no caller did, so the position
+  /// never carried and the UI said it would.
   ///
   /// Returns what actually happened, so the caller can tell the reader "moved,
   /// resumed at chapter 12" from "moved, could not find your chapter" rather
@@ -151,26 +223,36 @@ class NovelMigrator {
     required MediaItem from,
     required MediaItem to,
     int? chapterNumber,
-    List<({String id, String title})> destinationChapters = const [],
+    String? chapterId,
+    List<({String id, String title})>? destinationChapters,
   }) async {
-    // The furthest position we have for the OLD copy, read BEFORE anything is
-    // rewritten.
-    final before = _positions.furthest(from.sourceId, from.id);
-
     // Same book, same source: nothing to move, and doing it anyway would strand
     // the reader's own position under a key they never left.
     if (from.sourceId == to.sourceId && from.id == to.id) {
       return const MigrationResult(ok: false, reason: 'same place');
     }
 
+    // The position that travels is the one belonging to the chapter we are
+    // resolving, read BEFORE anything is rewritten.
+    final carried = chapterId == null
+        ? _positions.furthest(from.sourceId, from.id)
+        : _positions.at(from.sourceId, from.id, chapterId);
+    final carryPos = carried?.pos;
+    final carryTotal = carried?.total;
+
     // My List: drop the old key, add the new one.
     await _list.remove(from);
     await _list.add(to);
 
-    // History: rewrite this novel's entry to the new source, keeping the title
-    // and marking where it now lives. Several history entries can share a show
-    // (one per chapter read), so every one of them moves - otherwise Continue
-    // Reading keeps offering the old source for the first tap after migrating.
+    // History: re-point this novel's row at the new source, keeping the title
+    // and marking where it now lives, or Continue Reading keeps offering the old
+    // source for the first tap after migrating.
+    //
+    // Read history is keyed one row per title, so there is normally exactly one
+    // row to move. The loop rather than a single `get` is deliberate: `all()` is
+    // unfiltered and a box written by an older schema could hold more than one
+    // row per title, and leaving a straggler behind is exactly the "still on the
+    // dead source" ghost this is meant to prevent.
     final movedEntries = <ReadEntry>[];
     for (final e in _history.all()) {
       if (e.sourceId != from.sourceId || e.showId != from.id) continue;
@@ -198,15 +280,16 @@ class NovelMigrator {
 
     // Carry the reading position, resolved against the destination's chapters.
     var resumed = false;
-    if (before != null && chapterNumber != null) {
-      final destId = resolveChapter(destinationChapters, chapterNumber);
+    if (carryPos != null && carryTotal != null && chapterNumber != null) {
+      final chapters = destinationChapters ?? await _chaptersOf(to);
+      final destId = resolveChapter(chapters, chapterNumber);
       if (destId != null) {
         await _positions.applyTo(
           sourceId: to.sourceId,
           showId: to.id,
           chapterId: destId,
-          pos: before.pos,
-          total: before.total,
+          pos: carryPos,
+          total: carryTotal,
         );
         resumed = true;
       }
