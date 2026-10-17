@@ -144,6 +144,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # The changelog is the release notes.
+      #
+      # `gh release create --generate-notes` was filling the body from merged
+      # pull requests, and this repository commits straight to main, so there
+      # were never any to list: every automated release ended up with an 88
+      # character body consisting of nothing but the compare link. That is why
+      # v4.0.0, v4.2.1 and v4.2.2 have no description on the releases page while
+      # v4.1.0 and v4.2.0 - written by hand afterwards - do.
+      #
+      # The section is already written and committed before the tag exists, so
+      # taking it from there means the page cannot drift from the file the
+      # release was cut from, and cannot be forgotten by whoever cuts it.
+      - name: Compose the release notes from the changelog
+        if: github.event_name == 'push'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          NOTES="$(mktemp)"
+          # Everything under "## <version>" up to the next "## " heading. The
+          # date and any trailing "Unreleased" block are deliberately dropped.
+          awk -v want="${VERSION}" '
+            $0 ~ ("^## +" want "( |$)") { grab = 1; next }
+            grab && /^## / { exit }
+            grab { print }
+          ' CHANGELOG.md > "${NOTES}"
+
+          if [ ! -s "${NOTES}" ]; then
+            echo "::warning::No CHANGELOG.md section for ${VERSION} - falling back to generated notes. Add one before tagging so the release page has a description."
+            exit 0
+          fi
+          echo "Found $(wc -l < "${NOTES}" | tr -d ' ') lines for ${VERSION}."
+          echo "NOTES_FILE=${NOTES}" >> "${GITHUB_ENV}"
+
       # Guarded because a re-run of an old tag would otherwise fail on a release
       # that already exists. The artifact above is always produced regardless.
       - name: Attach to the GitHub Release
@@ -157,6 +192,10 @@ jobs:
           if gh release view "${TAG}" > /dev/null 2>&1; then
             echo "Release ${TAG} already exists - uploading to it."
             gh release upload "${TAG}" "${APK}" --clobber
+          elif [ -n "${NOTES_FILE:-}" ]; then
+            gh release create "${TAG}" "${APK}" \
+              --title "Inkbound ${TAG}" \
+              --notes-file "${NOTES_FILE}"
           else
             gh release create "${TAG}" "${APK}" \
               --title "Inkbound ${TAG}" \
