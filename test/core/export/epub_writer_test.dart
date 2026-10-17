@@ -14,7 +14,14 @@ void _assertWellFormedXml(String xml) {
   XmlDocument.parse(xml);
 }
 
-Archive _readEpub(File f) => ZipDecoder().decodeStream(InputFileStream(f.path));
+/// Decoded from bytes, never from a file stream.
+///
+/// `InputFileStream(f.path)` opens a RandomAccessFile that outlives the decode,
+/// so every test using it leaked a handle and the tearDown's recursive delete
+/// failed with "being used by another process". Linux lets you unlink an open
+/// file, so this only ever failed on Windows - seven tests green on CI and red
+/// on a dev box. `readAsBytesSync` closes its own handle before returning.
+Archive _readEpub(File f) => ZipDecoder().decodeBytes(f.readAsBytesSync());
 
 String _entryString(Archive a, String name) =>
     utf8.decode(a.findFile(name)!.content as List<int>);

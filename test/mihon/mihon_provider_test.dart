@@ -230,8 +230,11 @@ void main() {
       final p = MihonProvider(info: srcInfo(id: 7));
       final pages = await p.getPages('/c1');
 
-      expect(log.single.method, 'getPages');
-      final args = log.single.arguments as Map;
+      // Matched on the method, not log.single: the surviving pages also fetch
+      // image cookies, so the log holds more than this one call.
+      final getPages = log.where((c) => c.method == 'getPages');
+      expect(getPages, hasLength(1));
+      final args = getPages.single.arguments as Map;
       expect(args['sourceId'], 7);
       expect(args['url'], '/c1');
 
@@ -239,7 +242,12 @@ void main() {
       // NOT fail the whole chapter.
       expect(pages, hasLength(2));
       expect(pages[0].url, 'https://cdn.example.com/p1.jpg');
-      expect(pages[0].headers, {'Referer': 'https://m.example.com'});
+      // containsPair: page headers carry the `x-mihon-src` marker alongside
+      // whatever the source asked for.
+      expect(
+        pages[0].headers,
+        containsPair('Referer', 'https://m.example.com'),
+      );
       expect(pages[1].url, 'https://cdn.example.com/p3.jpg');
     });
 
@@ -305,7 +313,15 @@ void main() {
         info: srcInfo(baseUrl: 'https://m.example.com', headers: const {}),
       );
       final items = await p.popular();
-      expect(items.single.coverHeaders, {'Referer': 'https://m.example.com'});
+      // containsPair, not map equality: coverHeaders also carries the
+      // `x-mihon-src` marker, which the image providers key off to route a
+      // Cloudflare-gated cover through the native fetcher. Asserting the whole
+      // map here couples this Referer test to an unrelated mechanism - and
+      // exact-map equality is what let it drift stale when the marker landed.
+      expect(
+        items.single.coverHeaders,
+        containsPair('Referer', 'https://m.example.com'),
+      );
     });
 
     test('leaves an existing Referer untouched (case-insensitive)', () async {
@@ -324,7 +340,10 @@ void main() {
         ),
       );
       final items = await p.popular();
-      expect(items.single.coverHeaders, {'referer': 'https://original.example.com'});
+      expect(
+        items.single.coverHeaders,
+        containsPair('referer', 'https://original.example.com'),
+      );
     });
 
     test('no headers and no baseUrl → coverHeaders is null', () async {

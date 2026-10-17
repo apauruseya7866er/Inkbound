@@ -118,7 +118,11 @@ void main() {
       // Deflating an already-compressed image burns CPU for nothing, and
       // stored entries read back as a plain seek and copy.
       final path = await writeArchive(3);
-      final archive = ZipDecoder().decodeStream(InputFileStream(path));
+      // Decoded from bytes, not InputFileStream: that opens a RandomAccessFile
+      // the decode never closes, and the tearDown's recursive delete then fails
+      // with "being used by another process". releaseCbz() frees the packer's
+      // own cache but not a stream this test opened.
+      final archive = ZipDecoder().decodeBytes(await File(path).readAsBytes());
       for (final f in archive.files.where((f) => f.isFile)) {
         expect(f.compression, CompressionType.none);
       }

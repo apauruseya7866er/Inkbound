@@ -386,7 +386,15 @@ void main() {
 
       final pages = await repo.pages('/c1', sourceId: 'mihon:7');
 
-      expect(log.single.method, 'getPages');
+      // Not log.single: reading a page also fetches an image cookie for the
+      // CDN URL, so the channel log legitimately holds more than the call under
+      // test. Matched on the method instead - which also lets this assert the
+      // argument it was called with, where log.single only ever checked the name.
+      final getPages = log.where((c) => c.method == 'getPages');
+      expect(getPages, hasLength(1));
+      expect(getPages.single.arguments['url'], '/c1');
+      expect(getPages.single.arguments['sourceId'], 7);
+
       expect(pages.map((p) => p.url), [
         'https://cdn/p1.jpg',
         'https://cdn/p2.jpg',
