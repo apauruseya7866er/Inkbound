@@ -20,7 +20,7 @@ Signed releases come from tags. Pushing `v*` builds a signed APK on the releases
 
 ## The JavaScript runtime is required for most of the suite
 
-The scraper runtime is a native library, `quickjs_c_bridge`. Around 28 of the tests — everything under `test/core/lnreader/`, plus `js_engine_test.dart`, `js_reading_provider_names_test.dart` and `cf_solve_needed_test.dart` — execute real plugin JavaScript through it.
+The scraper runtime is a native library, `quickjs_c_bridge`. Around 28 of the tests — everything under `test/core/lnreader/`, plus `js_engine_test.dart`, `js_reading_provider_names_test.dart` and `cf_solve_needed_test.dart` — execute real plugin JavaScript through it. They are marked `@Tags(['needs-device'])`.
 
 If that library is not built for the current platform, those tests fail with:
 
@@ -28,7 +28,11 @@ If that library is not built for the current platform, those tests fail with:
 Failed to load dynamic library 'quickjs_c_bridge.dll': The specified module could not be found.
 ```
 
-That is a missing build artifact, not a broken test, and not something your change caused. **CI does not currently build this library**, so the Test job is red on `main` for this reason and will stay red until it does. Judge your change by whether it adds failures beyond that known set.
+That is a missing build artifact, not a broken test, and not something your change caused. Those tests are tagged `needs-device` and skipped by `dart_test.yaml`, so the Test job is a real gate again instead of a permanently red one. They are not deleted and not ignored - to run them where the library exists:
+
+```sh
+flutter test --run-skipped -d <device>
+```
 
 ### Where that coverage actually runs: `integration_test/js_runtime_test.dart`
 

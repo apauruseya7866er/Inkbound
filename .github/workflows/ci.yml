@@ -45,17 +45,17 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    # Non-blocking, and that is a measured decision rather than a shrug. On Linux
-    # the suite reports 56 failures: ~30 are a missing `quickjs_c_bridge.dll` (the
-    # FFI library ships per-platform and is absent for the Linux runner) and the
-    # rest are Windows file-locking and Hive-quarantine assumptions baked into
-    # tests that were only ever run on a Windows dev box.
+    # A hard gate, and deliberately so. This used to be `continue-on-error: true`
+    # because roughly thirty tests could only ever fail here: they execute real
+    # plugin JavaScript through flutter_js, which on Android is QuickJS compiled
+    # to a native library, and that library has no host build - so the runner
+    # reports `Failed to load dynamic library 'quickjs_c_bridge'` every time.
     #
-    # So this job reports the real number instead of hiding it, and the
-    # blocking gates are `analyze` (zero errors, zero warnings) and the release
-    # build. Fixing the 56 is tracked separately; turning this into a hard gate
-    # before then would mean a permanently red badge that stops meaning anything.
-    continue-on-error: true
+    # A permanently red job is worse than no gate at all: it cannot catch a
+    # regression in the other three thousand tests either, and it teaches people
+    # to ignore the badge. Those thirty are now tagged `needs-device` and skipped
+    # by `dart_test.yaml`, so this job means something again, and the engine is
+    # covered for real on a device by integration_test/js_runtime_test.dart.
     steps:
       - uses: actions/checkout@v4
 

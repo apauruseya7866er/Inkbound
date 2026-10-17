@@ -85,24 +85,68 @@ Future<void> _quarantine(String name) async {
         // One kept copy per box, so repeated failures can't fill the disk.
         final previous = File(kept);
         if (previous.existsSync()) previous.deleteSync();
-        await file.rename(kept);
-        debugPrint('[Hive] kept the unreadable "$name" at $kept');
-        return;
+        if (await _moveAside(file, kept, name)) return;
       }
     } catch (e) {
       debugPrint('[Hive] could not move "$name" aside ($e) — deleting it.');
     }
   }
-  try {
-    await Hive.deleteBoxFromDisk(name);
-  } catch (deleteError) {
-    // deleteBoxFromDisk removes the data (.hive) file first, then the .lock —
-    // and its exists()/delete() on the .lock is a TOCTOU race: the lock can be
-    // released in the gap, throwing PathNotFoundException even though the data
-    // file is already gone. Don't let that abort recovery; the reopen above is
-    // what actually matters.
-    debugPrint(
-      '[Hive] cleanup of "$name" hit $deleteError — reopening anyway.',
-    );
+
+  // Same reason as the rename above, and the same cause: Hive is still holding
+  // the data file from the open that just threw, so on a Windows host the
+  // delete fails with "being used by another process" and the corrupt bytes
+  // survive - after which the reopen below throws the same error and the box
+  // takes the splash down. Retried through Hive's own API so its .lock
+  // handling stays where it belongs.
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await Future<void>.delayed(Duration(milliseconds: 20 * attempt));
+    }
+    try {
+      await Hive.deleteBoxFromDisk(name);
+      return;
+    } catch (e) {
+      if (attempt == 2) {
+        // deleteBoxFromDisk removes the data (.hive) file first, then the .lock
+        // - and its exists()/delete() on the .lock is a TOCTOU race: the lock
+        // can be released in the gap, throwing PathNotFoundException even though
+        // the data file is already gone. Don't let that abort recovery; the
+        // reopen is what actually matters.
+        debugPrint('[Hive] cleanup of "$name" hit $e — reopening anyway.');
+      }
+    }
   }
+}
+
+/// Renames [file] to [kept], retrying briefly. True once it is moved.
+///
+/// The retry is not defensive padding. The handle on this file belongs to the
+/// `Hive.openBox` that just threw — Hive opens it to read frames, throws on the
+/// unknown typeId, and only releases the handle as that call unwinds — so the
+/// rename issued from the same catch block can still lose a race it would have
+/// won a moment later. POSIX (Android, iOS, tvOS) unlinks and renames an open
+/// file, so this only ever matters on a Windows host, where both the rename and
+/// the delete fallback fail with "being used by another process" and the corrupt
+/// file survives — at which point the reopen throws the *same* error and the box
+/// takes the splash down with it, which is the outcome this function exists to
+/// prevent.
+///
+/// Bounded and short: this runs during boot, and the fallback it protects is
+/// already a degraded path. Three attempts, no unbounded waiting.
+Future<bool> _moveAside(File file, String kept, String name) async {
+  for (var attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await Future<void>.delayed(Duration(milliseconds: 20 * attempt));
+    }
+    try {
+      await file.rename(kept);
+      debugPrint('[Hive] kept the unreadable "$name" at $kept');
+      return true;
+    } catch (e) {
+      if (attempt == 2) {
+        debugPrint('[Hive] moving "$name" aside failed again ($e)');
+      }
+    }
+  }
+  return false;
 }

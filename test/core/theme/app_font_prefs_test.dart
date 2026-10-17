@@ -70,7 +70,12 @@ void main() {
     // pubspec is the contract for these: claiming bundled without declaring it
     // means no download is attempted AND Flutter has no such family, so it
     // silently draws the platform default.
-    final pubspec = await File('pubspec.yaml').readAsString();
+    //
+    // Normalised first: git checks pubspec out with CRLF on Windows, so a bare
+    // `contains('- family: X\n')` misses there and passes on CI's LF. A test
+    // that only works on one platform's line endings hides on the other.
+    final pubspec =
+        (await File('pubspec.yaml').readAsString()).replaceAll('\r\n', '\n');
     for (final f in AppFontPrefs.fonts.where((f) => f.bundled)) {
       expect(
         pubspec.contains('- family: ${f.family}\n'),

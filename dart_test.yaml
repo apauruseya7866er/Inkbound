@@ -1,0 +1,29 @@
+# `flutter test` reads this (it is dart_test.yaml, honoured by the Dart test
+# runner underneath).
+#
+# The one tag here exists to keep the Test job meaningful. Roughly thirty tests
+# under test/core/lnreader/ and test/core/provider/ execute real plugin
+# JavaScript through flutter_js, which on Android is QuickJS compiled to a native
+# library by Gradle. That library has no host build, so on a desktop test host
+# and on the Linux runner those tests can only fail with:
+#
+#   Failed to load dynamic library 'quickjs_c_bridge'
+#
+# Leaving them unskipped meant `continue-on-error: true` on the whole job, which
+# is the worst of both: the badge was permanently red and the job could not catch
+# a genuine regression in the other three thousand tests either.
+#
+# Skipping them by tag is honest rather than hidden - the tests are still here,
+# still run by anyone who asks for them, and they say why. The engine itself is
+# covered for real on a device by integration_test/js_runtime_test.dart.
+#
+# To run them where the library exists (needs includeEmulatorAbis=true, see
+# CONTRIBUTING):
+#
+#   flutter test --run-skipped -d <device>
+tags:
+  needs-device:
+    skip: >-
+      needs a device: flutter_js is QuickJS on Android and the native library has
+      no host build. Run with --run-skipped on an emulator, and see
+      integration_test/js_runtime_test.dart for the device-side coverage.
