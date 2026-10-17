@@ -85,18 +85,29 @@ void main() {
       expect(await file.readAsString(), contains('line 199'));
     });
 
-    test('compaction still runs, so the file cannot grow forever', () async {
-      for (var i = 0; i < 2500; i++) {
-        AppLogger.instance.log('line $i');
-      }
-      await AppLogger.instance.flush();
-      expect(AppLogger.instance.compactions, 1);
-      final lines = await file.readAsLines();
-      // Bounded by the buffer cap plus one compaction window, NOT by how many
-      // lines were written.
-      expect(lines.length, lessThanOrEqualTo(4001));
-      expect(lines.last, contains('line 2499'));
-    });
+    test(
+      'compaction still runs, so the file cannot grow forever',
+      () async {
+        for (var i = 0; i < 2500; i++) {
+          AppLogger.instance.log('line $i');
+        }
+        await AppLogger.instance.flush();
+        expect(AppLogger.instance.compactions, 1);
+        final lines = await file.readAsLines();
+        // Bounded by the buffer cap plus one compaction window, NOT by how many
+        // lines were written.
+        expect(lines.length, lessThanOrEqualTo(4001));
+        expect(lines.last, contains('line 2499'));
+      },
+      // Real file I/O, 2500 writes plus a rewrite, so how long this takes is the
+      // machine's disk rather than anything about the code under test. On this
+      // dev box it sits right on the 30s default and trips it whenever the
+      // suite is running its other files in parallel - which made a green
+      // branch look red for a reason that has nothing to do with the change
+      // being tested. Raised, not skipped: the assertions are still the point,
+      // and a test that only passes on a fast disk is not a real gate either.
+      timeout: const Timeout(Duration(minutes: 5)),
+    );
 
     test('redaction reaches the disk, not just the buffer', () async {
       AppLogger.instance.log('signed in as someone@example.com ok');
