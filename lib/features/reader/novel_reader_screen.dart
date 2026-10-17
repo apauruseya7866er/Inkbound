@@ -428,6 +428,11 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       // land before the player launch, which starts speech from wherever this
       // left the voice.
       _resumeNarrationPosition();
+      // After that, because it is the one that can decline: a chapter already
+      // being narrated must keep the live position rather than have a saved
+      // point applied over it, and only then is there a live position to adopt
+      // the bar for.
+      _adoptRunningNarration();
       _restoreScrollPosition();
       // After the chapter is segmented, never before: the player opens onto this
       // chapter's sentences, and a player over a chapter it has not read yet
@@ -452,21 +457,48 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// Re-cleans the open chapter after a rule changed, and re-points read-aloud
   /// at the result.
   ///
-  /// Narration stops first, and deliberately. The engine is part-way through an
-  /// utterance built from the *old* sentence list; re-adopting a shorter list
-  /// underneath it would leave the two disagreeing about what sentence 40 is,
-  /// and the panel would show a position the voice had never reached. The
-  /// chapter just changed shape GÇö a pause is the honest response, and the play
-  /// button is one tap away.
+  /// The engine is part-way through an utterance built from the *old* sentence
+  /// list, and hiding a sentence renumbers everything after it - so what used
+  /// to be sentence 40 is a different sentence now, and simply adopting the new
+  /// list underneath a running engine would leave the two disagreeing about
+  /// where the voice is. That is the real hazard here and it has not gone
+  /// anywhere.
+  ///
+  /// It used to be answered by stopping. Which is honest about the desync and
+  /// wrong about the reader: hiding a sentence is not a request to stop being
+  /// read to, and doing it silently mid-listen left the voice cut off with no
+  /// way back except starting over from the top of the chapter.
+  ///
+  /// Answered instead by finding the sentence again by its own text - the
+  /// fingerprint survives the renumbering, an index does not - and restarting
+  /// the utterance from there, so the engine and the list agree again by
+  /// construction rather than by being paused first.
   Future<void> _reapplyTextFilters() async {
     final html = _html;
     if (html == null || _text == null || !mounted) return;
     final prefs = sl<ReaderPrefs>();
-    // Only silence the voice when a rule actually removes something. Turning
-    // the cleanup off restores text, which does not invalidate a running
-    // narration so much as leave it behind.
-    if (prefs.textFiltersEnabled) await _tts?.stop();
-    if (!mounted) return;
+
+    // What the voice is on, recorded by its words rather than its number.
+    //
+    // Hiding a sentence renumbers every sentence after it, so the index is
+    // about to stop meaning anything while the words keep meaning exactly what
+    // they meant a moment ago. That is the whole reason this does not simply
+    // stop: the sentence can be found again in the new list by what it says,
+    // which an index cannot do.
+    final tts = _tts;
+    final wasSpeaking = tts?.state.isSpeaking ?? false;
+    final voiceSentence = tts?.state.currentSentence;
+    final anchor = TtsResumePoint(
+      chapterId: _chapter.url,
+      sentenceIndex: tts?.state.currentIndex ?? 0,
+      fingerprint: voiceSentence == null
+          ? null
+          : TtsResumePoint.fingerprintOf(voiceSentence.text),
+    );
+
+    // Where the page is now, as a fraction of the chapter, so it can be put
+    // back afterwards. See the re-anchor further down.
+    final fraction = _scrollFraction();
 
     final cleaned = filterNovelHtml(_text!.html, prefs.textFilterEngine);
 
@@ -482,21 +514,59 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     });
 
     // The chapter id has not changed, so the cubit would keep the sentence list
-    // it already has GÇö the one that still contains the sentence just hidden.
+    // it already has - the one that still contains the sentence just hidden.
     _ttsAligned = null;
     if (!_adoptAlignedChapter(cleaned, force: true)) {
-      _tts?.loadChapter(
+      tts?.loadChapter(
         bookId: widget.showId,
         chapterId: _chapter.url,
         html: cleaned,
         force: true,
       );
     }
-    // The page the reader was on no longer exists if what was hidden was part of
-    // it, so re-anchor to the top rather than leaving them somewhere other than
-    // the sentence they were reading.
-    if (_scrollController.hasClients) _scrollController.jumpTo(0);
-    _lastScrollPermille = 0;
+    if (!mounted) return;
+
+    // Back on the sentence the voice was on, found by its text in the new
+    // list. Forcing the re-adoption above resets the index to zero, so without
+    // this the voice resumed from the first sentence of the chapter.
+    if (tts != null && anchor.fingerprint != null) {
+      final index = tts.resolveResumeIndex(anchor);
+      if (wasSpeaking) {
+        unawaited(tts.play(from: index));
+      } else if (index != tts.state.currentIndex) {
+        unawaited(tts.seek(index));
+      }
+    }
+
+    // Back to where the reader was, not to the top.
+    //
+    // The top used to be deliberate: the paragraph that was on screen may have
+    // just been hidden, and landing somewhere arbitrary was thought to be
+    // worse. But the reader who hid one sentence at the bottom of a chapter was
+    // thrown to the top of the chapter for it, and hiding five in a row cost
+    // five round trips down there. A fraction of the chapter moves with the
+    // text, so it survives the change well enough to be worth keeping, and the
+    // polling is the same one [_restoreScrollPosition] uses because the fresh
+    // layout is a lazy sliver and a single jump lands short.
+    if (fraction != null) {
+      _lastScrollPermille = (fraction * 1000).round();
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _pollRestoreScroll(fraction),
+      );
+    } else if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+      _lastScrollPermille = 0;
+    }
+  }
+
+  /// How far down the chapter the page is, 0 to 1, or null before it can be
+  /// measured.
+  double? _scrollFraction() {
+    if (!_scrollController.hasClients) return null;
+    final position = _scrollController.position;
+    if (!position.hasContentDimensions) return null;
+    if (position.maxScrollExtent <= 0) return 0;
+    return (position.pixels / position.maxScrollExtent).clamp(0.0, 1.0);
   }
 
   /// Jumps to the chapter's saved scroll permille once the fresh content has
@@ -946,11 +1016,46 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     if (IncognitoMode.on) return;
     final tts = _tts;
     if (tts == null) return;
+    // A live voice outranks a saved point. The point is only written when the
+    // position is flushed, so while this chapter is still being read aloud the
+    // file is behind by however many sentences have been spoken since - and
+    // seeking to it walks the listen backwards, on a chapter that never
+    // actually stopped. The live index is the newer of the two records.
+    final state = tts.state;
+    if (state.isSpeaking && state.chapterId == _chapter.url) return;
     // Keyed by book id and chapter URL, which is why the ids here are the
     // reader's own and not the route's: a different key simply finds nothing.
     final point = tts.resumePointFor(widget.showId, _chapter.url);
     if (point == null) return;
     unawaited(tts.seek(tts.resolveResumeIndex(point)));
+  }
+
+  /// Puts the read-aloud bar back when this chapter is already being narrated.
+  ///
+  /// Coming back to a chapter does not stop the voice. `dispose` deliberately
+  /// only detaches the chapter source, because the foreground service keeps
+  /// reading on its own and dismissing the player hands the reader straight
+  /// back to where they were. But the bar's visibility is per-screen state, so
+  /// a fresh reader opens onto a chapter that is still being read aloud with no
+  /// controls for it at all - which reads as the feature having stopped rather
+  /// than as a listen that carried on without you.
+  ///
+  /// Opens the bar and nothing else. No audio is started here: arriving at a
+  /// chapter is not a request to be read to, the same rule
+  /// [_resumeNarrationPosition] follows.
+  void _adoptRunningNarration() {
+    final tts = _tts;
+    if (tts == null || _ttsPanelOpen) return;
+    final state = tts.state;
+    // Only for the chapter the voice is actually on. Opening a different
+    // chapter while another one is narrating must not borrow its controls.
+    if (!state.isSpeaking || state.chapterId != _chapter.url) return;
+    setState(() {
+      _ttsPanelOpen = true;
+      // Same reason _startTts gives: the panel is chrome, so narration with no
+      // visible controls reads as a feature that did not start at all.
+      _chromeVisible = true;
+    });
   }
 
   /// Opens the full-screen read-aloud player over this page.
