@@ -2143,6 +2143,18 @@ abstract class AppLocalizations {
   /// **'Theme'**
   String get theme;
 
+  /// No description provided for @highlightColor.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight colour'**
+  String get highlightColor;
+
+  /// No description provided for @highlightText.
+  ///
+  /// In en, this message translates to:
+  /// **'Highlight text'**
+  String get highlightText;
+
   /// No description provided for @fontSize.
   ///
   /// In en, this message translates to:

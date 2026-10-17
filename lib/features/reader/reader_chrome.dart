@@ -652,3 +652,100 @@ Widget readerOverrideTag(BuildContext context) {
     ),
   );
 }
+
+/// A tappable colour circle, for the reader's own settings sheet and the
+/// standalone Reader Settings screen.
+///
+/// One widget for both places on purpose. The two screens already disagreed on
+/// sizing, border colour and label treatment for the identical control, and a
+/// reader who changes a setting in one and finds a different-looking control in
+/// the other reads them as two different settings.
+class ReaderColourDot extends StatelessWidget {
+  const ReaderColourDot({
+    super.key,
+    required this.color,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.slashed = false,
+  });
+
+  final Color color;
+
+  /// Announced by the tooltip and the semantics label, because a coloured dot
+  /// says nothing on its own.
+  final String label;
+
+  final bool selected;
+  final VoidCallback onTap;
+
+  /// Draws the conventional diagonal, meaning "no choice made" rather than a
+  /// colour. Painting such an entry in some colour would imply that colour is
+  /// the one selected.
+  final bool slashed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: label,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: label,
+        child: InkResponse(
+          onTap: onTap,
+          radius: 22,
+          // Below the 48dp minimum on purpose: six of these will not fit a phone
+          // row, and a swatch is not a control anyone needs to hit with a thumb
+          // the way a switch does.
+          child: CustomPaint(
+            foregroundPainter: slashed
+                ? const _ReaderSlashPainter(AppColors.textSecondary)
+                : null,
+            child: Container(
+              width: 30,
+              height: 30,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: selected
+                      ? AppColors.textPrimary
+                      : AppColors.textTertiary.withValues(alpha: 0.35),
+                  width: selected ? 2.5 : 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The diagonal itself, kept out of [ReaderColourDot] so the widget stays a
+/// declarative description of what it shows.
+class _ReaderSlashPainter extends CustomPainter {
+  const _ReaderSlashPainter(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final centre = Offset(size.width / 2, size.height / 2);
+    // Short of the edge, so the slash stops inside the ring instead of
+    // crossing the border and looking like a struck-out glyph.
+    final d = size.shortestSide / 2 * 0.55;
+    canvas.drawLine(
+      centre.translate(-d, -d),
+      centre.translate(d, d),
+      Paint()
+        ..color = color
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_ReaderSlashPainter old) => old.color != color;
+}

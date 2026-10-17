@@ -456,7 +456,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// utterance built from the *old* sentence list; re-adopting a shorter list
   /// underneath it would leave the two disagreeing about what sentence 40 is,
   /// and the panel would show a position the voice had never reached. The
-  /// chapter just changed shape â€” a pause is the honest response, and the play
+  /// chapter just changed shape GÇö a pause is the honest response, and the play
   /// button is one tap away.
   Future<void> _reapplyTextFilters() async {
     final html = _html;
@@ -482,7 +482,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     });
 
     // The chapter id has not changed, so the cubit would keep the sentence list
-    // it already has â€” the one that still contains the sentence just hidden.
+    // it already has GÇö the one that still contains the sentence just hidden.
     _ttsAligned = null;
     if (!_adoptAlignedChapter(cleaned, force: true)) {
       _tts?.loadChapter(
@@ -1629,6 +1629,9 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
           children: novelBlockSpans(layout, blockIndex, base: base),
         ),
         textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+        pageBackground: _readerTheme(prefs.theme).bg,
+        choice: ttsHighlightChoiceFor(prefs.highlightColor),
+        textChoice: ttsHighlightTextChoiceFor(prefs.highlightTextColor),
         rangeStart: slice?.from,
         rangeEnd: slice?.to,
       ),
@@ -1824,6 +1827,9 @@ void _maybeFollowTtsScroll(TtsState state, {bool force = false}) {
   }) => TtsHighlightText(
     span: page,
     textAlign: prefs.textAlignJustify ? TextAlign.justify : TextAlign.start,
+    pageBackground: _readerTheme(prefs.theme).bg,
+    choice: ttsHighlightChoiceFor(prefs.highlightColor),
+        textChoice: ttsHighlightTextChoiceFor(prefs.highlightTextColor),
     rangeStart: rangeStart,
     rangeEnd: rangeEnd,
   );
@@ -3146,6 +3152,63 @@ void _maybeFollowTtsScroll(TtsState state, {bool force = false}) {
                                 onChanged: (v) => apply(
                                   () => prefs.setNovelFollowNarration(v),
                                 ),
+                              ),
+                            ),
+                            // How the spoken sentence is marked. In the read-aloud
+                            // group because it only exists while read-aloud is
+                            // available at all, and beside "Follow narration"
+                            // because both are about watching the voice rather
+                            // than about the page's shape.
+                            readerSheetRow(
+                              icon: Icons.format_color_fill_rounded,
+                              label: context.l10n.highlightColor,
+                              child: Wrap(
+                                spacing: 10,
+                                runSpacing: 8,
+                                children: [
+                                  for (final choice in ttsHighlightPalette)
+                                    ReaderColourDot(
+                                      color: choice.color,
+                                      label: choice.label,
+                                      selected: choice.id ==
+                                          prefs.highlightColor,
+                                      onTap: () => apply(
+                                        () => prefs.setHighlightColor(
+                                          choice.id,
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            readerSheetRow(
+                              icon: Icons.text_fields_rounded,
+                              label: context.l10n.highlightText,
+                              child: Wrap(
+                                spacing: 10,
+                                runSpacing: 8,
+                                children: [
+                                  for (final choice
+                                      in ttsHighlightTextPalette)
+                                    ReaderColourDot(
+                                      // No colour means "leave the words
+                                      // alone", so the dot is struck through
+                                      // rather than tinted with something that
+                                      // would read as a selection.
+                                      color: choice.color ??
+                                          AppColors.textSecondary
+                                              .withValues(alpha: 0.25),
+                                      label: choice.label,
+                                      selected: choice.id ==
+                                          prefs.highlightTextColor,
+                                      slashed: choice.color == null,
+                                      onTap: () => apply(
+                                        () => prefs.setHighlightTextColor(
+                                          choice.id,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ],

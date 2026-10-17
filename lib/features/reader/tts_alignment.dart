@@ -474,6 +474,22 @@ List<TextSpan> highlightPages(
 /// background, which merging styles top-down does. [pageOffset] is how much text
 /// precedes this subtree within the page, so each descendant can work in
 /// absolute terms.
+/// [span] with [style] merged over the character range `[start, end)`.
+///
+/// The public face of [_applyRange] for callers that hold a finished span tree
+/// rather than the layout it came from - the read-aloud highlight, which has
+/// to recolour a range inside a page the paginator already built.
+///
+/// Offsets are in [span]'s own plain text. A range that misses the span
+/// entirely returns it unchanged rather than an empty one, so calling this
+/// with a range belonging to another block is a no-op and not a crash.
+TextSpan applyStyleToRange(
+  TextSpan span,
+  int start,
+  int end,
+  TextStyle style,
+) => _applyRange(span, start, end, style, 0);
+
 TextSpan _applyRange(
   TextSpan span,
   int start,

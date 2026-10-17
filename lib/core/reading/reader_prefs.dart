@@ -36,6 +36,34 @@ class ReaderPrefs {
   String get theme => _box.get('theme', defaultValue: 'dark') as String;
   Future<void> setTheme(String value) => _box.put('theme', value);
 
+  /// Colour of the read-aloud highlight, as an id into the highlight palette.
+  ///
+  /// A string rather than a colour, so the palette can be retuned later without
+  /// stranding anyone on a tint that no longer exists. An unrecognised value
+  /// falls back to the default rather than failing.
+  ///
+  /// The default is spelled out rather than imported from the palette: that
+  /// lives under `features/`, and core does not depend on features anywhere in
+  /// this app. `kDefaultTtsHighlightId` is the same value, and a test asserts
+  /// the two agree, so the duplication cannot quietly drift.
+  String get highlightColor =>
+      _box.get('highlightColor', defaultValue: 'blue') as String;
+  Future<void> setHighlightColor(String value) =>
+      _box.put('highlightColor', value);
+
+  /// Colour of the highlighted sentence's own text, as an id into the text
+  /// palette. `'default'` leaves the sentence in the page's own colour, which
+  /// is how the highlight looked before this was a setting.
+  ///
+  /// Spelled out rather than imported for the same reason as `highlightColor`
+  /// above, and pinned by a test in the same way.
+  String get highlightTextColor => _box.get(
+        'highlightTextColor',
+        defaultValue: 'default',
+      ) as String;
+  Future<void> setHighlightTextColor(String value) =>
+      _box.put('highlightTextColor', value);
+
   /// Horizontal side margin (logical pixels) around reader text.
   double get marginWidth =>
       (_box.get('marginWidth', defaultValue: 20.0) as num).toDouble();

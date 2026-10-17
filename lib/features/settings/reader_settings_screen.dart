@@ -7,6 +7,8 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
 import '../../l10n/l10n.dart';
 import '../../core/ui/settings_widgets.dart';
+import '../reader/reader_chrome.dart';
+import '../reader/tts_highlight_box.dart';
 import 'tap_zones_screen.dart';
 import 'text_filter_settings_screen.dart';
 
@@ -169,6 +171,88 @@ class _ReaderSettingsScreenState extends State<ReaderSettingsScreen> {
   }
 
   /// A boolean row — same shape as `PlaybackSettingsScreen._toggleRow`.
+  /// The read-aloud highlight colour, as a row of dots.
+  ///
+  /// Dots rather than another `_pickerRow`, deliberately. Every other choice on
+  /// this screen is a word, and a word fits in a label on the right. A colour
+  /// only means anything seen, and hiding six of them behind a chevron means
+  /// picking one to see what any of them look like - which is the one thing a
+  /// colour picker exists to avoid. They all fit on one row, so they are all
+  /// visible at once.
+  ///
+  /// The selected dot is ringed rather than filled in differently, because
+  /// every dot is already a colour and only one of them is "on": a second fill
+  /// style would have to compete with the colours themselves.
+  Widget _highlightColourRow(ReaderPrefs prefs) {
+    final current = ttsHighlightChoiceFor(prefs.highlightColor);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          Text(
+            context.l10n.highlightColor,
+            style: AppText.body.copyWith(color: AppColors.textPrimary),
+          ),
+          const Spacer(),
+          for (final choice in ttsHighlightPalette)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: ReaderColourDot(
+                color: choice.color,
+                label: choice.label,
+                selected: choice.id == current.id,
+                onTap: () async {
+                  await prefs.setHighlightColor(choice.id);
+                  if (mounted) setState(() {});
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// The colour of the highlighted sentence's own text, as a row of dots.
+  ///
+  /// Separate from the wash colour above because the two answer different
+  /// questions: one is "show me where this is", the other is "make these words
+  /// stand out". A reader who wants a blue wash with white text wants exactly
+  /// that, and folding both into one control would force them to choose a
+  /// compromise pair.
+  Widget _highlightTextColourRow(ReaderPrefs prefs) {
+    final current = ttsHighlightTextChoiceFor(prefs.highlightTextColor);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Row(
+        children: [
+          Text(
+            context.l10n.highlightText,
+            style: AppText.body.copyWith(color: AppColors.textPrimary),
+          ),
+          const Spacer(),
+          for (final choice in ttsHighlightTextPalette)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: ReaderColourDot(
+                // No colour means "leave the words alone", so the dot shows a
+                // struck-through circle rather than a tint of the app accent -
+                // painting it in some colour would imply that colour is chosen.
+                color: choice.color ??
+                    AppColors.textSecondary.withValues(alpha: 0.25),
+                label: choice.label,
+                selected: choice.id == current.id,
+                onTap: () async {
+                  await prefs.setHighlightTextColor(choice.id);
+                  if (mounted) setState(() {});
+                },
+                slashed: choice.color == null,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _toggleRow({
     required IconData icon,
     required String title,
@@ -402,6 +486,8 @@ class _ReaderSettingsScreenState extends State<ReaderSettingsScreen> {
                 current: prefs.theme,
                 onPicked: prefs.setTheme,
               ),
+              _highlightColourRow(prefs),
+              _highlightTextColourRow(prefs),
               _sliderRow(
                 icon: Icons.format_size_rounded,
                 title: context.l10n.fontSize,

@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:watch_app/core/reading/reader_prefs.dart';
+import 'package:watch_app/features/reader/tts_highlight_box.dart';
 
 void main() {
   late Directory dir;
@@ -43,6 +45,34 @@ void main() {
       expect(p.textAlignJustify, isFalse);
       expect(p.paragraphSpacing, 8);
       expect(p.novelPaginated, isFalse);
+      expect(p.highlightColor, 'blue');
+      expect(p.highlightTextColor, 'default');
+    });
+
+    test('the highlight default resolves to a real palette colour', () async {
+      // The default is spelled out as a literal in ReaderPrefs because core
+      // does not import from features anywhere in this app, so the palette's own
+      // default cannot be the source of truth here. This is the test that stops
+      // the two copies drifting apart: rename a palette entry and this fails
+      // instead of leaving every untouched install on a colour that no longer
+      // exists.
+      await ReaderPrefs.init();
+      final stored = ReaderPrefs().highlightColor;
+      final choice = ttsHighlightChoiceFor(stored);
+      expect(choice.id, stored);
+      expect(choice.id, kDefaultTtsHighlightId);
+      expect(choice.color, isNot(const Color(0x00000000)));
+    });
+
+    test('the highlight-text default resolves to a real palette entry', () async {
+      // Same guard for the second setting: the default means "leave the words
+      // alone", which only works if that id still means that.
+      await ReaderPrefs.init();
+      final stored = ReaderPrefs().highlightTextColor;
+      final choice = ttsHighlightTextChoiceFor(stored);
+      expect(choice.id, stored);
+      expect(choice.id, kDefaultTtsHighlightTextId);
+      expect(choice.color, isNull, reason: 'the default must recolour nothing');
     });
   });
 

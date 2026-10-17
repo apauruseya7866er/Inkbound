@@ -1126,6 +1126,12 @@ class AppLocalizationsEs extends AppLocalizations {
   String get theme => 'Tema';
 
   @override
+  String get highlightColor => 'Highlight colour';
+
+  @override
+  String get highlightText => 'Highlight text';
+
+  @override
   String get fontSize => 'Tamaño de fuente';
 
   @override

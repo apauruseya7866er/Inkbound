@@ -1085,6 +1085,12 @@ class AppLocalizationsZh extends AppLocalizations {
   String get theme => '主题';
 
   @override
+  String get highlightColor => 'Highlight colour';
+
+  @override
+  String get highlightText => 'Highlight text';
+
+  @override
   String get fontSize => '字号';
 
   @override

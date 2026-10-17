@@ -436,6 +436,8 @@
 	"addFont": "Add font",
 	"couldntAddFont": "Couldn't add that font",
 	"theme": "Theme",
+	"highlightColor": "Highlight colour",
+	"highlightText": "Highlight text",
 	"fontSize": "Font size",
 	"lineHeight": "Line height",
 	"margin": "Margin",
