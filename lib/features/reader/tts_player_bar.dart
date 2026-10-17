@@ -337,10 +337,6 @@ class _SeekBarState extends State<_SeekBar> {
   /// position speech has actually reached.
   int? _dragging;
 
-  /// True once the pointer has moved far enough to count as a scrub, so the
-  /// release of a drag does not ALSO fire the tap that opens the player.
-  bool _dragged = false;
-
   @override
   void didUpdateWidget(_SeekBar oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -385,7 +381,11 @@ class _SeekBarState extends State<_SeekBar> {
       value: seekable
           ? 'Sentence ${shown + 1} of $total'
           : 'No sentences',
-      onTap: widget.onOpenPlayer,
+      // No semantic `onTap`: a screen-reader activation carries no position, so
+      // there is nothing to seek to, and binding it to "open the player" left
+      // the accessible path disagreeing with the sighted one. Stepping is
+      // already covered by onIncrease/onDecrease, and the expand button is a
+      // node of its own for getting into the player.
       onIncrease: seekable && total > 1 && !atEnd
           ? () => widget.onSeek!(shown + 1)
           : null,
@@ -401,25 +401,36 @@ class _SeekBarState extends State<_SeekBar> {
           ? 'Sentence ${(shown - 1).clamp(0, total - 1) + 1} of $total'
           : null,
       child: Tooltip(
-        message: 'Tap to open the audiobook player; drag to seek',
+        message: 'Tap to seek; drag to scrub',
         child: SizedBox(
           height: 24,
           child: LayoutBuilder(
             builder: (context, c) => GestureDetector(
               key: const ValueKey('compact-tts-progress'),
               behavior: HitTestBehavior.opaque,
-              onTap: () {
-                // A drag that ends here has already seeked; opening the player
-                // on top of that would be two answers to one gesture.
-                if (_dragged) {
-                  setState(() => _dragged = false);
-                  return;
-                }
-                widget.onOpenPlayer();
-              },
+              // Seeks, like the waveform in the full player and like every
+              // other audio player's progress bar.
+              //
+              // It used to open the player instead. The reasoning was that this
+              // strip is the widest thing in the compact bar and so a convenient
+              // large target - but a progress bar that navigates away is a
+              // progress bar that cannot be tapped to seek, which is the one
+              // gesture it exists for. It also contradicted this app's own
+              // waveform, where tap does seek. The expand button already opens
+              // the player and has its own hit target, so nothing was lost.
+              //
+              // Committed from the tap's own position on the way up, with no
+              // remembered value, so there is no stale one to seek to. A drag
+              // never reaches here: the drag recogniser wins and onTap is
+              // cancelled.
+              onTapUp: seekable && total > 1
+                  ? (d) {
+                      final v = _valueAt(d.localPosition.dx, c.maxWidth);
+                      if (v != null) widget.onSeek?.call(v.round());
+                    }
+                  : null,
               onHorizontalDragStart: seekable && total > 1
                   ? (d) {
-                      setState(() => _dragged = true);
                       final v = _valueAt(d.localPosition.dx, c.maxWidth);
                       if (v != null) setState(() => _dragging = v.round());
                     }

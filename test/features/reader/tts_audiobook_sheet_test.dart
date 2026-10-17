@@ -90,16 +90,28 @@ Widget _sheet(_FakeTtsCubit cubit) => MaterialApp(
 
 void main() {
   group('compact bar progress track', () {
-    testWidgets('a tap on the track opens the audiobook player', (tester) async {
+    testWidgets('a tap on the track seeks to the sentence under the finger', (
+      tester,
+    ) async {
+      // It used to open the player instead, on the reasoning that the strip is
+      // the widest thing in the bar and so a convenient open target. But a
+      // progress bar that navigates away is a progress bar you cannot tap to
+      // seek, and it contradicted the full player's waveform where tap does
+      // seek. Both surfaces now agree, and with every other audio player.
       final cubit = _FakeTtsCubit();
       var opened = 0;
       await tester.pumpWidget(_bar(cubit, onOpenPlayer: () => opened++));
 
-      await tester.tap(find.byKey(const ValueKey('compact-tts-progress')));
+      final track = find.byKey(const ValueKey('compact-tts-progress'));
+      final box = tester.renderObject<RenderBox>(track);
+      await tester.tapAt(box.localToGlobal(Offset(box.size.width * 0.75, 12)));
       await tester.pump();
 
-      expect(opened, 1);
-      expect(cubit.seeks, isEmpty, reason: 'a tap must not also seek');
+      expect(opened, 0, reason: 'a tap must not open the player');
+      expect(cubit.seeks, hasLength(1), reason: 'the tap commits one seek');
+      // Twelve sentences, so ~0.75 of the track is sentence 8 or 9 - anything
+      // past the middle proves the position came from the tap, not from 0.
+      expect(cubit.seeks.last, greaterThan(6));
       await cubit.close();
     });
 
@@ -119,7 +131,7 @@ void main() {
       await cubit.close();
     });
 
-    testWidgets('a drag scrubs instead of opening the player', (tester) async {
+    testWidgets('a drag scrubs to one seek on release', (tester) async {
       final cubit = _FakeTtsCubit();
       var opened = 0;
       await tester.pumpWidget(_bar(cubit, onOpenPlayer: () => opened++));
@@ -134,8 +146,37 @@ void main() {
       await gesture.up();
       await tester.pump();
 
-      expect(opened, 0, reason: 'a drag must not also open the player');
+      expect(opened, 0, reason: 'a drag must not open the player either');
       expect(cubit.seeks, hasLength(1), reason: 'the drag commits one seek');
+      expect(cubit.seeks.last, greaterThan(6));
+      await cubit.close();
+    });
+
+    testWidgets('the track matches the full player: tap seeks, both ways', (
+      tester,
+    ) async {
+      // The two surfaces are the same control and used to disagree - this one
+      // navigated, the waveform sought. Asserted together so the next person to
+      // make one of them clever has to break both at once and notice.
+      final cubit = _FakeTtsCubit();
+      await tester.pumpWidget(_bar(cubit, onOpenPlayer: () {}));
+
+      final track = find.byKey(const ValueKey('compact-tts-progress'));
+      final box = tester.renderObject<RenderBox>(track);
+
+      await tester.tapAt(box.localToGlobal(Offset(box.size.width * 0.25, 12)));
+      await tester.pump();
+      final nearStart = cubit.seeks.last;
+
+      await tester.tapAt(box.localToGlobal(Offset(box.size.width * 0.9, 12)));
+      await tester.pump();
+      final nearEnd = cubit.seeks.last;
+
+      expect(
+        nearEnd,
+        greaterThan(nearStart),
+        reason: 'the tapped position decides the sentence, as on the waveform',
+      );
       await cubit.close();
     });
   });
