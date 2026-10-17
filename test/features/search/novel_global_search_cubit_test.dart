@@ -96,9 +96,6 @@ class _FakeRepo implements CatalogueRepository {
   List<({String id, String name})> get loadedSources => loaded;
 
   @override
-  Map<String, String> get sourceLanguages => languages;
-
-  @override
   Future<({List<MediaItem> items, SourceOutcome outcome})> searchStatus(
     String query, {
     String category = 'sub',
