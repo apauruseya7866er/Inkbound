@@ -2,11 +2,23 @@ import 'package:hive/hive.dart';
 
 /// One selectable splash animation.
 class SplashStyleOption {
-  const SplashStyleOption({required this.id, required this.label});
+  const SplashStyleOption({
+    required this.id,
+    required this.label,
+    required this.asset,
+  });
 
   /// Persisted — never rename. Matches [SplashStyle.options].
   final String id;
   final String label;
+
+  /// The wordmark image this style reveals, as a bundled asset path.
+  ///
+  /// Carried on the option rather than hardcoded where the splash is drawn,
+  /// because there are two places that draw it — the splash itself and its
+  /// preview card in Settings — and a hardcoded path in both is how a style
+  /// ends up previewing artwork it does not actually play.
+  final String asset;
 }
 
 /// Which animation the splash plays.
@@ -29,14 +41,39 @@ class SplashStyle {
 
   /// [defaultId] first, so the picker leads with what a fresh install wears.
   ///
-  /// One option today. A second animated splash used to be offered here and
-  /// was drawn from the upstream project's logo geometry, which is not this
-  /// app's mark; it is gone rather than re-skinned. Its persisted id now falls
-  /// back to [defaultId] via [selectedId], so anyone who had picked it gets the
-  /// wordmark on the next launch.
+  /// Two options, and they differ only in the weight of the lettering: the same
+  /// wordmark, the same box, the same tracking, one cut at 400 and one at 700.
+  /// A second animated splash used to be offered here and was drawn from the
+  /// upstream project's logo geometry, which is not this app's mark; it is gone
+  /// rather than re-skinned. Its persisted id ("bankai") falls back to
+  /// [defaultId] via [selectedId], so anyone who had picked it gets the
+  /// wordmark on the next launch — which is also why the bold option needed a
+  /// fresh id rather than reusing that one.
   static const List<SplashStyleOption> options = [
-    SplashStyleOption(id: 'wordmark', label: 'Wordmark'),
+    SplashStyleOption(
+      id: 'wordmark',
+      label: 'Wordmark',
+      asset: 'assets/icon/wordmark.png',
+    ),
+    SplashStyleOption(
+      id: 'wordmark_bold',
+      label: 'Bold',
+      asset: 'assets/icon/wordmark_bold.png',
+    ),
   ];
+
+  /// The option [selectedId] names.
+  ///
+  /// Returns an option rather than null so a caller drawing the splash can
+  /// never be handed nothing to draw — [selectedId] already falls back, but
+  /// this closes the gap without the caller having to know that.
+  static SplashStyleOption get selectedOption {
+    final id = selectedId;
+    for (final o in options) {
+      if (o.id == id) return o;
+    }
+    return options.first;
+  }
 
   /// Falls back to [defaultId] for anything unknown, so a build that drops an
   /// option can't leave the splash with nothing to play.

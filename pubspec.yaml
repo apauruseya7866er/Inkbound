@@ -288,7 +288,10 @@ flutter:
     # require()/fetch shims + plugin loader that runs LNReader plugins on top.
     - assets/js/lnreader_harness.js
     # Brand wordmark — the same lettering as the icon, for header and splash.
+    # The bold cut is the second splash style (SplashStyle); same box and
+    # tracking as the regular one, so they differ only in weight.
     - assets/icon/wordmark.png
+    - assets/icon/wordmark_bold.png
     # Square app icon — shown on the About screen, the TV shell and the
     # Discord rich-presence CDN URL.
     - assets/icon/app_icon.png

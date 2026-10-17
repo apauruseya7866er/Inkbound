@@ -8,6 +8,7 @@ import '../../core/mode/novel_only.dart';
 import '../../core/state/active_source_cubit.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text.dart';
+import '../../core/ui/splash_style.dart';
 import '../sources/providers_hub_screen.dart';
 import 'onboarding_screen_tv.dart';
 import '../../l10n/l10n.dart';
@@ -120,7 +121,13 @@ class _SplashScreenState extends State<SplashScreen>
                           ],
                         ).createShader(rect),
                         child: Image.asset(
-                          'assets/icon/wordmark.png',
+                          // Which wordmark this launch reveals is the user's
+                          // pick from Settings -> Interface. Reading it here
+                          // rather than hardcoding is what makes the picker do
+                          // anything at all; safe to read this early because
+                          // SplashStyle.selectedId tolerates a closed box,
+                          // which it always is while initDependencies() runs.
+                          SplashStyle.selectedOption.asset,
                           fit: BoxFit.contain,
                         ),
                       ),

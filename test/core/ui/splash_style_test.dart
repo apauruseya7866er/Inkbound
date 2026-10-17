@@ -66,6 +66,48 @@ void main() {
     expect(ids.toSet().length, ids.length);
   });
 
+  test('every option ships the wordmark it names', () {
+    // The splash and its preview card both draw option.asset. A missing file
+    // does not throw at build time - Flutter logs and paints an error box - so
+    // the splash would come up blank on every cold start instead of failing.
+    for (final o in SplashStyle.options) {
+      expect(
+        File(o.asset).existsSync(),
+        isTrue,
+        reason: '${o.id} points at a missing wordmark: ${o.asset}',
+      );
+    }
+  });
+
+  test('the options really are different images', () {
+    // Two styles pointing at one asset would be a silent no-op: the picker
+    // would offer a choice that changes nothing on screen.
+    final assets = SplashStyle.options.map((o) => o.asset).toSet();
+    expect(assets.length, SplashStyle.options.length);
+  });
+
+  group('selectedOption', () {
+    test('resolves the stored choice to its option', () async {
+      await SplashStyle.select('wordmark_bold');
+      expect(SplashStyle.selectedOption.id, 'wordmark_bold');
+      expect(SplashStyle.selectedOption.asset, 'assets/icon/wordmark_bold.png');
+    });
+
+    test('resolves an id this build no longer ships to the default', () {
+      Hive.box(SplashStyle.boxName).put('splashStyleId', 'bankai');
+      expect(SplashStyle.selectedOption.id, SplashStyle.defaultId);
+    });
+
+    test('is an option even before the box is open', () async {
+      // Read from the splash build while initDependencies() is still opening
+      // boxes. selectedId already tolerates the closed box; this asserts the
+      // caller cannot be handed null either.
+      await Hive.close();
+      expect(() => SplashStyle.selectedOption, returnsNormally);
+      expect(SplashStyle.selectedOption.id, SplashStyle.defaultId);
+    });
+  });
+
   group('read before the box is open', () {
     // The splash is on screen WHILE initDependencies() is still opening boxes,
     // so this is genuinely read against a closed box. Hive.box() throws there,

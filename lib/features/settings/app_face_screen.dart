@@ -250,9 +250,9 @@ class _AppIconCard extends StatelessWidget {
 
 /// One splash choice, previewing itself on a loop.
 ///
-/// A still frame would be useless here — the whole difference between the two
-/// is motion, and the user only ever sees it at launch. So each card runs the
-/// real animation, at the real timings, on a slow repeat.
+/// A still frame would be weak here — the styles share one animation and differ
+/// in the lettering, and the user only ever sees it at launch. So each card
+/// runs the real animation, at the real timings, on a slow repeat.
 class _SplashCard extends StatefulWidget {
   const _SplashCard({
     required this.option,
@@ -316,7 +316,7 @@ class _SplashCardState extends State<_SplashCard>
                     child: FractionallySizedBox(
                       widthFactor: 0.82,
                       child: Image.asset(
-                        'assets/icon/wordmark.png',
+                        widget.option.asset,
                         fit: BoxFit.contain,
                       ),
                     ),

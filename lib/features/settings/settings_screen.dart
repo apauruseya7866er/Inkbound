@@ -1060,7 +1060,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: 'Icon, splash & banner',
         subtitle: 'How the app looks before you open it',
         keywords:
-            'app icon launcher splash startup animation bankai wordmark '
+            'app icon launcher splash startup animation bankai wordmark bold '
             'home banner card panels face',
         onTap: () => _push(const AppFaceScreen()),
       ),

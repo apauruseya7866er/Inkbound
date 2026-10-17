@@ -356,43 +356,82 @@ WORDMARK_TEXT = "INKBOUND"
 TRACKING = 0.30  # extra space between glyphs, in ems
 
 
-def _wordmark_font():
+def _apply_weight(font, weight):
+    """Set a variable font's weight axis, leaving every other axis at default.
+
+    Built from the font's own axis metadata rather than a fixed positional list:
+    Inter has two axes (optical size, weight) so `[weight]` would put the weight
+    on the optical size, and a different face may order or count them
+    differently. Falls back to leaving the font alone if it has no variation
+    axes at all.
+    """
+    try:
+        axes = font.get_variation_axes()
+    except (AttributeError, OSError):
+        return font
+    if not axes:
+        return font
+
+    values = []
+    for axis in axes:
+        name = axis.get("name", b"")
+        if isinstance(name, bytes):
+            name = name.decode("latin-1", "replace")
+        if name.strip().lower() in ("weight", "wght"):
+            values.append(max(axis["minimum"], min(axis["maximum"], weight)))
+        else:
+            values.append(axis["default"])
+    try:
+        font.set_variation_by_axes(values)
+    except (AttributeError, OSError):
+        pass
+    return font
+
+
+def _wordmark_font(size, weight=400):
     """Inter, which the app already bundles as its UI face, so the wordmark is
     set in the same typeface the interface is. Falls back to a system face if
-    the bundled font is missing so the script still runs on a partial checkout."""
+    the bundled font is missing so the script still runs on a partial checkout.
+
+    Inter is a variable font with a 100-900 weight axis, so the bold wordmark is
+    a real Bold rather than a Regular faked out with a stroke.
+    """
     for rel in ("assets/fonts/Inter.ttf", "assets/fonts/Nunito-Regular.ttf"):
         path = os.path.join(ROOT, rel)
         if os.path.exists(path):
-            return path
-    return "C:/Windows/Fonts/segoeui.ttf"
+            font = ImageFont.truetype(path, size)
+            return _apply_weight(font, weight) if weight != 400 else font
+    return ImageFont.truetype("C:/Windows/Fonts/segoeuib.ttf", size)
 
 
-def wordmark(width, height, colour=CREAM, pad=0.04):
+def wordmark(width, height, colour=CREAM, pad=0.04, weight=400):
     """INKBOUND, letterspaced, on transparency.
 
     Sized to fit `width` x `height` rather than cropped to the ink, so every
     caller gets the same optical size regardless of the box it asked for.
+
+    `weight` is a variable-font weight, not a point size. Because both cuts are
+    set to fill the same box, the bold one sits at the same optical size as the
+    regular one instead of looking like a larger word.
     """
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     box_w, box_h = int(width * (1 - 2 * pad)), int(height * (1 - 2 * pad))
 
-    size = box_h
-    font = ImageFont.truetype(_wordmark_font(), size)
-    advance = font.getlength("A")
-    track = advance * TRACKING
-    natural = sum(font.getlength(c) for c in WORDMARK_TEXT) + track * (
-        len(WORDMARK_TEXT) - 1
-    )
-    scale = min(box_w / natural, 1.0) if natural else 1.0
-    if scale < 1.0:
-        size = max(8, int(size * scale))
-        font = ImageFont.truetype(_wordmark_font(), size)
-        advance = font.getlength("A")
-        track = advance * TRACKING
-        natural = sum(font.getlength(c) for c in WORDMARK_TEXT) + track * (
+    def measure(font):
+        track = font.getlength("A") * TRACKING
+        return sum(font.getlength(c) for c in WORDMARK_TEXT) + track * (
             len(WORDMARK_TEXT) - 1
         )
 
+    size = box_h
+    font = _wordmark_font(size, weight)
+    scale = min(box_w / measure(font), 1.0) if measure(font) else 1.0
+    if scale < 1.0:
+        size = max(8, int(size * scale))
+        font = _wordmark_font(size, weight)
+
+    natural = measure(font)
+    track = font.getlength("A") * TRACKING
     ascent, descent = font.getmetrics()
     x = (width - natural) / 2
     y = (height - (ascent + descent)) / 2
@@ -584,6 +623,10 @@ def emit_in_app():
     # mode-switch transition draw it over their own backgrounds.
     save(artwork(PRIMARY, 512), "assets/icon/logo_mark.png")
     save(wordmark(900, 200), "assets/icon/wordmark.png")
+    # The bold cut of the same lettering, for the second splash style. Same box
+    # and same tracking as the regular one so the two sit at one optical size
+    # and differ only in weight — that is the whole difference between them.
+    save(wordmark(900, 200, weight=700), "assets/icon/wordmark_bold.png")
     # Launcher-icon previews for the in-app picker, one per slot, in SLOTS order.
     # Mipmaps are not reachable from Dart, so each ships as a normal asset.
     for _, mark, _ in SLOTS:
