@@ -39,7 +39,20 @@ import '../../l10n/l10n.dart';
 /// Mihon sources have NO enable/disable switch — a tap sets the source
 /// active, matching the Aniyomi screen exactly.
 class MihonSourcesScreen extends StatefulWidget {
-  const MihonSourcesScreen({super.key});
+  const MihonSourcesScreen({super.key, this.uninstallFn});
+
+  /// Replaces [SourceUninstaller.uninstall] for this screen's uninstall flow.
+  ///
+  /// `MihonRepoTab` already takes fetch/install/uninstall seams; this screen did
+  /// not pass them down, and the uninstall was reached only through a static
+  /// call. That made the flow untestable: [SourceUninstaller] ends in real file
+  /// I/O against the installed-source APK, and `testWidgets` runs its body in a
+  /// fake-async zone, so that I/O never resolves and the test hangs rather than
+  /// failing. Injecting it makes the screen's own contract - confirm, uninstall,
+  /// then show the empty state - assertable with no filesystem at all.
+  ///
+  /// Null in the app, which is the point: production keeps the real uninstaller.
+  final Future<SourceUninstallResult> Function(String sourceId)? uninstallFn;
 
   @override
   State<MihonSourcesScreen> createState() => _MihonSourcesScreenState();
@@ -106,6 +119,7 @@ class _MihonSourcesScreenState extends State<MihonSourcesScreen> {
       repoUrls: _mihonRepoUrls,
       onAddRepo: () => _showAddMihonRepoDialog(context),
       onRemoveRepo: _removeMihonRepo,
+      uninstallFn: widget.uninstallFn,
     );
   }
 }
@@ -119,11 +133,13 @@ class _MihonScreenPhoneView extends StatefulWidget {
     required this.repoUrls,
     required this.onAddRepo,
     required this.onRemoveRepo,
+    this.uninstallFn,
   });
 
   final List<String> repoUrls;
   final VoidCallback onAddRepo;
   final void Function(String url) onRemoveRepo;
+  final Future<SourceUninstallResult> Function(String sourceId)? uninstallFn;
 
   @override
   State<_MihonScreenPhoneView> createState() => _MihonScreenPhoneViewState();
@@ -202,7 +218,12 @@ class _MihonScreenPhoneViewState extends State<_MihonScreenPhoneView> {
                 children: [
                   ListView(
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
-                    children: [_MihonInstalledGroup(query: _query)],
+                    children: [
+                      _MihonInstalledGroup(
+                        query: _query,
+                        uninstallFn: widget.uninstallFn,
+                      ),
+                    ],
                   ),
                   // MihonRepoTab brings its own scrollable ListView.builder +
                   // padding; wrapping it in another ListView gives the inner
@@ -229,9 +250,13 @@ class _MihonScreenPhoneViewState extends State<_MihonScreenPhoneView> {
 // ---------------------------------------------------------------------------
 
 class _MihonInstalledGroup extends StatefulWidget {
-  const _MihonInstalledGroup({this.query = ''});
+  const _MihonInstalledGroup({this.query = '', this.uninstallFn});
 
   final String query;
+
+  /// Threaded down to the row that owns the confirm dialog. See
+  /// [MihonSourcesScreen.uninstallFn].
+  final Future<SourceUninstallResult> Function(String sourceId)? uninstallFn;
 
   @override
   State<_MihonInstalledGroup> createState() => _MihonInstalledGroupState();
@@ -355,11 +380,13 @@ class _MihonInstalledGroupState extends State<_MihonInstalledGroup> {
                                 _MihonSourceRow(
                                   source: groups[i].first,
                                   activeId: activeId,
+                                  uninstallFn: widget.uninstallFn,
                                 )
                               else
                                 _MihonExtensionGroup(
                                   sources: groups[i],
                                   activeId: activeId,
+                                  uninstallFn: widget.uninstallFn,
                                 ),
                             ],
                           ],
@@ -382,10 +409,15 @@ class _MihonInstalledGroupState extends State<_MihonInstalledGroup> {
 /// source, so activate / settings / uninstall behave identically (uninstall
 /// removes the whole extension — all its languages).
 class _MihonExtensionGroup extends StatefulWidget {
-  const _MihonExtensionGroup({required this.sources, required this.activeId});
+  const _MihonExtensionGroup({
+    required this.sources,
+    required this.activeId,
+    this.uninstallFn,
+  });
 
   final List<MihonProvider> sources;
   final String activeId;
+  final Future<SourceUninstallResult> Function(String sourceId)? uninstallFn;
 
   @override
   State<_MihonExtensionGroup> createState() => _MihonExtensionGroupState();
@@ -474,7 +506,11 @@ class _MihonExtensionGroupState extends State<_MihonExtensionGroup> {
                           thickness: 0.5,
                           color: AppColors.hairline,
                         ),
-                        _MihonSourceRow(source: s, activeId: widget.activeId),
+                        _MihonSourceRow(
+                          source: s,
+                          activeId: widget.activeId,
+                          uninstallFn: widget.uninstallFn,
+                        ),
                       ],
                     ],
                   ),
@@ -498,10 +534,17 @@ class _MihonSourceRow extends StatefulWidget {
     required this.activeId,
     this.updateLookupFn,
     this.applyUpdateFn,
+    this.uninstallFn,
   });
 
   final MihonProvider source;
   final String activeId;
+
+  /// Test seam: replaces [SourceUninstaller.uninstall] in this row's confirm
+  /// flow. Null in the app, which is the point — production keeps the real
+  /// uninstaller. See [MihonSourcesScreen.uninstallFn] for why the flow cannot
+  /// be driven any other way from a widget test.
+  final Future<SourceUninstallResult> Function(String sourceId)? uninstallFn;
 
   /// Test seam: overrides the live `MihonManager.updateFor` lookup. When
   /// non-null the button also skips the `AnimatedBuilder` so widget tests
@@ -567,7 +610,8 @@ class _MihonSourceRowState extends State<_MihonSourceRow> {
     // The delete itself lives in SourceUninstaller, shared with the source
     // health screen: one place that knows every ecosystem's uninstall, so it
     // cannot drift into "uninstalled from here, back again after a restart".
-    final res = await SourceUninstaller.uninstall(widget.source.sourceId);
+    final res = await (widget.uninstallFn?.call(widget.source.sourceId) ??
+        SourceUninstaller.uninstall(widget.source.sourceId));
 
     if (!context.mounted) return;
     final messenger = ScaffoldMessenger.of(context)..clearSnackBars();

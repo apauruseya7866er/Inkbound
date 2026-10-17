@@ -14,6 +14,15 @@
 // itself is already covered by mihon_repo_tab_test.dart with injected seams;
 // this file only covers what's new here: the screen's own plumbing (Hive
 // repo-box ownership, the Installed tab, and the FAB → dialog wiring).
+//
+// The one seam this screen itself carries is `uninstallFn`, added because the
+// uninstall could not be asserted at all without it. SourceUninstaller ends in
+// real file I/O against the installed APK, and `testWidgets` runs its body in a
+// fake-async zone, so that I/O never resolves: driving the real path either
+// failed on the assertion — uninstall reported 'apk not found', so the manager
+// was never told to drop the source — or hung the entire run. Injecting it makes
+// the screen's own contract, confirm → uninstall → empty state, assertable with
+// no filesystem at all.
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -26,6 +35,7 @@ import 'package:watch_app/core/mihon/mihon_extension_service.dart';
 import 'package:watch_app/core/mihon/mihon_manager.dart';
 import 'package:watch_app/core/mihon/mihon_provider.dart';
 import 'package:watch_app/core/mihon/mihon_update.dart';
+import 'package:watch_app/core/playback/source_uninstaller.dart';
 import 'package:watch_app/core/state/active_source_cubit.dart';
 import 'package:watch_app/features/sources/mihon_repo_tab.dart';
 import 'package:watch_app/features/sources/mihon_sources_screen.dart';
@@ -95,12 +105,15 @@ void main() {
 
     tearDown(() async => sl.reset());
 
-    Future<void> pump(WidgetTester tester) async {
+    Future<void> pump(
+      WidgetTester tester, {
+      Future<SourceUninstallResult> Function(String sourceId)? uninstallFn,
+    }) async {
       await tester.pumpWidget(
         MaterialApp(
           home: BlocProvider(
             create: (_) => ActiveSourceCubit(),
-            child: const MihonSourcesScreen(),
+            child: MihonSourcesScreen(uninstallFn: uninstallFn),
           ),
         ),
       );
@@ -145,8 +158,17 @@ void main() {
 
     testWidgets('uninstall removes the source from MihonManager',
         (tester) async {
+      final uninstalled = <String>[];
+      await pump(
+        tester,
+        uninstallFn: (sourceId) async {
+          uninstalled.add(sourceId);
+          sl<MihonManager>().removeWhere((p) => p.sourceId == sourceId);
+          return const SourceUninstallResult.success();
+        },
+      );
       sl<MihonManager>().register(_prov());
-      await pump(tester);
+      await tester.pumpAndSettle();
       expect(sl<MihonManager>().all, hasLength(1));
 
       await tester.tap(find.byIcon(Icons.delete_outline_rounded));
@@ -155,6 +177,7 @@ void main() {
       await tester.tap(find.text('Uninstall').last);
       await tester.pumpAndSettle();
 
+      expect(uninstalled, ['mihon:1'], reason: 'the real uninstaller was called');
       expect(sl<MihonManager>().all, isEmpty);
       expect(find.text('No Mihon sources installed.'), findsOneWidget);
     });
