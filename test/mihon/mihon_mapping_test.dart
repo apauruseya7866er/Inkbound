@@ -33,7 +33,7 @@ void main() {
       expect(item.cover, isNull);
     });
 
-    test('non-empty headers are forwarded as coverHeaders, unmodified', () {
+    test('non-empty headers are forwarded, plus the native marker', () {
       final item = mediaItemFromSManga(
         {
           'url': 'https://source.test/manga/3',
@@ -43,7 +43,14 @@ void main() {
         sourceId: 'mihon:111',
         headers: {'Referer': 'https://source.test/'},
       );
-      expect(item.coverHeaders, {'Referer': 'https://source.test/'});
+      // The passed-in header survives, and `x-mihon-src` is added on top - it is
+      // how the cover and page providers know to fetch through the native,
+      // cookie-carrying path instead of plain HTTP. Asserting the whole map
+      // against only the caller's headers is what let this drift stale when the
+      // marker landed; asserting both halves keeps the coverage and states the
+      // actual contract.
+      expect(item.coverHeaders, containsPair('Referer', 'https://source.test/'));
+      expect(item.coverHeaders, containsPair('x-mihon-src', '111'));
     });
 
     test('empty headers produce null coverHeaders', () {
@@ -121,14 +128,16 @@ void main() {
       expect(detail.studios, ['Solo Artist']);
     });
 
-    test('non-empty headers are forwarded as coverHeaders on detail', () {
+    test('non-empty headers are forwarded on detail, plus the native marker',
+        () {
       final detail = mediaDetailFromSManga(
         {'url': 'u', 'title': 'T', 'status': 1},
         const [],
         sourceId: 'mihon:10',
         headers: {'Referer': 'https://source.test/'},
       );
-      expect(detail.coverHeaders, {'Referer': 'https://source.test/'});
+      expect(detail.coverHeaders, containsPair('Referer', 'https://source.test/'));
+      expect(detail.coverHeaders, containsPair('x-mihon-src', '10'));
     });
 
     test('status 2 -> completed, 5 -> cancelled, 6 -> hiatus, unknown -> unknown', () {
