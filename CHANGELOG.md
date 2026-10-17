@@ -8,6 +8,94 @@ what went wrong.
 Versions are listed oldest first. The release date is the day the signed APK was
 published.
 
+## 4.2.2 - 2026-10-17
+
+### The audiobook player, reachable and honest about where you are
+
+Four things in the read-aloud player and the chapter it floats over, all
+reported from one reading session.
+
+**The cover did nothing.** It is the largest thing in the player and it had no
+tap handler at all, so the only way into the transcript was the 24-pixel button
+in the header. Tapping the cover now opens it. Coming back the other way, there
+is no cover to tap on the transcript - so "READING NOW" in the header does it
+there, and only there, since in the player the cover already offers that same
+move.
+
+**Pull the player down to go back to the text.** Drag it downwards and it
+dismisses onto the exact sentence being read, not the top of the chapter. That
+measurement already existed for following the voice automatically; it had three
+rules attached that are right for automatic following and wrong for an explicit
+ask - narration has to be playing, follow-narration has to be on, and there is a
+grace period so the view will not fight your finger. All three are bypassed,
+because you just asked.
+
+**The transcript stopped following.** Opening it used to land at the top of the
+chapter, and it only started tracking the voice once you had scrolled once. The
+retry that should have covered the first frame gave up instead and never tried
+again, so while narrating - when the next sentence eventually rebuilds the view
+and retries for you - it looked fine, and while paused it did not. It follows
+now, including paused.
+
+### Coming back to a chapter keeps the listen
+
+Narration deliberately survives leaving a chapter - the service keeps reading,
+and dismissing the player is meant to hand you back to where you were. But the
+controls are per-screen state, so a chapter you returned to was still being read
+aloud with no controls for it at all. That reads as the feature having stopped,
+and the only way to get the controls back was to stop - which discards the
+position, so the workaround cost you the thing you were trying to keep. The bar
+now comes back on its own when the chapter is already being narrated, and the
+voice carries on where it was.
+
+A related fix while we were here: Continue Reading could rewind a live listen.
+The saved position is only written when the position is flushed, so while a
+chapter is being read the saved copy lags behind, and resuming would seek to
+where the voice *used* to be.
+
+### Hiding a sentence stops throwing you to the top
+
+Two explicit decisions, both wrong for reading and both removed. Hiding a
+sentence stopped the narration outright, and jumped the page to the top of the
+chapter. Hiding five sentences at the bottom of a chapter therefore cost five
+round trips down there.
+
+The stop was guarding something real - the voice is part-way through an
+utterance built from the old text, and hiding a sentence renumbers everything
+after it, so simply swapping the text underneath a running voice leaves the two
+disagreeing about where it is. It is now answered by finding the sentence again
+by its own words, which survive renumbering where a number does not, and
+restarting from there. The page comes back to where you were instead of the top.
+
+### A highlight you can see, and one you can pick
+
+The read-aloud highlight was a single blue box with a heavy blue border drawn
+around the whole sentence. Wrapping over three lines, that box left a wide
+empty margin beside the short first line, so the mark stopped lining up with the
+words it was describing. Each line now gets its own rounded box, the way
+`box-decoration-break: clone` does it in CSS, so the shape hugs the text instead
+of fencing it. The heavy border is gone.
+
+Both the colour behind the sentence and the colour of the words are now your
+choice, in Reader Settings - in the standalone page and in the reader's own
+settings sheet, under Follow narration. Six washes and seven inks; blue is the
+default, which is also what the highlight used before, so nothing changes until
+you pick something.
+
+Each colour carries its own strength, which is not fussiness: at one shared
+strength, coral is clearly readable on a black page and blue is very nearly
+not, and the relationship reverses for the pale colours. A single number would
+have left half of them useless. There is no black ink - on the dark themes that
+is not a style, it is an invisible sentence - and **Default** leaves the
+sentence in the page's own colour, as it always has.
+
+### Tapping the progress bar seeks
+
+The compact read-aloud bar's progress track opened the audiobook player when
+tapped. It also contradicted this app's own waveform, where tapping the track
+seeks - the same control, two answers, in one app. It seeks now, as it does
+everywhere else, and the expand button remains the way into the player.
+
 ## 4.2.1 - 2026-10-17
 
 ### One mark, everywhere it appears
