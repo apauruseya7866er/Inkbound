@@ -8,6 +8,52 @@ what went wrong.
 Versions are listed oldest first. The release date is the day the signed APK was
 published.
 
+## 4.2.1 - 2026-10-17
+
+### One mark, everywhere it appears
+
+The app had three different identities in it, and the two that actually reach
+you belonged to the project this was forked from. The launcher icon, the iOS and
+tvOS icons, the TV banner and the in-app mark were each drawn separately, and
+the iOS icon and the TV banner were still the upstream crescent and wordmark -
+so an iPhone showed a different app from the one the About screen described, and
+the TV banner was a stranger's name.
+
+All of them are now one mark: an open book with the bookmark ribbon in its
+gutter. It is the launcher icon on both slots, the iOS icon at all twenty sizes,
+the tvOS icon and Top Shelf images, the TV banner, the splash, the About screen
+and the Home header.
+
+Two launcher icons ship, as before, and the picker still offers both. The
+default is the book on its own. The second slot is a cat reading it, for readers
+who want the less serious one. The icon ids and their aliases are unchanged -
+they live in your phone's preferences and cannot be renamed once shipped - so
+"crescent", which used to name a crescent and then a cat, now names the book.
+
+### A second splash
+
+Settings -> Interface -> Icon, splash & banner now offers two splashes:
+**Wordmark** and **Bold**. Same lettering, same box, same spacing, the second
+set in a heavier cut. The bold is a real Bold from the variable weight axis in
+the bundled Inter, not the same cut with a stroke drawn over it.
+
+Picking one now does something. The splash and its preview card both had the
+wordmark's filename written into them by hand, so with a single option on offer
+the setting looked wired up and could not have worked.
+
+### Fixes
+
+- **The Home header no longer overflows on a narrow phone.** On a 320dp screen
+  the header's five controls and the source switcher wanted 324px of a 288px
+  row, and the wordmark was squeezed to nothing width while the row still
+  overflowed. The wordmark now scales down instead of disappearing, the source
+  switcher ellipsizes inside whatever share it is given, and the five buttons
+  keep their full tap targets.
+- **The splash mark no longer disappears on a narrow phone.** Same cause, in the
+  switcher's own capsule: the ecosystem tag and the drop arrow were rigid and
+  could not compress past their own children, which overflowed once the capsule
+  itself was given less room.
+
 ## 4.2.0 - 2026-10-10
 
 ### Clear out sources that have stopped working
