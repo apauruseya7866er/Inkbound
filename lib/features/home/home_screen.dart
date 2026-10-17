@@ -639,7 +639,14 @@ class _HomeViewState extends State<_HomeView>
             // mean digging through Settings. Align sizes to the image, so
             // the tap area is the wordmark itself and the rest of the row
             // is untouched.
-            Expanded(
+            //
+            // Flexible, not Expanded, and scaled rather than squashed. On the
+            // narrowest phone the five actions want 174px of a 288px row and
+            // the switcher up to another 150, so an Expanded wordmark was
+            // handed 0px and the brand vanished - while the row still
+            // overflowed by 36px, because Expanded can only shrink its own
+            // share, it cannot make the inflexible children smaller.
+            Flexible(
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: GestureDetector(
@@ -650,10 +657,17 @@ class _HomeViewState extends State<_HomeView>
                     // 48px minimum tap target, and vertical padding alone
                     // cannot shift a left-aligned image.
                     padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Image.asset(
-                      'assets/icon/wordmark.png',
-                      height: 22,
-                      fit: BoxFit.contain,
+                    child: FittedBox(
+                      // scaleDown, not contain: the artwork keeps its 22px
+                      // where there is room and gives up height only once the
+                      // row cannot give it any width.
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Image.asset(
+                        'assets/icon/wordmark.png',
+                        height: 22,
+                        fit: BoxFit.contain,
+                      ),
                     ),
                   ),
                 ),
@@ -664,7 +678,13 @@ class _HomeViewState extends State<_HomeView>
             _notificationBell(context),
             const HomeSearchAction(),
             const HomeNovelSearchAction(),
-            const HomeSourceSwitcherSlot(),
+            // Flexible for the same reason, and for a second one: the chip is
+            // capped at 150px to keep it from squeezing the wordmark, but that
+            // cap is the widest thing in the row. Letting it ellipsize inside
+            // its own share is what keeps a narrow phone from overflowing at
+            // all. The five buttons above stay rigid - a header that overflows
+            // is a bug, but a 40dp tap target is a worse one.
+            const Flexible(child: HomeSourceSwitcherSlot()),
           ],
         ),
       ),

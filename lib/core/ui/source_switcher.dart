@@ -607,13 +607,23 @@ class SourceSwitcher extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            tag,
-            style: TextStyle(
-              fontSize: 9,
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-              color: tagColor,
+          // Both labels flex, not just the name. This chip is handed whatever
+          // the Home header has left over, and on a narrow phone that can be
+          // barely more than the gaps and the arrow: with a rigid tag the Row
+          // could not compress past its own children and overflowed the chip
+          // by 15px. Loose fit, so both keep their natural width whenever there
+          // is room and only ellipsize when there is not.
+          Flexible(
+            child: Text(
+              tag,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.4,
+                color: tagColor,
+              ),
             ),
           ),
           const SizedBox(width: 6),
