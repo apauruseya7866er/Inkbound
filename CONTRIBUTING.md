@@ -44,6 +44,27 @@ includeEmulatorAbis=true
 
 Then `flutter run` or `flutter build apk --release` as usual.
 
+## Changing the logo, splash or banner
+
+Every image of the brand — both launcher icons, the adaptive and monochrome layers, the iOS AppIcon set, the tvOS brand assets, the Android TV banner, the Top Shelf images, the splash mark and the in-app picker previews — is generated from one description of the mark:
+
+```bash
+python tool/gen_brand_assets.py   # run from the repository root; needs Pillow
+```
+
+Edit the geometry in that script, not the PNGs. It is deterministic, so re-running it on an unchanged tree writes identical bytes and leaves git clean.
+
+Do **not** use `dart run flutter_launcher_icons` as the regeneration path. That key is still in `pubspec.yaml` because the package is a dev dependency and people reach for it out of habit, but it only knows about one flat source image — it would overwrite the iOS set and the Android mipmaps and silently drop the adaptive, monochrome, second-slot and TV assets.
+
+Two things the script's filename choices will trip you up on:
+
+- The **brand mark is `plain`** (the book and ribbon, no cat). The cat is the alternate, reachable from Settings → Interface. That is one constant — `PRIMARY` at the top of the script — and the `SLOTS` table below it maps each frozen icon id to the artwork it currently carries.
+- Icon **ids and activity-alias names are frozen**, the artwork they point at is not. The default slot's id is still `crescent` and its alias is still `MainActivityCrescent`, while the mipmap it wears is `ic_launcher_plain`. Ids are written to users' phones; resource names are internal. Which mark an id carries has already changed more than once, so `SLOTS`, `AppIconService.options` and the manifest's `android:icon` on each alias have to agree — change one and you must change all three.
+
+Android adaptive icons use PNG layers here, not vectors as they once did, because the mark carries a soft drop shadow a flat `VectorDrawable` cannot express.
+
+If you change the plate gradient, `ic_launcher_bg` in `android/app/src/main/res/values/colors.xml` has to move with it — it is the flat background layer behind the masked artwork.
+
 ## Novel-only flag
 
 Anime and manga code is intentionally still compiled. Don't delete those enum cases or branches; gate behavior through `lib/core/mode/novel_only.dart`. See [FORK.md](FORK.md) for why.

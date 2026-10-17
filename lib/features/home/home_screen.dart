@@ -126,9 +126,9 @@ class _HomeViewState extends State<_HomeView>
   bool _resumePrewarmed = false;
 
   // ── Logo-strike mode transition ──────────────────────────────────────────
-  // Tapping a mode card runs a full-screen overlay: the Zangetsu mark springs
-  // in at centre behind a scrim, a red glow pulses and a steel glint sweeps the
-  // blade, the mode swaps hidden at that peak, then it reveals. Self-contained —
+  // Tapping a mode card runs a full-screen overlay: the Inkbound mark springs
+  // in at centre behind a scrim, a red glow pulses and a white glint sweeps
+  // across it, the mode swaps hidden at that peak, then it reveals. Self-contained —
   // see [_enterMode] / [_slashOverlay].
   late final AnimationController _slashCtrl;
   bool _slashing = false;
@@ -1485,7 +1485,7 @@ class _HomeViewState extends State<_HomeView>
 
   /// Full-screen logo-strike overlay: the mark springs in at centre behind a
   /// scrim (peaking at the midpoint to hide the content swap), a red glow pulses
-  /// and a steel glint sweeps the blade at the strike. Absorbs taps for its
+  /// and a white glint sweeps across it at the strike. Absorbs taps for its
   /// ~600ms so the switch can't be double-fired.
   Widget _slashOverlay() {
     const logoSize = 152.0;

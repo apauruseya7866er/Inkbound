@@ -34,12 +34,19 @@
          Settings → Apps, notifications, recents and share sheets, and it cannot
          follow the user's pick: Android resolves it at install time, while the
          <activity-alias> icons further down only ever affect the home screen.
-         So it names the current mark and stays there — someone who picks Katana
-         or Classic changes their home screen, not this. -->
+         So it names the current mark and stays there — someone who picks the
+         plain book changes their home screen, not this.
+
+         The resource is ic_launcher_plain because that is the brand mark, but
+         the persisted icon id for this slot is still "crescent": that id is
+         written into prefs on users' phones and cannot be renamed once
+         shipped. Which mark an id carries has changed once already — "crescent"
+         wore a crescent, then a cat, and is now the plain book. See
+         AppIconService.defaultId and tool/gen_brand_assets.py's SLOTS. -->
     <application
         android:label="Inkbound"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher_crescent"
+        android:icon="@mipmap/ic_launcher_plain"
         android:banner="@drawable/tv_banner"
         android:networkSecurityConfig="@xml/network_security_config"
         android:enableOnBackInvokedCallback="false">
@@ -172,13 +179,20 @@
              time and cannot be changed at runtime.
 
              Renaming or removing an alias orphans it on users' home screens, so
-             these names are permanent once shipped. -->
+             these names are permanent once shipped — which is why they read
+             "Crescent" and "Default" long after the artwork stopped being a
+             crescent or a katana. The alias names and the persisted icon ids are
+             both frozen; only the mipmaps they point at change.
+
+             Crescent is the one shipping android:enabled="true", so it is the
+             icon a fresh install gets, and it wears the plain book. Default is
+             the alternate and wears the cat. -->
         <activity-alias
             android:name=".MainActivityCrescent"
             android:targetActivity=".MainActivity"
             android:exported="true"
             android:enabled="true"
-            android:icon="@mipmap/ic_launcher_crescent"
+            android:icon="@mipmap/ic_launcher_plain"
             android:label="Inkbound">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -190,7 +204,7 @@
             android:targetActivity=".MainActivity"
             android:exported="true"
             android:enabled="false"
-            android:icon="@mipmap/ic_launcher"
+            android:icon="@mipmap/ic_launcher_cat"
             android:label="Inkbound">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

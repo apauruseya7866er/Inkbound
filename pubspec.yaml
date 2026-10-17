@@ -240,8 +240,18 @@ dependency_overrides:
   # forcing 0.7.1 unblocks resolution without affecting the Android build.
   js: ^0.7.1
 
-# App launcher icon (Zangetsu logo). Regenerate with:
-#   dart run flutter_launcher_icons
+# App launcher icons. tool/gen_brand_assets.py is the source of truth and
+# writes every target: the Android mipmaps and adaptive layers for both icon
+# slots, the monochrome layers, the iOS AppIcon set, the tvOS brand assets, the
+# TV banner and the bundled in-app previews. Run it from the repository root:
+#   python tool/gen_brand_assets.py
+#
+# This key is kept because the package is still a dev dependency and people
+# reach for `dart run flutter_launcher_icons` out of habit. Do NOT use it as
+# the regeneration path: it only knows about one flat source image, so it would
+# overwrite the iOS set and the Android mipmaps and drop the adaptive,
+# monochrome, second-slot and TV assets on the floor. If you run it anyway, run
+# gen_brand_assets.py afterwards to put everything back.
 flutter_launcher_icons:
   image_path: "assets/icon/app_icon.png"
   android: true
@@ -277,16 +287,20 @@ flutter:
     - assets/js/lnreader_cheerio.js
     # require()/fetch shims + plugin loader that runs LNReader plugins on top.
     - assets/js/lnreader_harness.js
-    # Brand wordmark extracted from the logo (exact lettering) for header/splash.
+    # Brand wordmark — the same lettering as the icon, for header and splash.
     - assets/icon/wordmark.png
-    # Square app icon — shown on the About screen.
+    # Square app icon — shown on the About screen, the TV shell and the
+    # Discord rich-presence CDN URL.
     - assets/icon/app_icon.png
     # Launcher-icon previews for the Appearance picker (mipmaps are not
     # reachable from Dart, so the choices are bundled as normal assets).
-    - assets/icon/preview_crescent.png
-    - assets/icon/preview_default.png
-    # New Zangetsu mark (black bg keyed out) — for the mode-switch transition.
+    # Named for the artwork, not the persisted icon id — see AppIconService.
+    - assets/icon/preview_cat.png
+    - assets/icon/preview_plain.png
+    # The mark alone with the plate keyed out — the splash, the About screen
+    # and the mode-switch transition draw it over their own backgrounds.
     - assets/icon/logo_mark.png
+
     # Metadata provider marks, from each service's own site, for the switcher
     # sheet. The sheet falls back to initials if one ever fails to decode.
     - assets/icon/providers/anilist.png

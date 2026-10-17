@@ -38,11 +38,17 @@ class AppIconService {
   /// `android:enabled="true"`. NOT the same thing as the option whose id
   /// happens to be the string `'default'`: that id is the older Z-and-katana
   /// mark and is persisted, so it can never be renamed — which is exactly why
-  /// the crescent got its own id rather than taking that slot. Anyone who had
+  /// the book got its own id rather than taking that slot. Anyone who had
   /// picked an icon keeps the one they picked. Keep this in step with the
   /// manifest and with `MainActivity.currentIconAlias()`'s fallback — all three
   /// have to name the same icon, or the launcher shows one thing while Settings
   /// claims another.
+  ///
+  /// The id reads "crescent" and the artwork is the plain book. The id predates
+  /// the artwork and ships in users' prefs, so it stays. What an id *carries*
+  /// is not frozen and has already changed twice: a crescent, then a cat, now
+  /// the plain book. tool/gen_brand_assets.py's SLOTS table has to agree with
+  /// this list and with the manifest's android:icon on each alias.
   static const String defaultId = 'crescent';
 
   /// [defaultId] first — the picker leads with what a fresh install is
@@ -52,18 +58,19 @@ class AppIconService {
   /// identical to "Katana", so the picker showed one artwork under two names and
   /// the home screen changed nothing when you tapped it. The id stays in nobody's
   /// enum and is not renamed here — [selectedId] maps anything unrecognised to
-  /// [defaultId], so a reader who had picked it lands on the crescent and keeps
-  /// working.
+  /// [defaultId], so a reader who had picked it lands on the book and keeps
+  /// working. Labels, unlike ids, are not persisted and have changed with the
+  /// artwork each time.
   static const List<AppIconOption> options = [
     AppIconOption(
       id: 'crescent',
-      label: 'Inkbound',
-      asset: 'assets/icon/preview_crescent.png',
+      label: 'Plain',
+      asset: 'assets/icon/preview_plain.png',
     ),
     AppIconOption(
       id: 'default',
-      label: 'Katana',
-      asset: 'assets/icon/preview_default.png',
+      label: 'Cat',
+      asset: 'assets/icon/preview_cat.png',
     ),
   ];
 
