@@ -9,6 +9,16 @@ import 'package:watch_app/core/reading/tts/tts_prefs.dart';
 import 'package:watch_app/core/reading/tts/tts_state.dart';
 import 'package:watch_app/core/theme/app_colors.dart';
 
+/// Why the sheet closed, so the reader can do the one thing the sheet itself
+/// cannot: put the novel text where the voice actually is.
+enum TtsAudiobookExit {
+  /// Closed to go back to the novel, but stay put on the page.
+  dismissed,
+
+  /// Dragged down to go back to the novel AT the sentence being read.
+  revealSentence,
+}
+
 /// Opens the read-aloud audiobook player over the reader, covering the page.
 /// A full-screen page, not a sheet.
 ///
@@ -31,7 +41,12 @@ import 'package:watch_app/core/theme/app_colors.dart';
 ///
 /// The name is left alone: renaming it would touch the reader and every test that
 /// opens it for no gain, and it still describes what the thing is.
-Future<void> showTtsAudiobookSheet(
+///
+/// Opens the sheet and reports how it closed.
+///
+/// The system back button pops with no value at all, so the caller has to
+/// survive a null rather than assume this always runs.
+Future<TtsAudiobookExit?> showTtsAudiobookSheet(
   BuildContext context, {
   required TtsCubit cubit,
   required String bookTitle,
@@ -42,8 +57,8 @@ Future<void> showTtsAudiobookSheet(
   required VoidCallback onNextChapter,
   String? cover,
 }) {
-  return Navigator.of(context).push<void>(
-    PageRouteBuilder<void>(
+  return Navigator.of(context).push<TtsAudiobookExit>(
+    PageRouteBuilder<TtsAudiobookExit>(
       // Modal: it is a thing opened over the reader rather than a step in a
       // sequence, and it should not sit in the reader's back stack as if it did.
       fullscreenDialog: true,
@@ -83,6 +98,13 @@ Future<void> showTtsAudiobookSheet(
 }
 
 enum _SheetView { player, lyrics }
+
+/// Downward pull, in logical pixels, that counts as "take me back to the novel
+/// text".
+///
+/// Far enough to be a deliberate pull rather than the bounce of a tap, and
+/// short enough that the sheet does not feel stuck.
+const double _dragToReadOverscroll = 64;
 
 /// The audiobook player and its lyric-style transcript, sharing one sheet and
 /// one header, so moving between them is a toggle rather than a navigation.
@@ -128,6 +150,44 @@ class TtsAudiobookSheet extends StatefulWidget {
 class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
   _SheetView _view = _SheetView.player;
 
+  /// Downward pull accumulated since the current touch started, in logical
+  /// pixels.
+  double _pulledDown = 0;
+
+  /// Lets the drag handler ask whether the player body is already scrolled, so
+  /// pulling down while the layout is panned is not read as leaving.
+  final ScrollController _playerScroll = ScrollController();
+
+  /// Treats pulling the player down as "take me back to the novel text".
+  ///
+  /// Listens to raw pointer moves rather than adding a drag recogniser, and the
+  /// reason is the same either way round: the player body is a scroll view, so
+  /// a [GestureDetector] wrapped around it competes with that scroll view for
+  /// the gesture and - being the shallower of the two - loses it every time. It
+  /// would sit there looking correct and never fire. [Listener] is not in the
+  /// gesture arena at all, so it sees the drag without taking it from anyone.
+  ///
+  /// Counted only while the body is at the top, because the body does scroll
+  /// on a short screen or at large text, and there a downward drag is the
+  /// reader panning the layout back up, not a request to leave.
+  void _onPlayerPointerMove(PointerMoveEvent event) {
+    if (event.delta.dy <= 0) return;
+    if (_playerScroll.hasClients) {
+      final position = _playerScroll.position;
+      if (position.pixels > position.minScrollExtent) return;
+    }
+    _pulledDown += event.delta.dy;
+    if (_pulledDown < _dragToReadOverscroll) return;
+    _pulledDown = 0;
+    Navigator.of(context).pop(TtsAudiobookExit.revealSentence);
+  }
+
+  @override
+  void dispose() {
+    _playerScroll.dispose();
+    super.dispose();
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +211,8 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
                 child: Column(
                   children: [
                     _SheetHeader(
-                      onClose: () => Navigator.of(context).maybePop(),
+                      onClose: () => Navigator.of(context)
+                          .pop(TtsAudiobookExit.dismissed),
                       showingLyrics: _view == _SheetView.lyrics,
                       onToggleView: () => setState(() {
                         _view = _view == _SheetView.player
@@ -161,12 +222,29 @@ class _TtsAudiobookSheetState extends State<TtsAudiobookSheet> {
                     ),
                     Expanded(
                       child: _view == _SheetView.player
-                          ? _PlayerBody(
-                              cover: widget.cover,
-                              chapterTitle: widget.chapterTitle(),
-                              bookTitle: widget.bookTitle,
+                          // Dragging the player down is "take me back to the
+                          // text", the same move as the close button but aimed
+                          // at the page rather than at the sheet. Only here:
+                          // the transcript scrolls vertically, and pulling that
+                          // would strand the reader on whichever sentence they
+                          // were trying to read.
+                          ? Listener(
+                              key: const ValueKey(
+                                'audiobook-player-drag-to-read',
+                              ),
+                              onPointerDown: (_) => _pulledDown = 0,
+                              onPointerMove: _onPlayerPointerMove,
+                              child: _PlayerBody(
+                                cover: widget.cover,
+                                chapterTitle: widget.chapterTitle(),
+                                bookTitle: widget.bookTitle,
+                                scrollController: _playerScroll,
+                                onOpenLyrics: () => setState(() {
+                                  _view = _SheetView.lyrics;
+                                }),
+                              ),
                             )
-                          : _LyricsBody(
+                        : _LyricsBody(
                               chapterTitle: widget.chapterTitle,
                               cubit: widget.cubit,
                               state: state,
@@ -217,6 +295,12 @@ class _SheetHeader extends StatelessWidget {
   final bool showingLyrics;
   final VoidCallback onToggleView;
 
+  /// Whether "READING NOW" is the way back to the player, which it only is
+  /// from the lyrics: there the cover that does this job is off screen, and in
+  /// the player the cover already offers the same move, so two targets for one
+  /// gesture would be one too many.
+  bool get _showingLyricsTapTarget => showingLyrics;
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -230,17 +314,37 @@ class _SheetHeader extends StatelessWidget {
             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 28),
             color: AppColors.textPrimary,
           ),
-          const Expanded(
-            child: Text(
-              'READING NOW',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 2.4,
-              ),
-            ),
+          Expanded(
+            child: _showingLyricsTapTarget
+                ? Semantics(
+                    button: true,
+                    label: 'Back to player',
+                    child: GestureDetector(
+                      key: const ValueKey('audiobook-sheet-reading-now'),
+                      behavior: HitTestBehavior.opaque,
+                      onTap: onToggleView,
+                      child: const Text(
+                        'READING NOW',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 2.4,
+                        ),
+                      ),
+                    ),
+                  )
+                : const Text(
+                    'READING NOW',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 2.4,
+                    ),
+                  ),
           ),
           IconButton(
             key: const ValueKey('audiobook-sheet-toggle'),
@@ -308,11 +412,19 @@ class _PlayerBody extends StatelessWidget {
     required this.cover,
     required this.chapterTitle,
     required this.bookTitle,
+    required this.onOpenLyrics,
+    required this.scrollController,
   });
 
   final String? cover;
   final String chapterTitle;
   final String bookTitle;
+  final ScrollController scrollController;
+
+  /// The cover is the big target the reader was already aiming at, so it opens
+  /// the transcript - the same move as the header's toggle button, one gesture
+  /// further from it.
+  final VoidCallback onOpenLyrics;
 
   /// Room the title block needs under the cover, so the cover never grows into
   /// it and pushes the layout off the bottom of the sheet.
@@ -334,6 +446,7 @@ class _PlayerBody extends StatelessWidget {
             .toDouble();
         final vertical = math.max(0.0, c.maxHeight - 16);
         return SingleChildScrollView(
+          controller: scrollController,
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
           child: ConstrainedBox(
             // Centres the artwork in whatever height there is, and still scrolls
@@ -342,30 +455,39 @@ class _PlayerBody extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-Container(
-            key: const ValueKey('audiobook-cover'),
-            width: side,
-            height: side,
-                  clipBehavior: Clip.antiAlias,
-                  decoration: BoxDecoration(
-                    color: AppColors.surface2,
-                    borderRadius: BorderRadius.circular(20),
+Semantics(
+                  button: true,
+                  label: 'Open lyrics',
+                  child: GestureDetector(
+                    key: const ValueKey('audiobook-cover-tap'),
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onOpenLyrics,
+                    child: Container(
+                      key: const ValueKey('audiobook-cover'),
+                      width: side,
+                      height: side,
+                      clipBehavior: Clip.antiAlias,
+                      decoration: BoxDecoration(
+                        color: AppColors.surface2,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: (cover == null || cover!.isEmpty)
+                          ? const Icon(
+                              Icons.menu_book_rounded,
+                              size: 84,
+                              color: AppColors.textTertiary,
+                            )
+                          : CachedNetworkImage(
+                              imageUrl: cover!,
+                              fit: BoxFit.cover,
+                              errorWidget: (_, _, _) => const Icon(
+                                Icons.menu_book_rounded,
+                                size: 84,
+                                color: AppColors.textTertiary,
+                              ),
+                            ),
+                    ),
                   ),
-                  child: (cover == null || cover!.isEmpty)
-                      ? const Icon(
-                          Icons.menu_book_rounded,
-                          size: 84,
-                          color: AppColors.textTertiary,
-                        )
-                      : CachedNetworkImage(
-                          imageUrl: cover!,
-                          fit: BoxFit.cover,
-                          errorWidget: (_, _, _) => const Icon(
-                            Icons.menu_book_rounded,
-                            size: 84,
-                            color: AppColors.textTertiary,
-                          ),
-                        ),
                 ),
                 const SizedBox(height: 20),
                 Padding(
@@ -441,6 +563,13 @@ class _LyricsBodyState extends State<_LyricsBody> {
   static const double _fontActive = 26;
   static const double _lineHeight = 1.3;
 
+  /// How many frames one reveal may spend converging on its sentence.
+  ///
+  /// Generous on purpose. The first open of a transcript usually spends the
+  /// first frame waiting for the list to attach, so a budget sized for the
+  /// steady state runs out exactly when the reader most needs the view to move.
+  static const int _maxRevealAttempts = 12;
+
   @override
   void initState() {
     super.initState();
@@ -489,49 +618,43 @@ class _LyricsBodyState extends State<_LyricsBody> {
   }
 
   void _step(int index, int attempt) {
-    if (!mounted || attempt > 5) return;
+    if (!mounted || attempt > _maxRevealAttempts) return;
 
-    void settle() {
-      if (!mounted) return;
-      final ctx = _keys[index]?.currentContext;
-      if (ctx == null) {
-        // Still not built. Clear the guard so the next sentence tries again
-        // rather than the view staying stuck where it is.
-        _lastRevealed = -1;
-        return;
-      }
+    // Built, and therefore measurable: hand it to the viewport, which puts it
+    // in the middle and finishes the job.
+    final ctx = _keys[index]?.currentContext;
+    if (ctx != null) {
       Scrollable.ensureVisible(
         ctx,
         alignment: 0.5,
         duration: const Duration(milliseconds: 320),
         curve: Curves.easeOutCubic,
       );
-    }
-
-    final ctx = _keys[index]?.currentContext;
-    if (ctx != null) {
-      settle();
-      return;
-    }
-    if (!_scroll.hasClients) {
-      _lastRevealed = -1;
       return;
     }
 
-    final position = _scroll.position;
-    final average = _measuredAverageExtent() ?? _estimateExtent(index);
-    final top = widget.state.sentences.isEmpty
-        ? 0.0
-        : MediaQuery.sizeOf(context).height * 0.20;
-    final target = (top + average * index).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    if ((target - position.pixels).abs() < 1) {
-      _lastRevealed = -1;
-      return;
+    // Not built yet, so make it build. Jumping to where the row ought to be
+    // lays it out; the next frame can then measure it and correct.
+    //
+    // Neither "no scroll position yet" nor "already at the target offset" ends
+    // the search. Both used to clear the guard and give up, and both are the
+    // normal state of affairs on the first frame of a freshly opened
+    // transcript: nothing had attached yet, so the reveal was abandoned, the
+    // chapter stayed at its top, and the view only started following the voice
+    // once the reader had scrolled - which is also what laid out the rows the
+    // second attempt needed.
+    if (_scroll.hasClients) {
+      final position = _scroll.position;
+      final average = _measuredAverageExtent() ?? _estimateExtent(index);
+      final top = widget.state.sentences.isEmpty
+          ? 0.0
+          : MediaQuery.sizeOf(context).height * 0.20;
+      final target = (top + average * index).clamp(
+        position.minScrollExtent,
+        position.maxScrollExtent,
+      );
+      if ((target - position.pixels).abs() > 1) _scroll.jumpTo(target);
     }
-    _scroll.jumpTo(target);
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _step(index, attempt + 1),
     );

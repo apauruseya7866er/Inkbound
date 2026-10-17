@@ -962,7 +962,7 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   Future<void> _openAudiobookPlayer() async {
     final tts = _tts;
     if (tts == null || !mounted) return;
-    await showTtsAudiobookSheet(
+    final exit = await showTtsAudiobookSheet(
       context,
       cubit: tts,
       bookTitle: widget.showTitle,
@@ -977,6 +977,30 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
       onNextChapter: () => _skipChapter(_nextIndex),
       cover: widget.cover,
     );
+    // The sheet routes back here, so this runs once the reader is on screen
+    // again and its scroll position is meaningful.
+    if (exit == TtsAudiobookExit.revealSentence) _revealTtsSentence();
+  }
+
+  /// Puts the novel on the sentence the voice is on, now, because the reader
+  /// asked for it by dragging the player down.
+  ///
+  /// This is the same measurement the automatic follow uses, deliberately run
+  /// with the automatic follow's own rules switched off. All three of them are
+  /// right while narration is playing and nobody is touching the screen, and
+  /// all three are wrong for an explicit request: narration may be paused, the
+  /// reader may have turned follow off because they never wanted the page
+  /// moving on its own, and the grace period exists to stop the view fighting a
+  /// drag - which is precisely the drag that just asked for this.
+  void _revealTtsSentence() {
+    final tts = _tts;
+    if (tts == null) return;
+    final state = tts.state;
+    if (_isPaginated) {
+      _maybeFollowTts(state, force: true);
+    } else {
+      _maybeFollowTtsScroll(state, force: true);
+    }
   }
 
   /// Opens the player on load, for a reader who asked to listen rather than to
@@ -1634,10 +1658,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// below it, and someone who wants to read along has nowhere to look. Holding
   /// it near the middle leaves the text above *and* below on screen, which is
   /// what makes reading along possible at all.
-  void _maybeFollowTtsScroll(TtsState state) {
-    if (!state.isSpeaking) return;
-    if (_isPaginated) return; // paged mode turns the page instead
-    if (!sl<ReaderPrefs>().novelFollowNarration) return;
+void _maybeFollowTtsScroll(TtsState state, {bool force = false}) {
+  if (!state.isSpeaking && !force) return;
+  if (_isPaginated) return; // paged mode turns the page instead
+  if (!force && !sl<ReaderPrefs>().novelFollowNarration) return;
     final layout = _scrollLayout;
     final offsets = _blockOffsets;
     final width = _blockWidth;
@@ -1659,9 +1683,10 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
     // Their scroll wins for a moment. Yanking the page back mid-drag is the
     // fastest way to make an auto-follow feel broken; after the grace the
     // sentence takes over again, so pausing it does not mean switching it off.
+    // A forced reveal is the exception - see [_revealTtsSentence].
     final sinceScroll =
         DateTime.now().millisecondsSinceEpoch - _lastManualScroll;
-    if (sinceScroll < _ttsScrollGraceMs) return;
+    if (!force && sinceScroll < _ttsScrollGraceMs) return;
 
     final viewport = position.viewportDimension;
     final yInBlock = _sentenceTopInBlock(
@@ -1840,18 +1865,22 @@ class _NovelReaderScreenState extends State<NovelReaderScreen>
   /// mode feel broken even though it is working. Skipped while the reader is
   /// paging themselves (see [_ttsPageTurnGraceMs]) so it assists rather than
   /// takes over.
-  void _maybeFollowTts(TtsState state) {
+  void _maybeFollowTts(TtsState state, {bool force = false}) {
     final aligned = _ttsAligned;
     final pages = _pages;
-    if (aligned == null || pages.isEmpty || !state.isSpeaking) return;
+    if (aligned == null || pages.isEmpty) return;
+    if (!force && !state.isSpeaking) return;
 
     final range = aligned.rangeAt(state.currentIndex);
     if (range == null) return;
     final target = pageIndexForRange(pages, range.start, range.end);
     if (target == null || target == _pageIndex) return;
 
-    final since = DateTime.now().millisecondsSinceEpoch - _lastManualPageTurn;
-    if (since < _ttsPageTurnGraceMs) return;
+    if (!force) {
+      final since =
+          DateTime.now().millisecondsSinceEpoch - _lastManualPageTurn;
+      if (since < _ttsPageTurnGraceMs) return;
+    }
     if (_ttsTurningPage) return;
 
     _ttsTurningPage = true;

@@ -19,10 +19,13 @@ List<TtsSentenceView> _sentences(int n) => List<TtsSentenceView>.generate(
 /// A cubit stand-in that records what the sheet asked it to do. The sheet only
 /// needs seek/skip/toggle/setRate/setSleepTimer and a TtsState to render.
 class _FakeTtsCubit extends Cubit<TtsState> implements TtsCubit {
-  _FakeTtsCubit({int total = 12, int current = 3})
-    : super(
+  _FakeTtsCubit({
+    int total = 12,
+    int current = 3,
+    TtsStatus status = TtsStatus.speaking,
+  }) : super(
         TtsState(
-          status: TtsStatus.speaking,
+          status: status,
           available: true,
           bookId: 'book',
           chapterId: 'chapter',
@@ -69,6 +72,21 @@ Widget _bar(_FakeTtsCubit cubit, {required VoidCallback onOpenPlayer}) =>
         ),
       ),
     );
+
+/// The sheet on its own, for the cases that are about the sheet's own controls
+/// rather than about the route it is pushed on.
+Widget _sheet(_FakeTtsCubit cubit) => MaterialApp(
+  home: TtsAudiobookSheet(
+    cubit: cubit,
+    bookTitle: 'A Wizard of Earthsea',
+    chapterTitle: () => 'Chapter 8',
+    canPreviousChapter: () => true,
+    canNextChapter: () => true,
+    onPreviousChapter: () {},
+    onNextChapter: () {},
+    cover: null,
+  ),
+);
 
 void main() {
   group('compact bar progress track', () {
@@ -589,6 +607,186 @@ group('audiobook sheet', () {
       expect(cubit.rate, isNotNull);
       expect(cubit.rate, isNot(before));
 
+      await cubit.close();
+    });
+
+    testWidgets('the cover opens the transcript, like the header toggle', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(_sheet(cubit));
+      await tester.pumpAndSettle();
+
+      // The player, so the transcript is not on screen yet.
+      expect(find.byIcon(Icons.lyrics_rounded), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-cover-tap')));
+      await tester.pumpAndSettle();
+
+      // Lyrics: the header now points back at the player.
+      expect(find.byIcon(Icons.list_rounded), findsOneWidget);
+      expect(find.byKey(const ValueKey('audiobook-cover')), findsNothing);
+
+      await cubit.close();
+    });
+
+    testWidgets('READING NOW is the way back to the player from the lyrics', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(_sheet(cubit));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+      expect(find.byIcon(Icons.list_rounded), findsOneWidget);
+
+      // Only offered from the lyrics, where the cover that would otherwise do
+      // this is off screen.
+      expect(
+        find.byKey(const ValueKey('audiobook-sheet-reading-now')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('audiobook-sheet-reading-now')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('audiobook-cover')), findsOneWidget);
+      expect(find.byIcon(Icons.lyrics_rounded), findsOneWidget);
+      await cubit.close();
+    });
+
+    testWidgets('READING NOW is inert in the player, where the cover works', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      await tester.pumpWidget(_sheet(cubit));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('audiobook-sheet-reading-now')),
+        findsNothing,
+      );
+      await cubit.close();
+    });
+
+    testWidgets('dragging the player down asks the reader for the sentence', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      TtsAudiobookExit? exit;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  exit = await showTtsAudiobookSheet(
+                    context,
+                    cubit: cubit,
+                    bookTitle: 'A Wizard of Earthsea',
+                    chapterTitle: () => 'Chapter 8',
+                    canPreviousChapter: () => true,
+                    canNextChapter: () => true,
+                    onPreviousChapter: () {},
+                    onNextChapter: () {},
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      final body = find.byKey(const ValueKey('audiobook-player-drag-to-read'));
+      expect(body, findsOneWidget);
+      await tester.drag(body, const Offset(0, 260));
+      await tester.pumpAndSettle();
+
+      expect(
+        exit,
+        TtsAudiobookExit.revealSentence,
+        reason: 'the drag is a request to land on the sentence being read',
+      );
+      await cubit.close();
+    });
+
+    testWidgets('an upward drag in the player does not dismiss it', (
+      tester,
+    ) async {
+      final cubit = _FakeTtsCubit(total: 6);
+      TtsAudiobookExit? exit;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async {
+                  exit = await showTtsAudiobookSheet(
+                    context,
+                    cubit: cubit,
+                    bookTitle: 'A Wizard of Earthsea',
+                    chapterTitle: () => 'Chapter 8',
+                    canPreviousChapter: () => true,
+                    canNextChapter: () => true,
+                    onPreviousChapter: () {},
+                    onNextChapter: () {},
+                  );
+                },
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      await tester.drag(
+        find.byKey(const ValueKey('audiobook-player-drag-to-read')),
+        const Offset(0, -260),
+      );
+      await tester.pumpAndSettle();
+
+      expect(exit, isNull, reason: 'the sheet is still open');
+      await cubit.close();
+    });
+
+    testWidgets('lyrics follow the sentence even with narration paused', (
+      tester,
+    ) async {
+      // Paused on purpose. While speaking, the cubit emits and the next build
+      // retries a reveal that gave up; paused, nothing rebuilds, so the first
+      // reveal is the only chance the transcript has to move. A long chapter
+      // with the sentence far down is what makes "stayed at the top" visible.
+      final cubit = _FakeTtsCubit(
+        total: 80,
+        current: 60,
+        status: TtsStatus.paused,
+      );
+      await tester.pumpWidget(_sheet(cubit));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('audiobook-sheet-toggle')));
+      await tester.pumpAndSettle();
+
+      final scrollable = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      expect(
+        scrollable.position.pixels,
+        greaterThan(0),
+        reason: 'the transcript opened on the sentence, not at the top',
+      );
       await cubit.close();
     });
   });
