@@ -30,6 +30,21 @@ Failed to load dynamic library 'quickjs_c_bridge.dll': The specified module coul
 
 That is a missing build artifact, not a broken test, and not something your change caused. **CI does not currently build this library**, so the Test job is red on `main` for this reason and will stay red until it does. Judge your change by whether it adds failures beyond that known set.
 
+### Where that coverage actually runs: `integration_test/js_runtime_test.dart`
+
+`flutter_js` is backed by **QuickJS compiled to a native library**, and `android/app/build.gradle.kts` builds it from the package's own `android/CMakeLists.txt` — Android only. On iOS the same package uses JavaScriptCore and needs no bridge. So there is no host build to install: the tests above can only ever run where Gradle has already built the `.so`, which means on a device.
+
+`integration_test/js_runtime_test.dart` is the other half of that coverage, on the only platform where it can exist:
+
+```sh
+# android/local.properties needs includeEmulatorAbis=true first — see below
+flutter test integration_test/js_runtime_test.dart -d <device>
+```
+
+It asserts the engine evaluates, that it reports errors rather than swallowing them, that the committed cheerio bundle parses HTML, and that a real LNReader CommonJS plugin loads, pushes a fetch out through the outbox bridge and hands back parsed data — plus that a failing fetch rejects instead of hanging to its 30s timeout. The fetch is injected, so nothing touches the network.
+
+Porting a host test here is usually cheap: if it injects its own fakes rather than hitting the network or a mock channel, it moves over as-is. Reach for this when a change to the source system needs to be proven on a real engine.
+
 ## Testing on an emulator
 
 Release builds package **arm64-v8a and armeabi-v7a only**. An x86_64 emulator cannot launch them — every native library in the APK is stripped, and the launch dies looking for `lib/x86_64/libflutter.so`. The x86_64 libraries are dead weight on real devices, so they are not shipped by default.
